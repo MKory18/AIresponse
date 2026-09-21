@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.*
+!.env.example
+.data
+tsconfig.tsbuildinfo
+npm-debug.log*
+coverage
+.tmp-storage-test
+*.tsbuildinfo

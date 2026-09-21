@@ -1,0 +1,320 @@
+import { childLogger } from "@/core/logger";
+import { processPendingJobs, type JobHandler } from "@/modules/jobs/service";
+import { getEmbeddingProvider } from "@/modules/knowledge/embeddings";
+import { classifySentiment } from "@/modules/feedback/service";
+
+const log = childLogger("jobs");
+
+type HandlerDb = Parameters<typeof processPendingJobs>[0];
+
+/**
+ * process_knowledge_document: chunk â†’ embed â†’ persist active vectors.
+ * Idempotent: deactivates existing chunks first; safe to retry.
+ */
+async function handleProcessDocument(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const documentId = String(payload.documentId ?? "");
+  const doc = await db.knowledgeDocument.findUnique({ where: { id: documentId } });
+  if (!doc) return { success: false, error: "Document not found" };
+
+  try {
+    const { chunkText } = await import("@/modules/knowledge/chunker");
+    const provider = getEmbeddingProvider();
+
+    const chunks = chunkText(doc.content, {
+      workspaceId: doc.workspaceId,
+      documentId: doc.id,
+      category: doc.category,
+      documentVersion: doc.version,
+    });
+    if (chunks.length === 0) throw new Error("Document produced no chunks");
+
+    await db.knowledgeChunk.updateMany({ where: { documentId: doc.id }, data: { isActive: false } });
+
+    for (const chunk of chunks) {
+      const embedding = await provider.embed(chunk.content);
+      await db.knowledgeChunk.create({
+        data: {
+          documentId: doc.id,
+          workspaceId: doc.workspaceId,
+          content: chunk.content,
+          chunkIndex: chunk.chunkIndex,
+          tokenCount: chunk.tokenCount,
+          metadata: {
+            category: doc.category,
+            documentVersion: doc.version,
+            ...chunk.metadata,
+          },
+          embedding: `[${embedding.join(",")}]`,
+          isActive: true,
+        } as never,
+      });
+    }
+
+    await db.knowledgeDocument.update({
+      where: { id: doc.id },
+      data: { status: "READY", error: null },
+    });
+    log.info({ documentId: doc.id, chunks: chunks.length }, "document_processed");
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db.knowledgeDocument.update({
+      where: { id: doc.id },
+      data: { status: "FAILED", error: message },
+    });
+    return { success: false, error: message };
+  }
+}
+
+/** analyze_feedback: rule-based sentiment for feedback rows missing one. */
+async function handleAnalyzeFeedback(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const feedbackId = String(payload.feedbackId ?? "");
+  const feedback = await db.feedback.findUnique({ where: { id: feedbackId } });
+  if (!feedback) return { success: false, error: "Feedback not found" };
+  if (!feedback.content) {
+    await db.feedback.update({ where: { id: feedback.id }, data: { sentiment: "neutral" } });
+    return { success: true };
+  }
+  await db.feedback.update({
+    where: { id: feedback.id },
+    data: { sentiment: classifySentiment(feedback.content) },
+  });
+  return { success: true };
+}
+
+/** process_media: extracts image dimensions for common formats (no vision AI). */
+async function handleProcessMedia(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const mediaId = String(payload.mediaId ?? "");
+  const asset = await db.mediaAsset.findUnique({ where: { id: mediaId } });
+  if (!asset) return { success: false, error: "Media asset not found" };
+
+  const metadata: Record<string, unknown> = { ...(asset.metadata as Record<string, unknown>) };
+  if (asset.mimeType === "image/png") {
+    // PNG: width/height live at fixed offsets in IHDR.
+    try {
+      const { getStorage } = await import("@/modules/media/storage");
+      const file = await getStorage().get(asset.storageKey);
+      if (file) {
+        const chunks: Buffer[] = [];
+        for await (const c of file.stream) chunks.push(c as Buffer);
+        const buf = Buffer.concat(chunks);
+        if (buf.length > 24 && buf.readUInt32BE(12) === 0x49484452) {
+          await db.mediaAsset.update({
+            where: { id: asset.id },
+            data: { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) },
+          });
+        }
+      }
+    } catch {
+      // dimension extraction is best-effort; never fails the job
+    }
+  }
+  metadata.processedAt = new Date().toISOString();
+  await db.mediaAsset.update({ where: { id: asset.id }, data: { metadata: metadata as never } });
+  return { success: true };
+}
+
+/** process_ai_message: runs the AI orchestrator for one inbound message. */
+async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string }> {
+  const { processAIMessage } = await import("@/modules/ai/orchestrator");
+  const vectorStore = await buildWorkspaceVectorStore(db, workspaceId);
+  const result = await processAIMessage(db, {
+    workspaceId,
+    conversationId: String(payload.conversationId ?? ""),
+    messageId: String(payload.messageId ?? ""),
+  }, { vectorStore });
+  // Transient AI provider failures are retried by the job queue; permanent
+  // gates (AI disabled, duplicate, takeover) are terminal successes.
+  if (result.status === "AI_FAILED") {
+    return { success: false, error: result.error ?? "AI failed" };
+  }
+  return { success: true };
+}
+
+/** Builds an in-memory vector store from this workspace's active chunks. */
+async function buildWorkspaceVectorStore(db: HandlerDb, workspaceId: string) {
+  const { InMemoryVectorStore } = await import("@/modules/knowledge/vector-store");
+  const chunks = await (db as any).knowledgeChunk.findMany({
+    where: { workspaceId, isActive: true },
+    take: 1000,
+  });
+  const vectors = new Map<string, number[]>();
+  const rows = new Map<string, { documentId: string; workspaceId: string; content: string; metadata: Record<string, unknown>; isActive: boolean }>();
+  for (const c of chunks) {
+    if (!c.embedding) continue;
+    vectors.set(c.id, typeof c.embedding === "string" ? JSON.parse(c.embedding) : c.embedding);
+    rows.set(c.id, { documentId: c.documentId, workspaceId, content: c.content, metadata: c.metadata, isActive: true });
+  }
+  return new InMemoryVectorStore(vectors, rows);
+}
+
+/** generate_summary: refreshes conversation.summary via the SUMMARY model. */
+async function handleGenerateSummary(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const conversationId = String(payload.conversationId ?? "");
+  const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+  if (!conversation) return { success: false, error: "Conversation not found" };
+
+  const messages = await db.message.findMany({
+    where: { conversationId, deletedAt: null },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 20,
+    select: { direction: true, senderType: true, text: true },
+  });
+
+  const { getAIProvider } = await import("@/modules/ai/provider");
+  const { resolveModel, loadAISettings, withRetry, logUsage } = await import("@/modules/ai/router");
+  const { coreSystemRules, wrapUntrustedCustomerContent, summaryInstruction, PROMPT_VERSIONS } = await import("@/modules/ai/prompts");
+  const { summaryResultSchema, validateStructured } = await import("@/modules/ai/structured");
+  const { heuristicIntent } = await import("@/modules/ai/intent");
+
+  const settings = (await loadAISettings(db, conversation.workspaceId)) as never;
+  const cfg = resolveModel(settings, "SUMMARY");
+  const provider = getAIProvider();
+  const transcript = messages
+    .reverse()
+    .map((m) => `${m.direction === "INBOUND" ? "العميل" : "المتجر"}: ${m.text ?? "[وسائط]"}`)
+    .join("\n");
+
+  try {
+    const res = await withRetry(() =>
+      provider.generateStructured({
+        system: `${coreSystemRules()}\n\n${summaryInstruction()}`,
+        user: wrapUntrustedCustomerContent(transcript, []),
+        model: cfg.model,
+        temperature: 0.2,
+        maxTokens: cfg.maxTokens,
+        validate: (raw) => validateStructured(summaryResultSchema, raw),
+      })
+    );
+    await db.conversation.update({ where: { id: conversationId }, data: { summary: res.value.summary } });
+    await logUsage(db, {
+      workspaceId: conversation.workspaceId,
+      conversationId,
+      purpose: "SUMMARY",
+      provider: provider.name,
+      model: cfg.model,
+      promptVersion: PROMPT_VERSIONS.SUMMARY,
+      promptTokens: res.promptTokens,
+      completionTokens: res.completionTokens,
+      latencyMs: res.latencyMs,
+      success: true,
+    });
+    return { success: true };
+  } catch (err) {
+    // Deterministic fallback summary — never blocks the pipeline.
+    const fallbackIntent = heuristicIntent(transcript.slice(-300));
+    await db.conversation.update({
+      where: { id: conversationId },
+      data: { summary: `آخر نشاط: ${messages.length} رسالة. آخر نية مرصودة: ${fallbackIntent.intent}.` },
+    });
+    void err;
+    return { success: true };
+  }
+}
+
+/** process_webhook_event: normalized Facebook events → Conversation Engine. */
+async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { processIncomingMessage } = await import("@/modules/conversations/service");
+  const workspaceId = String(payload.workspaceId ?? "");
+  const webhookEventId = String(payload.webhookEventId ?? "");
+  const messages = (payload.messages as Array<Record<string, unknown>>) ?? [];
+
+  for (const m of messages) {
+    await processIncomingMessage(db, {
+      workspaceId,
+      channelType: "FACEBOOK",
+      externalUserId: String(m.externalCustomerId ?? ""),
+      externalConversationId: String(m.externalConversationId ?? ""),
+      externalMessageId: String(m.externalMessageId ?? ""),
+      externalEventId: String(m.externalEventId ?? ""),
+      provider: "facebook",
+      type: "TEXT",
+      text: (m.text as string) ?? null,
+      metadata: { channelAccountId: m.channelAccountId, attachments: m.attachments ?? [] },
+      sentAt: m.timestamp ? new Date(m.timestamp as string) : undefined,
+    });
+  }
+
+  await (db as any).webhookEvent.update({
+    where: { id: webhookEventId },
+    data: { processedAt: new Date() },
+  });
+  return { success: true };
+}
+
+/** evaluate_automation: runs the Automation Engine for one trusted event. */
+async function handleEvaluateAutomation(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { evaluateEvent } = await import("@/modules/automation/engine");
+  const result = await evaluateEvent(db, {
+    name: String(payload.eventName ?? ""),
+    workspaceId: String(payload.workspaceId ?? ""),
+    eventId: String(payload.eventId ?? ""),
+    payload: (payload.payload as Record<string, unknown>) ?? {},
+    depth: Number(payload.depth ?? 0),
+  });
+  void result;
+  return { success: true };
+}
+
+/** process_due_followups: scheduler entry — claim + execute due follow-ups. */
+async function handleProcessDueFollowUps(db: HandlerDb): Promise<{ success: boolean; error?: string }> {
+  const { processDueFollowUps } = await import("@/modules/automation/followup-service");
+  await processDueFollowUps(db, 10);
+  return { success: true };
+}
+
+/** aggregate_workspace_analytics: idempotent daily rebuild (supports late events). */
+async function handleAggregateAnalytics(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { rebuildRange } = await import("@/modules/analytics/aggregation");
+  const workspaceId = String(payload.workspaceId ?? "");
+  const from = payload.from ? new Date(String(payload.from)) : new Date(Date.now() - 2 * 24 * 3600_000);
+  const to = payload.to ? new Date(String(payload.to)) : new Date();
+  await rebuildRange(db, workspaceId, from, to);
+  return { success: true };
+}
+
+export function getJobHandlers(): Record<string, JobHandler> {
+  return {
+    process_knowledge_document: (payload) => handleProcessDocument(getDb(), payload),
+    analyze_feedback: (payload) => handleAnalyzeFeedback(getDb(), payload),
+    process_media: (payload) => handleProcessMedia(getDb(), payload),
+    process_ai_message: (payload, jobId) => handleProcessAIMessage(getDb(), payload, currentWorkspaceId(jobId)),
+    generate_summary: (payload) => handleGenerateSummary(getDb(), payload),
+    process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(getDb(), payload),
+    evaluate_automation: (payload) => handleEvaluateAutomation(getDb(), payload),
+    process_due_followups: () => handleProcessDueFollowUps(getDb()),
+    aggregate_workspace_analytics: (payload) => handleAggregateAnalytics(getDb(), payload),
+  };
+}
+
+// The handlers receive the Prisma transaction client from the runner at call
+// time; we keep a module-level reference set by runJobs().
+let currentDb: HandlerDb | null = null;
+const jobWorkspaces = new Map<string, string>();
+
+function currentWorkspaceId(jobId: string): string {
+  return jobWorkspaces.get(jobId) ?? "";
+}
+
+function getDb(): HandlerDb {
+  if (!currentDb) throw new Error("Job runner DB not initialized");
+  return currentDb;
+}
+
+export async function runJobs(db: HandlerDb, opts?: { limit?: number; workerId?: string }) {
+  currentDb = db;
+  // Track each job's workspace so handlers can scope tenant-isolated work.
+  const pending = await (db as any).backgroundJob.findMany({
+    where: { status: "PENDING", runAfter: { lte: new Date() } },
+    orderBy: { createdAt: "asc" },
+    take: opts?.limit ?? 10,
+    select: { id: true, workspaceId: true },
+  });
+  jobWorkspaces.clear();
+  for (const j of pending) jobWorkspaces.set(j.id, j.workspaceId);
+  try {
+    return await processPendingJobs(db, getJobHandlers(), opts);
+  } finally {
+    currentDb = null;
+  }
+}

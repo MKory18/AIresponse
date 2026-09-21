@@ -1,0 +1,54 @@
+import { z } from "zod";
+import { createHandler, ok } from "@/core/api/handler";
+import { prisma } from "@/core/db/prisma";
+import { recordAudit } from "@/modules/audit/service";
+
+const settingsSchema = z.object({
+  provider: z.enum(["mock", "openai", "openrouter"]).optional(),
+  classificationModel: z.string().trim().max(120).nullable().optional(),
+  extractionModel: z.string().trim().max(120).nullable().optional(),
+  responseModel: z.string().trim().max(120).nullable().optional(),
+  visionModel: z.string().trim().max(120).nullable().optional(),
+  summaryModel: z.string().trim().max(120).nullable().optional(),
+  embeddingModel: z.string().trim().max(120).nullable().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().min(50).max(4000).optional(),
+  confidenceExecute: z.number().min(0).max(1).optional(),
+  confidenceRespond: z.number().min(0).max(1).optional(),
+  humanHandoffThreshold: z.number().min(0).max(1).optional(),
+  aiEnabled: z.boolean().optional(),
+  autoRespond: z.boolean().optional(),
+});
+
+export const GET = createHandler(
+  { permission: "ai.configure" },
+  async ({ auth }) => {
+    // API keys are never exposed — provider keys live in ENV only.
+    const settings = await prisma.aISettings.upsert({
+      where: { workspaceId: auth!.workspaceId },
+      create: { workspaceId: auth!.workspaceId },
+      update: {},
+    });
+    return ok(settings);
+  }
+);
+
+export const PATCH = createHandler(
+  { body: settingsSchema, permission: "ai.configure" },
+  async ({ auth, body }) => {
+    const settings = await prisma.aISettings.upsert({
+      where: { workspaceId: auth!.workspaceId },
+      create: { workspaceId: auth!.workspaceId, ...body },
+      update: body,
+    });
+    await recordAudit(prisma, {
+      workspaceId: auth!.workspaceId,
+      userId: auth!.userId,
+      action: "ai_settings.updated",
+      entityType: "AISettings",
+      entityId: settings.id,
+      metadata: { fields: Object.keys(body) },
+    });
+    return ok(settings);
+  }
+);

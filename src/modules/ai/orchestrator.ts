@@ -1,0 +1,593 @@
+import { childLogger } from "@/core/logger";
+import type { MessageType } from "@prisma/client";
+import type { Db } from "@/modules/customers/service";
+import { NotFoundError } from "@/core/errors";
+import { getAIProvider, AIProviderError, type AIProvider } from "./provider";
+import { loadAISettings, resolveModel, withRetry, logUsage, type AISettingsLike } from "./router";
+import {
+  PROMPT_VERSIONS, coreSystemRules, personaPrompt, trustedDataPrompt,
+  wrapUntrustedCustomerContent, extractionInstruction, responseInstruction,
+  type PersonaConfig, type Intent,
+} from "./prompts";
+import { extractionResultSchema, validateStructured, type ExtractionResult, type ResponsePlan } from "./structured";
+import { heuristicIntent, looksLikeInjection } from "./intent";
+import { saveMemories, loadMemory } from "./memory";
+import { buildAIContext } from "./context-builder";
+import type { VectorStore } from "@/modules/knowledge/vector-store";
+import { validateResponse } from "./guardrails";
+import { recordAudit } from "@/modules/audit/service";
+
+import { PgVectorStore } from "@/modules/knowledge/vector-store";
+import { prisma } from "@/core/db/prisma";
+import { handleOrderIntent } from "@/modules/orders/intelligence";
+
+const log = childLogger("orchestrator");
+
+const HANDOFF_ACK = "طھظ…ط§ظ…طŒ ط±ط­ ط£ط­ظˆظ‘ظ„ظƒ ط¹ظ„ظ‰ ظ…ظˆط¸ظپ ظ…ظ† ط§ظ„ظپط±ظٹظ‚ ظٹطھظˆط§طµظ„ ظ…ط¹ظƒ ط­ط§ظ„ظ‹ط§ ًںŒ¹";
+const LOW_CONFIDENCE_ACK = "ظ…ط§ ظپظ‡ظ…طھ ظ‚طµط¯ظƒ ط¨ط§ظ„ط¶ط¨ط· ًںŒ¹ ظ…ظ…ظƒظ† طھظˆط¶ط­ظ„ظٹ ط£ظƒط«ط±طں";
+
+export interface AIExecutionResult {
+  status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND";
+  intent?: Intent;
+  confidence?: number;
+  plan?: ResponsePlan;
+  response?: string;
+  citations?: { sourceType: string; sourceId: string }[];
+  violations?: string[];
+  executionId?: string;
+  error?: string;
+}
+
+export interface OrchestratorDeps {
+  provider?: AIProvider;
+  vectorStore?: VectorStore;
+}
+
+/**
+ * AIOrchestrator.process â€” the central pipeline:
+ *
+ * load message â†’ idempotency â†’ load conversation/customer/persona/settings â†’
+ * intent+extraction (structured, Zod-validated, retry, heuristic fallback) â†’
+ * memory load/save â†’ context (Phase 3 buildAIContext, intent-scoped) â†’
+ * deterministic response plan â†’ handoff policy (injection/complaint/low
+ * confidence) â†’ generate response (retry) â†’ guardrails (validate/regenerate/
+ * fallback) â†’ send as AI sender â†’ citations + usage log.
+ *
+ * Deterministic guarantees:
+ * - Only INBOUND messages are processed (AI outbound never re-enters â€” loop prevention).
+ * - The same messageId is processed once (idempotency).
+ * - A failed provider never fabricates a reply: AI_FAILED + original message preserved.
+ */
+export async function processAIMessage(
+  db: Db,
+  params: {
+    conversationId: string;
+    messageId: string;
+    workspaceId: string;
+    dryRun?: boolean;
+  },
+  deps: OrchestratorDeps = {}
+): Promise<AIExecutionResult> {
+  // 1. Load message â€” only inbound customer messages drive the AI.
+  const message = await db.message.findUnique({ where: { id: params.messageId } });
+  if (!message || message.workspaceId !== params.workspaceId || message.conversationId !== params.conversationId) {
+    return { status: "SKIPPED" };
+  }
+  if (message.direction !== "INBOUND" || message.senderType !== "CUSTOMER") {
+    return { status: "NOT_INBOUND" }; // AI loop prevention
+  }
+
+  // 2. Idempotency: one successful AI execution per message (failed runs are
+  // retried by the job queue and must not be blocked).
+  const existing = await db.aIUsageLog.findFirst({
+    where: { messageId: message.id, purpose: "RESPONSE", status: "SUCCESS" },
+    select: { id: true },
+  });
+  if (existing && !params.dryRun) return { status: "DUPLICATE", executionId: existing.id };
+
+  // 3. Conversation state gating.
+  const conversation = await db.conversation.findUnique({ where: { id: params.conversationId } });
+  if (!conversation || conversation.workspaceId !== params.workspaceId) throw new NotFoundError("Conversation");
+  if (!conversation.aiEnabled || conversation.aiState !== "AI_ACTIVE") {
+    if (!params.dryRun) return { status: "AI_DISABLED" };
+  }
+
+  // 4. Config + persona.
+  const settings = (await loadAISettings(db, params.workspaceId)) as AISettingsLike | null;
+  if (settings && !settings.aiEnabled) return { status: "AI_DISABLED" };
+  if (settings && settings.autoRespond === false && !params.dryRun) return { status: "AI_DISABLED" };
+  const personaRow = await db.persona.findFirst({
+    where: { workspaceId: params.workspaceId, isActive: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  const persona: PersonaConfig = {
+    name: personaRow?.name ?? "ط§ظ„ظ…ط³ط§ط¹ط¯",
+    language: personaRow?.language ?? "ar",
+    dialect: personaRow?.dialect ?? null,
+    tone: personaRow?.tone ?? "friendly",
+    formality: personaRow?.formality ?? "informal",
+    responseLength: personaRow?.responseLength ?? "short",
+    emojiLevel: personaRow?.emojiLevel ?? 1,
+    salesStyle: personaRow?.salesStyle ?? "helpful",
+    systemInstructions: personaRow?.systemInstructions ?? null,
+    prohibitedPhrases: personaRow?.prohibitedPhrases ?? [],
+    customRules: personaRow?.customRules ?? [],
+  };
+
+  const customer = await db.customer.findUnique({ where: { id: conversation.customerId } });
+  if (!customer) throw new NotFoundError("Customer");
+
+  const provider = deps.provider ?? getAIProvider();
+  const customerText = message.text ?? "[ط±ط³ط§ظ„ط© ظˆط³ط§ط¦ط·]";
+  const recentMessages = await db.message.findMany({
+    where: { conversationId: conversation.id, deletedAt: null },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 8,
+    select: { senderType: true, direction: true, text: true },
+  });
+
+  // 5. Intent + entity extraction (structured, repaired, retried, fallback).
+  const modelCfg = resolveModel(settings, "EXTRACTION");
+  const extractionUser = wrapUntrustedCustomerContent(
+    customerText,
+    recentMessages.reverse().map((m) => ({
+      sender: m.senderType,
+      text: m.text ?? "[ظˆط³ط§ط¦ط·]",
+    }))
+  );
+  const extractionSystem = [
+    coreSystemRules(),
+    personaPrompt(persona),
+    extractionInstruction(),
+  ].join("\n\n");
+
+  let extraction: ExtractionResult;
+  let extractionOk = true;
+  try {
+    const res = await withRetry(
+      () =>
+        provider.generateStructured<ExtractionResult>({
+          system: extractionSystem,
+          user: extractionUser,
+          model: modelCfg.model,
+          temperature: modelCfg.temperature,
+          maxTokens: modelCfg.maxTokens,
+          validate: (raw) => validateStructured(extractionResultSchema, raw),
+        }),
+      { attempts: 2 }
+    );
+    extraction = res.value;
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "EXTRACTION",
+      provider: provider.name,
+      model: modelCfg.model,
+      promptVersion: PROMPT_VERSIONS.EXTRACTION,
+      promptTokens: res.promptTokens,
+      completionTokens: res.completionTokens,
+      latencyMs: res.latencyMs,
+      success: true,
+    });
+  } catch (err) {
+    extractionOk = false;
+    const fallback = heuristicIntent(customerText);
+    extraction = {
+      intent: fallback.intent,
+      confidence: fallback.confidence,
+      entities: {},
+      missingFields: [],
+      memories: [],
+      requestedAction: fallback.intent === "HUMAN_REQUEST" ? "HANDOFF_HUMAN" : "ANSWER",
+    };
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "EXTRACTION",
+      provider: provider.name,
+      model: modelCfg.model,
+      promptVersion: PROMPT_VERSIONS.EXTRACTION,
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: 0,
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Injection defence: customer content never escalates or changes policy.
+  const injection = looksLikeInjection(customerText);
+
+  // Order Intelligence: deterministic draft/rules handling for order intents.
+  let orderResult: Awaited<ReturnType<typeof handleOrderIntent>> | null = null;
+  if (
+    ["ORDER_CREATE", "ORDER_UPDATE", "ORDER_CANCEL", "UNKNOWN"].includes(extraction.intent) ||
+    extraction.requestedAction === "CREATE_ORDER"
+  ) {
+    try {
+      orderResult = await handleOrderIntent(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        extraction,
+        customerText,
+        source: "AI",
+        actorUserId: "ai-agent",
+      });
+    } catch (err) {
+      log.error({ err }, "order_intelligence_failed");
+    }
+  }
+
+  // 6. Memory (load before context, save curated candidates after).
+  const memories = await loadMemory(db, params.workspaceId, customer.id);
+
+  // 7. Context per intent (Phase 3 buildAIContext â€” bounded retrieval).
+  const productId = await resolveProductId(db, params.workspaceId, extraction, customerText);
+  const vectorStore = deps.vectorStore ?? getVectorStore();
+  const context = await buildAIContext(db, vectorStore, {
+    workspaceId: params.workspaceId,
+    query: customerText,
+    productId: productId ?? undefined,
+    knowledgeLimit: 4,
+  });
+
+  // 8. Deterministic response plan (rules, not generation â€” spec آ§17).
+  const plan = buildPlan(extraction, context);
+  if (orderResult?.handled && orderResult.action !== "NONE") {
+    plan.goal = "complete_order";
+    plan.needsClarification = orderResult.action === "ASK_MISSING_FIELD";
+    plan.missingFields = orderResult.missingFields ?? plan.missingFields;
+  }
+  void extractionOk;
+
+  if (orderResult?.needsHumanReview) {
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "ORDER_REQUIRES_HUMAN" },
+    });
+    await recordAudit(db, {
+      workspaceId: params.workspaceId,
+      action: "conversation.ai_paused",
+      entityType: "Conversation",
+      entityId: conversation.id,
+      metadata: { reason: "ORDER_REQUIRES_HUMAN" },
+    });
+    return {
+      status: "HANDOFF",
+      intent: extraction.intent as Intent,
+      confidence: extraction.confidence,
+      plan,
+      response: HANDOFF_ACK,
+    };
+  }
+
+  // 9. Handoff policy.
+  const handoffThreshold = settings?.humanHandoffThreshold ?? 0.5;
+  const mustHandoff =
+    injection ||
+    extraction.requestedAction === "HANDOFF_HUMAN" ||
+    extraction.intent === "HUMAN_REQUEST" ||
+    extraction.intent === "COMPLAINT" ||
+    extraction.confidence < handoffThreshold;
+
+  if (mustHandoff && !params.dryRun) {
+    const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+    const handoffReasonMap: Record<string, "INJECTION_DETECTED" | "COMPLAINT" | "CUSTOMER_REQUEST" | "LOW_CONFIDENCE"> = {
+      PROMPT_INJECTION: "INJECTION_DETECTED",
+      COMPLAINT: "COMPLAINT",
+      CUSTOMER_REQUEST: "CUSTOMER_REQUEST",
+      LOW_CONFIDENCE: "LOW_CONFIDENCE",
+    };
+    await createHandoff(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      customerId: customer.id,
+      reason: handoffReasonMap[handoffReason(extraction, injection)] ?? "LOW_CONFIDENCE",
+      metadata: { messageId: message.id, confidence: extraction.confidence },
+      actorUserId: "ai-agent",
+    });
+    await recordAudit(db, {
+      workspaceId: params.workspaceId,
+      action: "conversation.ai_paused",
+      entityType: "Conversation",
+      entityId: conversation.id,
+      metadata: { reason: handoffReason(extraction, injection), intent: extraction.intent, confidence: extraction.confidence },
+    });
+    await sendAI(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      text: extraction.intent === "COMPLAINT" || injection ? HANDOFF_ACK : LOW_CONFIDENCE_ACK,
+      sourceMessageId: message.id,
+      dryRun: params.dryRun,
+    });
+    return {
+      status: "HANDOFF",
+      intent: extraction.intent as Intent,
+      confidence: extraction.confidence,
+      plan,
+      response: HANDOFF_ACK,
+    };
+  }
+
+  // 10. Response generation (validated by guardrails; regenerate once, then safe fallback).
+  const responseModelCfg = resolveModel(settings, "RESPONSE");
+  const system = [
+    coreSystemRules(),
+    personaPrompt(persona),
+    trustedDataPrompt({
+      product: context.product
+        ? {
+            name: context.product.name,
+            price: `${context.product.price} ${context.product.currency}`,
+            currency: "",
+            stockStatus: context.product.stockStatus,
+            shortDescription: context.product.shortDescription,
+            benefits: context.product.benefits,
+            usage: context.product.usage,
+            warnings: context.product.warnings,
+            objections: context.product.objections,
+            salesNotes: context.product.salesNotes,
+            faqs: context.product.faqs,
+          }
+        : undefined,
+      knowledge: { faqs: context.knowledge.faqs, documents: context.knowledge.documents },
+      feedback: plan.useFeedback ? context.feedback : [],
+      memory: memories.map((m) => ({ type: m.type, content: m.value })),
+      summary: conversation.summary,
+      orderSummary: orderResult?.summaryText ?? null,
+    }),
+  ].join("\n\n");
+
+  const userPrompt = [
+    extractionUser,
+    `ط§ظ„ظ†ظٹط©: ${extraction.intent} (ط«ظ‚ط© ${extraction.confidence})`,
+    `ط§ظ„ط®ط·ط©: ${JSON.stringify(plan)}`,
+    responseInstruction(persona),
+  ].join("\n\n");
+
+  let responseText = "";
+  let violations: string[] = [];
+  try {
+    const res = await withRetry(
+      () =>
+        provider.generateText({
+          system,
+          user: userPrompt,
+          model: responseModelCfg.model,
+          temperature: responseModelCfg.temperature,
+          maxTokens: responseModelCfg.maxTokens,
+        }),
+      { attempts: 2 }
+    );
+    responseText = res.text.trim();
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: provider.name,
+      model: responseModelCfg.model,
+      intent: extraction.intent,
+      confidence: extraction.confidence,
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
+      promptTokens: res.promptTokens,
+      completionTokens: res.completionTokens,
+      latencyMs: res.latencyMs,
+      success: true,
+    });
+
+    // Guardrails
+    const check = validateResponse({
+      response: responseText,
+      context,
+      prohibitedPhrases: persona.prohibitedPhrases,
+      allowFeedbackQuote: plan.useFeedback,
+    });
+    if (!check.valid) {
+      violations = check.violations;
+      log.warn({ violations }, "guardrail_violation_regen");
+      // One corrective regeneration, then deterministic fallback.
+      const retry = await provider.generateText({
+        system: `${system}\n\nط±ط¯ظƒ ط§ظ„ط³ط§ط¨ظ‚ ط±ظڈظپط¶ ظ„ظ„ط£ط³ط¨ط§ط¨ ط§ظ„طھط§ظ„ظٹط©: ${violations.join(", ")}. ط£ط¹ط¯ ظƒطھط§ط¨ط© ط§ظ„ط±ط¯ ظ…ظ„طھط²ظ…ط§ظ‹ طھظ…ط§ظ…ط§ظ‹ ط¨ط§ظ„ظ‚ظˆط§ط¹ط¯.`,
+        user: userPrompt,
+        model: responseModelCfg.model,
+        temperature: 0.2,
+        maxTokens: responseModelCfg.maxTokens,
+      });
+      const retryCheck = validateResponse({
+        response: retry.text.trim(),
+        context,
+        prohibitedPhrases: persona.prohibitedPhrases,
+        allowFeedbackQuote: plan.useFeedback,
+      });
+      responseText = retryCheck.valid ? retry.text.trim() : check.fallback!;
+    }
+  } catch (err) {
+    // AI failure: never fabricate. Keep the message; surface AI_FAILED.
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: provider.name,
+      model: responseModelCfg.model,
+      intent: extraction.intent,
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: 0,
+      success: false,
+      status: "AI_FAILED",
+      error: err instanceof AIProviderError ? err.message : String(err),
+    });
+    if (!params.dryRun) {
+      await db.conversation.update({
+        where: { id: conversation.id },
+        data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "AI_FAILED" },
+      });
+      await recordAudit(db, {
+        workspaceId: params.workspaceId,
+        action: "conversation.ai_paused",
+        entityType: "Conversation",
+        entityId: conversation.id,
+        metadata: { reason: "AI_FAILED" },
+      });
+    }
+    return {
+      status: "AI_FAILED",
+      intent: extraction.intent as Intent,
+      confidence: extraction.confidence,
+      plan,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  // 11. Persist: send as AI + citations + memory.
+  const sent = await sendAI(db, {
+    workspaceId: params.workspaceId,
+    conversationId: conversation.id,
+    text: responseText,
+    sourceMessageId: message.id,
+    dryRun: params.dryRun,
+  });
+
+  if (!params.dryRun) {
+    await db.knowledgeCitation.createMany({
+      data: context.citations.map((c) => ({
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        sourceType: c.sourceType,
+        sourceId: c.sourceId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  if (extraction.memories.length) {
+    await saveMemories(db, {
+      workspaceId: params.workspaceId,
+      customerId: customer.id,
+      source: `ai_extraction:${message.id}`,
+      memories: extraction.memories,
+    });
+  }
+
+  // 12. Summary refresh at intervals (not every message).
+  const inboundCount = await db.message.count({
+    where: { conversationId: conversation.id, direction: "INBOUND" },
+  });
+  if (inboundCount % 6 === 0 && !params.dryRun) {
+    await db.backgroundJob.create({
+      data: {
+        type: "generate_summary",
+        workspaceId: params.workspaceId,
+        payload: { conversationId: conversation.id } as never,
+      },
+    });
+  }
+
+  return {
+    status: plan.needsClarification ? "CLARIFIED" : "RESPONDED",
+    intent: extraction.intent as Intent,
+    confidence: extraction.confidence,
+    plan,
+    response: responseText,
+    citations: context.citations,
+    violations: violations.length ? violations : undefined,
+    executionId: sent?.id,
+  };
+}
+
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+async function resolveProductId(db: Db, workspaceId: string, extraction: ExtractionResult, customerText = ""): Promise<string | null> {
+  const candidates: string[] = [];
+  if (extraction.entities.product) candidates.push(extraction.entities.product);
+  // Context-based fallback: match product names against words in the message
+  // ("ط¨ط¯ظٹ 3" after a product mention resolves via this path).
+  for (const word of customerText.split(/[\sطŒ,.!طں?]+/)) {
+    if (word.length >= 3) candidates.push(word);
+  }
+  for (const name of candidates) {
+    const cleaned = name.replace(/^(ط§ظ„|ط§ظ„ظ€)/, "");
+    const product = await db.product.findFirst({
+      where: {
+        workspaceId,
+        isActive: true,
+        isArchived: false,
+        OR: [{ name: { contains: name } }, ...(cleaned !== name ? [{ name: { contains: cleaned } }] : [])],
+      },
+      select: { id: true },
+    });
+    if (product) return product.id;
+  }
+  return null;
+}
+
+function buildPlan(extraction: ExtractionResult, context: Awaited<ReturnType<typeof buildAIContext>>): ResponsePlan {
+  const goalMap: Record<string, string> = {
+    GREETING: "greet",
+    PRODUCT_QUESTION: "answer_product",
+    PRICE_QUESTION: "answer_price",
+    AVAILABILITY: "answer_product",
+    PRODUCT_COMPARISON: "answer_product",
+    HOW_TO_USE: "answer_usage",
+    BENEFITS: "answer_usage",
+    FEEDBACK_REQUEST: "answer_feedback",
+    DELIVERY_QUESTION: "answer_delivery",
+    PAYMENT_QUESTION: "answer_payment",
+    RETURN_REQUEST: "answer_policy",
+    ORDER_CREATE: "complete_order",
+    ORDER_UPDATE: "clarify",
+    ORDER_CANCEL: "handoff",
+    TRACK_ORDER: "track_order",
+    HUMAN_REQUEST: "handoff",
+    COMPLAINT: "handle_complaint",
+    UNKNOWN: "clarify",
+  };
+  const needsClarification =
+    extraction.requestedAction === "CLARIFY" ||
+    (extraction.intent === "ORDER_CREATE" && extraction.missingFields.length > 0) ||
+    extraction.intent === "UNKNOWN";
+  return {
+    goal: goalMap[extraction.intent] ?? "clarify",
+    needsClarification,
+    missingFields: extraction.missingFields,
+    sendMedia: /ط´ظƒظ„|طµظˆط±ط©|طµظˆط±|ظƒظٹظپ ظٹط¨ط¯ظˆ/.test(JSON.stringify(extraction.entities)),
+    useFeedback: extraction.intent === "FEEDBACK_REQUEST",
+    knowledgeSources: ["product", "faq", "policy"],
+  };
+}
+
+function handoffReason(extraction: ExtractionResult, injection: boolean): string {
+  if (injection) return "PROMPT_INJECTION";
+  if (extraction.intent === "COMPLAINT") return "COMPLAINT";
+  if (extraction.intent === "HUMAN_REQUEST") return "CUSTOMER_REQUEST";
+  if (extraction.requestedAction === "HANDOFF_HUMAN") return "CUSTOMER_REQUEST";
+  return "LOW_CONFIDENCE";
+}
+
+async function sendAI(
+  db: Db,
+  params: { workspaceId: string; conversationId: string; text: string; sourceMessageId?: string; dryRun?: boolean }
+) {
+  if (params.dryRun) return null;
+  const { dispatchOutbound } = await import("@/modules/channels/outbound");
+  const result = await dispatchOutbound(db, {
+    workspaceId: params.workspaceId,
+    conversationId: params.conversationId,
+    sourceMessageId: params.sourceMessageId ?? "n/a",
+    text: params.text,
+  });
+  return { id: result.messageId, deliveryStatus: result.deliveryStatus };
+}
+
+function getVectorStore(): VectorStore {
+  return new PgVectorStore((sql, params2) =>
+    prisma.$queryRawUnsafe(sql, ...params2) as Promise<Array<Record<string, unknown>>>
+  );
+}
