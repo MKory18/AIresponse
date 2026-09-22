@@ -32,6 +32,9 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
+# src is required at runtime only by prisma/seed.ts (npm run db:seed),
+# which tsx executes from source (no tsconfig path aliases used).
+COPY --from=builder /app/src ./src
 
 USER nextjs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
