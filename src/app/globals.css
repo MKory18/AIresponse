@@ -4,8 +4,66 @@
 
 :root {
   color-scheme: light;
+  --surface-1: 250 251 253;
+  --surface-2: 255 255 255;
+  --surface-3: 241 245 249;
+  --text: 15 23 42;
+  --text-muted: 100 116 139;
+  --text-subtle: 148 163 184;
+  --line: 226 232 240;
+}
+
+.dark {
+  color-scheme: dark;
+  --surface-1: 9 12 18;
+  --surface-2: 17 21 29;
+  --surface-3: 26 31 42;
+  --text: 226 232 240;
+  --text-muted: 148 163 184;
+  --text-subtle: 100 116 139;
+  --line: 39 45 60;
+}
+
+html {
+  font-feature-settings: "ss01", "ss02";
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-surface-1 font-sans text-ink antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numeric/LTR data (phones, prices, IDs) inside RTL layouts */
+.num {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+}
+
+/* Slim scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line)) transparent;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Focus visibility for accessibility */
+:focus-visible {
+  outline: 2px solid rgb(47 111 235 / 0.6);
+  outline-offset: 1px;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(-100%); }
 }

@@ -1,3 +1,6 @@
+import { Facebook, Globe, Instagram, MessageCircle, Send } from "lucide-react";
+import type { LucideProps } from "lucide-react";
+
 export type ConversationListItem = {
   id: string;
   status: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED";
@@ -41,25 +44,29 @@ export type CustomerDetail = {
   aiSummary: string | null;
 };
 
+export type DraftInfo = {
+  id: string;
+  state: string;
+  productName: string | null;
+  quantity: number | null;
+  phone: string | null;
+  rawAddress: string | null;
+  province: string | null;
+  missingFields: string[];
+};
+
 export const CHANNEL_LABELS: Record<string, string> = {
-  WHATSAPP: "WhatsApp",
-  FACEBOOK: "Messenger",
-  INSTAGRAM: "Instagram",
-  TELEGRAM: "Telegram",
-  WEB: "Web",
+  FACEBOOK: "فيسبوك ماسنجر",
+  INSTAGRAM: "إنستغرام",
+  WHATSAPP: "واتساب",
+  TELEGRAM: "تيليغرام",
+  WEB: "الويب",
 };
 
-export const CHANNEL_ICONS: Record<string, string> = {
-  WHATSAPP: "🟢",
-  FACEBOOK: "🔵",
-  INSTAGRAM: "🟣",
-  TELEGRAM: "➤",
-  WEB: "🌐",
-};
-
-export const STATUS_STYLES: Record<string, string> = {
-  OPEN: "bg-emerald-50 text-emerald-700",
-  PENDING: "bg-amber-50 text-amber-700",
-  RESOLVED: "bg-slate-100 text-slate-600",
-  CLOSED: "bg-slate-100 text-slate-500",
+export const CHANNEL_ICONS: Record<string, React.ComponentType<LucideProps>> = {
+  FACEBOOK: Facebook,
+  INSTAGRAM: Instagram,
+  WHATSAPP: MessageCircle,
+  TELEGRAM: Send,
+  WEB: Globe,
 };
