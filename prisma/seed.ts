@@ -8,43 +8,44 @@ const MIN = 60 * 1000;
 
 async function main() {
   // Idempotent seed. Demo data is only for local development / docker-compose.
-  const existing = await prisma.user.findUnique({ where: { email: DEMO_EMAIL } });
-  if (existing) {
-    console.log("Demo seed already applied — skipping.");
-    return;
-  }
+  // Every step checks for existing data first, so a partially applied seed
+  // (e.g. a previous run that failed mid-way) completes instead of failing.
+  const user =
+    (await prisma.user.findUnique({ where: { email: DEMO_EMAIL } })) ??
+    (await prisma.user.create({
+      data: { email: DEMO_EMAIL, name: "Demo Admin", passwordHash: await hashPassword(DEMO_PASSWORD) },
+    }));
 
-  const passwordHash = await hashPassword(DEMO_PASSWORD);
-  const user = await prisma.user.create({
-    data: { email: DEMO_EMAIL, name: "Demo Admin", passwordHash },
-  });
-
-  const workspace = await prisma.workspace.create({
-    data: {
-      name: "Demo Store",
-      slug: "demo-store",
-      members: { create: { userId: user.id, role: "OWNER", status: "ACTIVE" } },
-      aiSettings: { create: {} },
-      personas: {
-        create: {
-          name: "Sara",
-          tone: "friendly",
-          language: "ar",
-          dialect: "syrian",
-          formality: "informal",
-          emojiLevel: 1,
-          responseLength: "short",
-          salesStyle: "helpful",
+  const workspace =
+    (await prisma.workspace.findUnique({ where: { slug: "demo-store" } })) ??
+    (await prisma.workspace.create({
+      data: {
+        name: "Demo Store",
+        slug: "demo-store",
+        members: { create: { userId: user.id, role: "OWNER", status: "ACTIVE" } },
+        aiSettings: { create: {} },
+        personas: {
+          create: {
+            name: "Sara",
+            tone: "friendly",
+            language: "ar",
+            dialect: "syrian",
+            formality: "informal",
+            emojiLevel: 1,
+            responseLength: "short",
+            salesStyle: "helpful",
+          },
         },
       },
-    },
-    include: { personas: true },
-  });
+      include: { personas: true },
+    }));
 
   // Single channel: Facebook Messenger (per product scope).
-  const fbChannel = await prisma.channel.create({
-    data: { workspaceId: workspace.id, type: "FACEBOOK", displayName: "Facebook Page — Demo", status: "CONNECTED" },
-  });
+  const fbChannel =
+    (await prisma.channel.findFirst({ where: { workspaceId: workspace.id, type: "FACEBOOK" } })) ??
+    (await prisma.channel.create({
+      data: { workspaceId: workspace.id, type: "FACEBOOK", displayName: "Facebook Page — Demo", status: "CONNECTED" },
+    }));
 
   // ── Products (5) with variants + FAQs ──
   const productSpecs = [
@@ -124,34 +125,49 @@ async function main() {
 
   const products = [] as { id: string; name: string; price: number; currency: string }[];
   for (const spec of productSpecs) {
-    const p = await prisma.product.create({
-      data: {
-        workspaceId: workspace.id,
-        name: spec.name,
-        sku: spec.sku,
-        shortDescription: spec.shortDescription,
-        description: spec.description,
-        price: spec.price,
-        compareAtPrice: spec.compareAtPrice,
-        currency: spec.currency,
-        category: spec.category,
-        benefits: spec.benefits,
-        usage: spec.usage,
-        objections: spec.objections,
-        warnings: spec.warnings,
-        stockQty: 40,
-
-        variants: {
-          create: spec.variants.map((v) => ({ ...v, currency: spec.currency })),
-        },
-      },
+    const existingProduct = await prisma.product.findUnique({
+      where: { workspaceId_sku: { workspaceId: workspace.id, sku: spec.sku } },
     });
-    for (const f of spec.faqs) {
-      await prisma.faq.create({
-        data: { workspaceId: workspace.id, productId: p.id, question: f.question, answer: f.answer },
+    const p =
+      existingProduct ??
+      (await prisma.product.create({
+        data: {
+          workspaceId: workspace.id,
+          name: spec.name,
+          sku: spec.sku,
+          shortDescription: spec.shortDescription,
+          description: spec.description,
+          price: spec.price,
+          compareAtPrice: spec.compareAtPrice,
+          currency: spec.currency,
+          category: spec.category,
+          benefits: spec.benefits,
+          usage: spec.usage,
+          objections: spec.objections,
+          warnings: spec.warnings,
+          stockQty: 40,
+
+          variants: {
+            create: spec.variants.map((v) => ({ ...v })),
+          },
+        },
+      }));
+    // ProductVariant has no currency field: variants inherit the product's currency.
+    for (const v of spec.variants) {
+      await prisma.productVariant.upsert({
+        where: { productId_sku: { productId: p.id, sku: v.sku } },
+        update: {},
+        create: { ...v, productId: p.id },
       });
     }
-    products.push({ id: p.id, name: p.name, price: spec.price, currency: spec.currency });
+    if (!existingProduct) {
+      for (const f of spec.faqs) {
+        await prisma.faq.create({
+          data: { workspaceId: workspace.id, productId: p.id, question: f.question, answer: f.answer },
+        });
+      }
+    }
+    products.push({ id: p.id, name: spec.name, price: spec.price, currency: spec.currency });
   }
 
   // ── Customers (3) with Facebook identities ──
@@ -162,17 +178,28 @@ async function main() {
   ];
   const customers = [] as { id: string; name: string }[];
   for (const cs of customerSpecs) {
-    const c = await prisma.customer.create({
-      data: {
-        workspaceId: workspace.id,
-        name: cs.name,
-        phone: cs.phone,
-        province: cs.province,
-        status: "INTERESTED",
-        identities: {
-          create: { workspaceId: workspace.id, channelType: "FACEBOOK", channelExternalId: cs.identity, displayName: cs.name },
+    const c =
+      (await prisma.customer.findFirst({
+        where: { workspaceId: workspace.id, phone: cs.phone },
+      })) ??
+      (await prisma.customer.create({
+        data: {
+          workspaceId: workspace.id,
+          name: cs.name,
+          phone: cs.phone,
+          province: cs.province,
+          status: "INTERESTED",
+          identities: {
+            create: { workspaceId: workspace.id, channelType: "FACEBOOK", channelExternalId: cs.identity, displayName: cs.name },
+          },
         },
+      }));
+    await prisma.channelIdentity.upsert({
+      where: {
+        channelType_channelExternalId: { channelType: "FACEBOOK", channelExternalId: cs.identity },
       },
+      update: {},
+      create: { workspaceId: workspace.id, customerId: c.id, channelType: "FACEBOOK", channelExternalId: cs.identity, displayName: cs.name },
     });
     customers.push({ id: c.id, name: cs.name });
   }
@@ -230,6 +257,13 @@ async function main() {
   ];
 
   for (const spec of specs) {
+    const existingConversation = await prisma.conversation.findFirst({
+      where: { workspaceId: workspace.id, channelConversationId: spec.ext },
+    });
+    if (existingConversation) {
+      // Conversation (and its messages) already seeded — skip to avoid duplicates.
+      continue;
+    }
     const startAt = ago(spec.minutesAgo + spec.script.length * 2);
     const conversation = await prisma.conversation.create({
       data: {
@@ -278,8 +312,10 @@ async function main() {
 
   // ── Channel account (encrypted demo token) + OPEN handoff — staging validation
   const { encryptSecret } = await import("../src/core/crypto");
-  await prisma.channelAccount.create({
-    data: {
+  await prisma.channelAccount.upsert({
+    where: { channelId: fbChannel.id },
+    update: {},
+    create: {
       channelId: fbChannel.id,
       provider: "FACEBOOK",
       externalAccountId: "page-1",
@@ -287,53 +323,69 @@ async function main() {
       encryptedCredentials: encryptSecret("demo-page-access-token"),
     },
   });
-  await prisma.channelIdentity.create({
-    data: {
+  await prisma.channelIdentity.upsert({
+    where: {
+      channelType_channelExternalId: { channelType: "FACEBOOK", channelExternalId: "psid-demo-1" },
+    },
+    update: {},
+    create: {
       workspaceId: workspace.id,
       customerId: customers[0].id,
       channelType: "FACEBOOK",
       channelExternalId: "psid-demo-1",
     },
   });
-  await prisma.humanHandoff.create({
-    data: {
-      workspaceId: workspace.id,
-      conversationId: (
-        await prisma.conversation.findFirstOrThrow({
-          where: { workspaceId: workspace.id, channelConversationId: "fb-conv-3" },
-        })
-      ).id,
-      customerId: customers[1].id,
-      reason: "COMPLAINT",
-      priority: "HIGH",
-      status: "OPEN",
-    },
+  const handoffConversation = await prisma.conversation.findFirstOrThrow({
+    where: { workspaceId: workspace.id, channelConversationId: "fb-conv-3" },
   });
+  const existingHandoff = await prisma.humanHandoff.findFirst({
+    where: { conversationId: handoffConversation.id, status: "OPEN" },
+  });
+  if (!existingHandoff) {
+    await prisma.humanHandoff.create({
+      data: {
+        workspaceId: workspace.id,
+        conversationId: handoffConversation.id,
+        customerId: customers[1].id,
+        reason: "COMPLAINT",
+        priority: "HIGH",
+        status: "OPEN",
+      },
+    });
+  }
 
   // ── Order ──
-  await prisma.order.create({
-    data: {
-      workspaceId: workspace.id,
-      orderNumber: "DEMO-0001",
-      customerId: customers[0].id,
-      status: "CONFIRMED",
-      total: 450000,
-      currency: "SYP",
-      province: "دمشق",
-      items: {
-        create: {
-          productId: products[0].id,
-          quantity: 3,
-          unitPrice: 150000,
-          subtotal: 450000,
-          productNameSnapshot: products[0].name,
-          skuSnapshot: "TRUFFLE-WATER-500",
+  const existingOrder = await prisma.order.findUnique({
+    where: { orderNumber: "DEMO-0001" },
+  });
+  if (!existingOrder) {
+    await prisma.order.create({
+      data: {
+        workspaceId: workspace.id,
+        orderNumber: "DEMO-0001",
+        customerId: customers[0].id,
+        status: "CONFIRMED",
+        total: 450000,
+        currency: "SYP",
+        province: "دمشق",
+        items: {
+          create: {
+            productId: products[0].id,
+            quantity: 3,
+            unitPrice: 150000,
+            subtotal: 450000,
+            productNameSnapshot: products[0].name,
+            skuSnapshot: "TRUFFLE-WATER-500",
+          },
         },
       },
-    },
-  });
+    });
+  }
 
   // ── Feedback (20) — 15 approved, 5 pending ──
+  // Feedback has no unique key: seed it only if this workspace has none yet.
+  const feedbackCount = await prisma.feedback.count({ where: { workspaceId: workspace.id } });
+  if (feedbackCount === 0) {
   const feedbackSpecs = [
     { p: 0, content: "المنتج ممتاز، الطعم خيالي وكل من جربه سأل عن المصدر", rating: 5, source: "Messenger — محادثة #112" },
     { p: 0, content: "قدمته في عزيمة وكل الضيوف سألوا عنه", rating: 5, source: "Messenger — محادثة #98" },
@@ -388,6 +440,7 @@ async function main() {
       },
     });
   }
+  }
 
   // ── Knowledge documents (READY + FAQ policies) ──
   const docs = [
@@ -422,21 +475,28 @@ async function main() {
       status: "READY" as const,
     },
   ];
-  for (const d of docs) {
-    await prisma.knowledgeDocument.create({
-      data: { workspaceId: workspace.id, title: d.title, category: d.category, sourceType: "MANUAL", content: d.content, status: d.status },
-    });
+  // Knowledge documents have no unique key: seed only if the workspace has none.
+  const docsCount = await prisma.knowledgeDocument.count({ where: { workspaceId: workspace.id } });
+  if (docsCount === 0) {
+    for (const d of docs) {
+      await prisma.knowledgeDocument.create({
+        data: { workspaceId: workspace.id, title: d.title, category: d.category, sourceType: "MANUAL", content: d.content, status: d.status },
+      });
+    }
   }
 
-  // Global FAQs (workspace-level, no product)
-  await prisma.faq.createMany({
-    data: [
-      { workspaceId: workspace.id, question: "هل يوجد توصيل لكل المحافظات؟", answer: "نعم، التوصيل متاح لجميع المحافظات خلال 24-48 ساعة.", category: "DELIVERY" },
-      { workspaceId: workspace.id, question: "كيف أدفع؟", answer: "الدفع عند الاستلام نقدًا أو عبر المكاتب المالية.", category: "PAYMENT" },
-      { workspaceId: workspace.id, question: "هل الدفع مقدما مطلوب؟", answer: "لا، الدفع عند الاستلام. لا نطلب أي تحويل مقدم عبر روابط.", category: "PAYMENT" },
-      { workspaceId: workspace.id, question: "وين محلكم؟", answer: "مقرنا دمشق — دويلعة، ونوصل لكل المحافظات.", category: "COMPANY" },
-    ],
-  });
+  // Global FAQs (workspace-level, no product) — seed only if none exist yet.
+  const globalFaqCount = await prisma.faq.count({ where: { workspaceId: workspace.id, productId: null } });
+  if (globalFaqCount === 0) {
+    await prisma.faq.createMany({
+      data: [
+        { workspaceId: workspace.id, question: "هل يوجد توصيل لكل المحافظات؟", answer: "نعم، التوصيل متاح لجميع المحافظات خلال 24-48 ساعة.", category: "DELIVERY" },
+        { workspaceId: workspace.id, question: "كيف أدفع؟", answer: "الدفع عند الاستلام نقدًا أو عبر المكاتب المالية.", category: "PAYMENT" },
+        { workspaceId: workspace.id, question: "هل الدفع مقدما مطلوب؟", answer: "لا، الدفع عند الاستلام. لا نطلب أي تحويل مقدم عبر روابط.", category: "PAYMENT" },
+        { workspaceId: workspace.id, question: "وين محلكم؟", answer: "مقرنا دمشق — دويلعة، ونوصل لكل المحافظات.", category: "COMPANY" },
+      ],
+    });
+  }
 
   console.log("Seed complete. Demo login:", DEMO_EMAIL, "/", DEMO_PASSWORD);
 }
