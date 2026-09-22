@@ -42,8 +42,9 @@ COPY --from=builder /app/scripts ./scripts
 # (worker, seed) resolves them by reading tsconfig.json at runtime.
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
+# No Dockerfile HEALTHCHECK: this image is shared by the web container and the
+# non-HTTP worker container. Health checks are managed per-service in Coolify
+# instead (web: GET /api/health; worker: none). See docs/COOLIFY-STAGING.md.
 USER nextjs
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
 EXPOSE 3000
 CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]

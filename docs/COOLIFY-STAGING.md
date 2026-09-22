@@ -95,10 +95,13 @@ In Coolify, add a **second service** from the same Dockerfile (same app resource
 - Start command override: `npx prisma migrate deploy && npm run worker`.
 - No inbound port.
 - `restart: unless-stopped`.
-- **Healthcheck:** the image's `HEALTHCHECK` (wget on port 3000) only applies to the web
-  container. On the worker service, set the health check to **disabled** in Coolify
-  (the worker is a non-HTTP process; its liveness is visible via the
-  `worker_started` / `worker_stopped_cleanly` logs).
+- **Healthcheck:** the image contains no Dockerfile `HEALTHCHECK` (it is shared by
+  the web and worker containers, and an image-level check cannot differ per service).
+  Configure health checks per service in Coolify instead:
+  - **Web app:** Coolify-managed health check → path `/api/health`, port `3000`
+    (30s interval, ~30s start period, 3 retries).
+  - **Worker:** health check disabled (non-HTTP process; liveness is visible via the
+    `worker_started` / `worker_stopped_cleanly` logs).
 
 The worker must never share the Next.js process — it polls `BackgroundJob` and claims jobs atomically via `lockedAt`/`lockedBy`.
 
@@ -117,12 +120,14 @@ The worker must never share the Next.js process — it polls `BackgroundJob` and
 
 ## 10. Health Check
 
-Endpoint: `GET /api/health` (Docker `HEALTHCHECK` already targets it, 30s interval, start-period 30s).
+Endpoint: `GET /api/health` (Coolify-managed — the image has no Dockerfile
+`HEALTHCHECK`; configure it in Coolify: path `/api/health`, port `3000`,
+30s interval, ~30s start period, 3 retries).
 
 - Returns `503` when the database is unreachable (`DB_UNHEALTHY`) or queue is unhealthy.
 - `queueDepth` / `failedJobs` expose worker-queue state.
 - In Coolify, set the health check path to `/api/health`.
-- "Container running" ≠ healthy; rely on the health endpoint and container `HEALTHCHECK` status.
+- "Container running" ≠ healthy; rely on the health endpoint status.
 
 ## 11. Migrations
 
