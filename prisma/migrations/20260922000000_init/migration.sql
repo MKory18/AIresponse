@@ -1,3 +1,8 @@
+-- Enable pgvector (required by KnowledgeChunk.embedding vector(1536)).
+-- The PostgreSQL server must use a pgvector-enabled image
+-- (e.g. pgvector/pgvector:pg16 or newer / PGVector in Coolify).
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- CreateEnum
 CREATE TYPE "UserRole" AS ENUM ('SUPER_ADMIN', 'OWNER', 'ADMIN', 'MANAGER', 'SALES_AGENT', 'SUPPORT_AGENT', 'VIEWER');
 

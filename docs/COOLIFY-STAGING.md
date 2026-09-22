@@ -26,11 +26,21 @@ No Redis is required. Background jobs are DB-backed (`BackgroundJob` with `locke
 
 ## 2. Enable pgvector
 
-Before the first `prisma migrate deploy` (the baseline migration creates a `vector(1536)` column):
+Before the first `prisma migrate deploy` (the baseline migration now runs
+`CREATE EXTENSION IF NOT EXISTS vector;` itself, so the image must ship the
+extension — the SQL alone cannot add it to a plain Postgres image).
+
+Confirm the running container is actually a pgvector image (Coolify's
+"PGVector" template label is NOT proof — a stale container with the old
+`postgres:16` image will still fail with `extension "vector" is not available`):
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+SELECT name FROM pg_available_extensions WHERE name = 'vector';  -- must return a row
 ```
+
+If it returns no rows: change the image to e.g. `pgvector/pgvector:pg16`
+(or the PGVector 18 image), **stop and redeploy the database container**, then
+re-check. Do not drop the volume.
 
 Verify inside the container:
 
