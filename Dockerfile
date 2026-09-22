@@ -38,6 +38,9 @@ COPY --from=builder /app/src ./src
 # scripts/worker.ts is the background-job consumer (npm run worker) for the
 # separate worker container; tsx runs it from source.
 COPY --from=builder /app/scripts ./scripts
+# tsconfig.json defines the @/* path aliases used by src/** imports; tsx
+# (worker, seed) resolves them by reading tsconfig.json at runtime.
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 USER nextjs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
