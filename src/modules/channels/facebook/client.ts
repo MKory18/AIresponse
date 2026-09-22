@@ -103,6 +103,48 @@ export class FacebookClient {
     }
   }
 
+  /**
+   * Page-level webhook subscription: without this Meta never delivers Page
+   * messaging events to our app, even with a valid Page Access Token.
+   * POST /{page-id}/subscribed_apps with subscribed_fields for messaging.
+   * Idempotent — re-subscribing an already-subscribed Page returns success.
+   */
+  async subscribePageToApp(pageAccessToken: string, pageId: string): Promise<{ subscribed: boolean }> {
+    const res = await this.call<{ success?: boolean }>(
+      `${pageId}/subscribed_apps`,
+      {
+        access_token: pageAccessToken,
+        subscribed_fields: "messages,messaging_postbacks,messaging_optins,messaging_referrals,message_reactions",
+      }
+    );
+    if (!res?.success) {
+      throw new FacebookApiError("Graph did not confirm page subscription", "PERMANENT");
+    }
+    return { subscribed: true };
+  }
+
+  /**
+   * Verification step: GET /{page-id}/subscribed_apps and return the apps
+   * (id + name) the Page is currently subscribed to. Callers match our
+   * META_APP_ID against this list to confirm delivery will work.
+   */
+  async getPageSubscriptions(pageAccessToken: string, pageId: string): Promise<{ httpStatus: number; apps: { id: string; name?: string }[] }> {
+    try {
+      const res = await this.fetchImpl(`${this.graphUrl}/${pageId}/subscribed_apps?fields=id,name&access_token=${encodeURIComponent(pageAccessToken)}`);
+      const json = (await res.json().catch(() => ({}))) as {
+        data?: { id: string; name?: string }[];
+        error?: { message: string; code?: number };
+      };
+      if (json.error) {
+        throw new FacebookApiError(json.error.message ?? "Subscription fetch failed", json.error?.code === 190 ? "PERMANENT" : "TRANSIENT", json.error?.code);
+      }
+      return { httpStatus: res.status, apps: json.data ?? [] };
+    } catch (err) {
+      if (err instanceof FacebookApiError) throw err;
+      throw new FacebookApiError("Network failure fetching page subscriptions", "TRANSIENT");
+    }
+  }
+
   /** OAuth code → long-lived user token. */
   async exchangeCodeForLongLivedToken(code: string, redirectUri: string): Promise<string> {
     const env = getEnv();

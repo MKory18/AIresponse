@@ -4,7 +4,9 @@ import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 import { encryptSecret } from "@/core/crypto";
 import { verifyPagesSelectionToken } from "@/modules/channels/facebook/oauth";
+import { getFacebookClient } from "@/modules/channels/facebook/client";
 import { AuthenticationError, ConflictError } from "@/core/errors";
+import { getEnv } from "@/core/env";
 import { childLogger } from "@/core/logger";
 
 const log = childLogger("facebook.oauth");
@@ -82,13 +84,44 @@ export const POST = createHandler(
     });
     await prisma.channel.update({ where: { id: channel.id }, data: { status: "CONNECTED" } });
 
+    // Page-level webhook subscription — without it Meta never sends Page
+    // messaging events. Attempt + verify (GET subscribed_apps) and report;
+    // a failure does NOT undo the connection but is clearly logged and surfaced.
+    const env = getEnv();
+    let subscription: { attempted: boolean; subscribed: boolean; appId: string | null; error?: string } = {
+      attempted: false,
+      subscribed: false,
+      appId: env.META_APP_ID ?? null,
+    };
+    try {
+      const client = getFacebookClient();
+      await client.subscribePageToApp(page.accessToken, page.id);
+      const verification = await client.getPageSubscriptions(page.accessToken, page.id);
+      const subscribed = verification.apps.some((a) => a.id === env.META_APP_ID);
+      subscription = { attempted: true, subscribed, appId: env.META_APP_ID ?? null };
+      if (subscribed) {
+        log.info(
+          { workspaceId: auth!.workspaceId, pageId: page.id, httpStatus: verification.httpStatus, appId: env.META_APP_ID },
+          "facebook.page.subscribed_to_webhook"
+        );
+      } else {
+        log.warn(
+          { workspaceId: auth!.workspaceId, pageId: page.id, httpStatus: verification.httpStatus, apps: verification.apps.map((a) => a.id) },
+          "facebook.page.subscription_not_confirmed"
+        );
+      }
+    } catch (err) {
+      subscription = { attempted: true, subscribed: false, appId: env.META_APP_ID ?? null, error: err instanceof Error ? err.message : "unknown" };
+      log.warn({ workspaceId: auth!.workspaceId, pageId: page.id, error: subscription.error }, "facebook.page.subscription_failed");
+    }
+
     await recordAudit(prisma, {
       workspaceId: auth!.workspaceId,
       userId: auth!.userId,
       action: "facebook.page.connected",
       entityType: "Channel",
       entityId: channel.id,
-      metadata: { pageId: page.id, pageName: page.name },
+      metadata: { pageId: page.id, pageName: page.name, pageSubscribed: subscription.subscribed },
     });
     log.info({ workspaceId: auth!.workspaceId }, "facebook.page.connected");
 
@@ -99,6 +132,8 @@ export const POST = createHandler(
         pageId: page.id,
         pageName: page.name,
         status: channel.status,
+        pageSubscribed: subscription.subscribed,
+        subscription,
       },
       201
     );
