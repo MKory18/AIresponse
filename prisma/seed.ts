@@ -1,5 +1,5 @@
-﻿import { prisma } from "@/core/db/prisma";
-import { hashPassword } from "@/modules/auth/password";
+﻿import { prisma } from "../src/core/db/prisma";
+import { hashPassword } from "../src/modules/auth/password";
 
 const DEMO_EMAIL = "admin@demo.local";
 const DEMO_PASSWORD = "Demo#2026!";
