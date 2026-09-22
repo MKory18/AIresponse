@@ -68,7 +68,9 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
     redirect_uri: redirectUri,
     state,
     response_type: "code",
-    scope: "pages_show_list,pages_messaging,pages_manage_metadata",
+    // pages_read_engagement: required by GET /{page-id} (connection smoke test);
+    // without it Graph returns error #100 "Page Public Content Access".
+    scope: "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement",
   });
   return `https://www.facebook.com/${process.env.META_GRAPH_VERSION ?? "v21.0"}/dialog/oauth?${params}`;
 }
