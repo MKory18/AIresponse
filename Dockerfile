@@ -35,6 +35,9 @@ COPY --from=builder /app/prisma ./prisma
 # src is required at runtime only by prisma/seed.ts (npm run db:seed),
 # which tsx executes from source (no tsconfig path aliases used).
 COPY --from=builder /app/src ./src
+# scripts/worker.ts is the background-job consumer (npm run worker) for the
+# separate worker container; tsx runs it from source.
+COPY --from=builder /app/scripts ./scripts
 
 USER nextjs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

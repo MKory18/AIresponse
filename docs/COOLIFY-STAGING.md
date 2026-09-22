@@ -95,6 +95,10 @@ In Coolify, add a **second service** from the same Dockerfile (same app resource
 - Start command override: `npx prisma migrate deploy && npm run worker`.
 - No inbound port.
 - `restart: unless-stopped`.
+- **Healthcheck:** the image's `HEALTHCHECK` (wget on port 3000) only applies to the web
+  container. On the worker service, set the health check to **disabled** in Coolify
+  (the worker is a non-HTTP process; its liveness is visible via the
+  `worker_started` / `worker_stopped_cleanly` logs).
 
 The worker must never share the Next.js process — it polls `BackgroundJob` and claims jobs atomically via `lockedAt`/`lockedBy`.
 
