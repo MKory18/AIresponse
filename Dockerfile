@@ -2,25 +2,27 @@
 
 # ── deps ────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS deps
+# openssl3 + libc6-compat: required so Prisma 5.22 detects OpenSSL on musl
+# (prevents the libquery_engine-linux-musl.so.node fallback failure).
+RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 
 # ── build ───────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
+RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# Dummy values so `next build` can load env without real credentials.
-# Runtime secrets are injected via environment/env_file, never baked in.
-ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
-ENV JWT_SECRET="build-time-placeholder-secret-value-000000000000"
-ENV ENCRYPTION_KEY="build-time-placeholder-encryption-key-0000000000"
+# No secrets at build time: all getEnv() calls happen at request time,
+# so `next build` does not need DATABASE_URL / JWT_SECRET / ENCRYPTION_KEY.
 RUN npx prisma generate && npm run build
 
 # ── runtime ─────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
+RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
