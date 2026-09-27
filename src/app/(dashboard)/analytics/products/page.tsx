@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Package, Trophy } from "lucide-react";
+import { formatNumber } from "@/lib/i18n";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Select } from "@/components/ui/input";
+import { SkeletonTable } from "@/components/ui/skeleton";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type ProductRow = {
   productId: string;
@@ -32,44 +38,63 @@ export default function ProductAnalyticsPage() {
   const sorted = [...rows].sort((a, b) => (b[sort] as number) - (a[sort] as number));
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">تحليلات المنتجات</h1>
-        <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-          <option value="units">ترتيب حسب: الكميات</option>
-          <option value="confirmedRevenue">ترتيب حسب: الإيرادات المؤكدة</option>
-          <option value="confirmedOrders">ترتيب حسب: الطلبات المؤكدة</option>
-        </select>
-      </div>
-      <p className="text-xs text-slate-500">آخر 30 يومًا — الأسعار من snapshots الطلبات (وليس سعر المنتج الحالي).</p>
-      {loading && <p className="text-sm text-slate-400">جارٍ التحميل…</p>}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-right text-sm">
-          <thead className="border-b border-slate-100 text-xs text-slate-500">
-            <tr>
-              <th className="p-3">المنتج</th>
-              <th className="p-3">الكميات</th>
-              <th className="p-3">طلبات مؤكدة</th>
-              <th className="p-3">إيرادات مؤكدة</th>
-              <th className="p-3">طلبات مُسلّمة</th>
-              <th className="p-3">إيرادات مُسلّمة</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <tr key={r.productId} className="border-b border-slate-50">
-                <td className="p-3 font-medium">{r.productName}</td>
-                <td className="p-3 tabular-nums">{r.units}</td>
-                <td className="p-3 tabular-nums">{r.confirmedOrders}</td>
-                <td className="p-3 tabular-nums">{r.confirmedRevenue.toLocaleString()}</td>
-                <td className="p-3 tabular-nums">{r.deliveredOrders}</td>
-                <td className="p-3 tabular-nums">{r.deliveredRevenue.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!loading && sorted.length === 0 && <p className="p-10 text-center text-sm text-slate-500">لا توجد بيانات.</p>}
-      </div>
+    <div className="page-wrap">
+      <PageHeader
+        title="تحليلات المنتجات"
+        description="آخر 30 يومًا — الأسعار من snapshots الطلبات (وليس سعر المنتج الحالي)."
+        actions={
+          <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="ترتيب" className="w-56">
+            <option value="units">ترتيب حسب: الكميات</option>
+            <option value="confirmedRevenue">ترتيب حسب: الإيرادات المؤكدة</option>
+            <option value="confirmedOrders">ترتيب حسب: الطلبات المؤكدة</option>
+          </Select>
+        }
+      />
+      {loading && (
+        <GlassCard className="p-4">
+          <SkeletonTable rows={6} />
+        </GlassCard>
+      )}
+      {!loading && sorted.length > 0 && (
+        <GlassCard className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>المنتج</th>
+                  <th>الكميات</th>
+                  <th>طلبات مؤكدة</th>
+                  <th>إيرادات مؤكدة</th>
+                  <th>طلبات مُسلّمة</th>
+                  <th>إيرادات مُسلّمة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((r, i) => (
+                  <tr key={r.productId}>
+                    <td>
+                      <span className="flex items-center gap-2 font-bold">
+                        {i === 0 && <Trophy size={14} className="shrink-0 text-amber-500" />}
+                        {r.productName}
+                      </span>
+                    </td>
+                    <td className="num font-bold">{formatNumber(r.units)}</td>
+                    <td className="num">{formatNumber(r.confirmedOrders)}</td>
+                    <td className="num">{r.confirmedRevenue.toLocaleString()}</td>
+                    <td className="num">{formatNumber(r.deliveredOrders)}</td>
+                    <td className="num">{r.deliveredRevenue.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      )}
+      {!loading && sorted.length === 0 && (
+        <GlassCard>
+          <EmptyState icon={<Package size={28} strokeWidth={1.5} />} title="لا توجد بيانات" description="ستظهر تحليلات المنتجات بعد تسجيل أول الطلبات." />
+        </GlassCard>
+      )}
     </div>
   );
 }

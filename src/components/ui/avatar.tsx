@@ -1,22 +1,24 @@
 import { cn } from "@/lib/cn";
 
-/** Avatar with automatic initial + stable background from the name. */
+/** Avatar with automatic initial + stable gradient background from the name. */
 const PALETTES = [
-  "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
-  "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
-  "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-  "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-  "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
-  "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300",
+  "from-violet-500/90 to-purple-600/90",
+  "from-sky-500/90 to-blue-600/90",
+  "from-emerald-500/90 to-teal-600/90",
+  "from-amber-500/90 to-orange-600/90",
+  "from-rose-500/90 to-pink-600/90",
+  "from-indigo-500/90 to-violet-600/90",
 ];
 
 export function Avatar({
   name,
   size = "md",
+  ring,
   className,
 }: {
   name: string | null | undefined;
   size?: "xs" | "sm" | "md" | "lg";
+  ring?: boolean;
   className?: string;
 }) {
   const display = (name ?? "").trim() || "؟";
@@ -32,9 +34,10 @@ export function Avatar({
     <span
       aria-hidden
       className={cn(
-        "inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold",
+        "inline-flex shrink-0 select-none items-center justify-center rounded-full bg-gradient-to-br font-bold text-white shadow-xs",
         PALETTES[idx],
         sizes[size],
+        ring && "ring-2 ring-white/70 dark:ring-white/10",
         className
       )}
     >

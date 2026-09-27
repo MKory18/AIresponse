@@ -1,11 +1,10 @@
 "use client";
 
-import { MapPin, Package, Phone, Sparkles, UserRound } from "lucide-react";
-import { cn } from "@/lib/cn";
+import { MapPin, Package, Phone, Sparkles } from "lucide-react";
 import { formatNumber, label, t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
-import { Card } from "../ui/card";
+import { GlassCard } from "../ui/card";
 import { EmptyState } from "../ui/empty-state";
 import { CHANNEL_LABELS, type CustomerDetail, type DraftInfo } from "./types";
 
@@ -23,8 +22,8 @@ export function CustomerPanel({
   return (
     <div className="space-y-3 p-4">
       {/* Identity */}
-      <div className="flex flex-col items-center gap-2 border-b border-line pb-4 text-center">
-        <Avatar name={customer.name ?? customer.phone} size="lg" />
+      <div className="glass-subtle flex flex-col items-center gap-2 rounded-2xl px-3 pb-4 pt-5 text-center">
+        <Avatar name={customer.name ?? customer.phone} size="lg" ring />
         <div>
           <p className="text-sm font-bold text-ink">{customer.name ?? "بدون اسم"}</p>
           {customer.phone && (
@@ -32,19 +31,23 @@ export function CustomerPanel({
               {customer.phone}
             </p>
           )}
-          <div className="mt-1.5 flex justify-center">
-            <StatusBadge value={customer.status} />
+          <div className="mt-2 flex justify-center gap-1.5">
+            <StatusBadge value={customer.status} dot />
           </div>
         </div>
       </div>
 
       {/* Contact info */}
-      <div className="space-y-1.5 text-xs">
-        {customer.province && <Row icon={<MapPin size={11} className="shrink-0 text-ink-subtle" />} text={`${t.customer.province}: ${customer.province}`} />}
+      <GlassCard level="glass-subtle" className="space-y-2 p-3.5 text-xs">
+        <p className="section-title">{t.customer.panelTitle}</p>
+        {customer.province && <Row icon={<MapPin size={12} className="shrink-0 text-ink-subtle" />} text={`${t.customer.province}: ${customer.province}`} />}
         {customer.address && <Row text={`${t.customer.address}: ${customer.address}`} />}
+        {customer.conversations.length > 0 && (
+          <Row text={`${t.nav.conversations}: ${formatNumber(customer.conversations.length)} · ${t.customer.lastActivity}: ${timeAgo(customer.conversations[0]?.updatedAt)}`} />
+        )}
         {customer.identities.length > 0 && (
           <div className="pt-1">
-            <p className="mb-1 font-semibold text-ink-muted">{t.customer.identities}</p>
+            <p className="mb-1.5 text-[11px] font-bold text-ink-muted">{t.customer.identities}</p>
             <div className="flex flex-wrap gap-1">
               {customer.identities.map((i) => (
                 <Badge key={i.id} tone="OPEN">
@@ -56,7 +59,7 @@ export function CustomerPanel({
         )}
         {customer.tags.length > 0 && (
           <div className="pt-1">
-            <p className="mb-1 font-semibold text-ink-muted">{t.customer.tags}</p>
+            <p className="mb-1.5 text-[11px] font-bold text-ink-muted">{t.customer.tags}</p>
             <div className="flex flex-wrap gap-1">
               {customer.tags.map((tag) => (
                 <Badge key={tag}>{tag}</Badge>
@@ -64,52 +67,85 @@ export function CustomerPanel({
             </div>
           </div>
         )}
-      </div>
+      </GlassCard>
 
       {/* Orders */}
-      <Card className="p-3">
-        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-ink">
-          <Package size={13} className="text-ink-subtle" /> {t.customer.recentOrders}
+      <GlassCard level="glass-subtle" className="p-3.5">
+        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-ink">
+          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+            <Package size={13} />
+          </span>
+          {t.customer.recentOrders}
         </p>
         {customer.orders.length === 0 ? (
-          <p className="text-[11px] text-ink-subtle">{t.customer.noOrders}</p>
+          <p className="text-[11px] leading-relaxed text-ink-subtle">{t.customer.noOrders}</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1">
             {customer.orders.map((o) => (
-              <div key={o.id} className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="num font-medium text-ink">{o.orderNumber}</span>
+              <div key={o.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-surface-3/70">
+                <span className="num font-bold text-ink">{o.orderNumber}</span>
                 <StatusBadge value={o.status} />
                 <span className="num text-ink-muted">{formatNumber(o.total)}</span>
               </div>
             ))}
           </div>
         )}
-      </Card>
+      </GlassCard>
 
       {/* Order draft */}
       {orderDraft && <OrderDraftCard draft={orderDraft} />}
 
       {/* AI summary */}
-      <Card className="border-violet-200/70 bg-violet-50/60 p-3 dark:border-violet-900 dark:bg-violet-950/40">
-        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
-          <Sparkles aria-hidden className="opacity-70" size={13} /> {t.inbox.aiSummary}
+      <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-500/10 to-violet-500/5 p-3.5 dark:border-violet-400/20">
+        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-violet-700 dark:text-violet-300">
+          <Sparkles aria-hidden size={13} /> {t.inbox.aiSummary}
         </p>
-        <p className="text-[11px] leading-relaxed text-violet-800 dark:text-violet-300">
+        <p className="text-[11px] leading-relaxed text-violet-900/80 dark:text-violet-200/80">
           {customer.aiSummary ?? t.inbox.aiSummaryEmpty}
         </p>
-      </Card>
+      </div>
+
+      {/* Timeline */}
+      {customer.conversations.length > 1 && (
+        <GlassCard level="glass-subtle" className="p-3.5">
+          <p className="mb-2 text-xs font-bold text-ink">النشاط الأخير</p>
+          <ol className="relative space-y-2.5 border-s border-line ps-4">
+            {customer.conversations.slice(0, 5).map((c) => (
+              <li key={c.id} className="text-[11px]">
+                <span aria-hidden className="absolute -start-[5px] mt-1 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-surface-2" />
+                <p className="font-semibold text-ink">{label(c.status)}</p>
+                <p className="text-ink-subtle">{timeAgo(c.updatedAt)}</p>
+              </li>
+            ))}
+          </ol>
+        </GlassCard>
+      )}
     </div>
   );
 }
 
 function OrderDraftCard({ draft }: { draft: DraftInfo }) {
   const complete = draft.missingFields.length === 0;
+  const pct = complete ? 100 : Math.round(((4 - draft.missingFields.length) / 4) * 100);
   return (
-    <Card className={complete ? "border-emerald-200/70 bg-emerald-50/50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30" : "border-amber-200/70 bg-amber-50/50 p-3 dark:border-amber-900 dark:bg-amber-950/30"}>
-      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-ink">
-        <Package size={13} className="text-brand-500" /> {t.inbox.draftTitle}
+    <div className={
+      complete
+        ? "rounded-2xl border border-emerald-500/20 bg-gradient-to-b from-emerald-500/10 to-emerald-500/5 p-3.5 dark:border-emerald-400/20"
+        : "rounded-2xl border border-amber-500/20 bg-gradient-to-b from-amber-500/10 to-amber-500/5 p-3.5 dark:border-amber-400/20"
+    }>
+      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-ink">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+          <Package size={13} />
+        </span>
+        {t.inbox.draftTitle}
         <StatusBadge value={draft.state} />
       </p>
+      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div
+          className={complete ? "h-full rounded-full bg-gradient-to-l from-emerald-400 to-emerald-600 transition-all" : "h-full rounded-full bg-gradient-to-l from-amber-400 to-amber-600 transition-all"}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
       <div className="space-y-1 text-[11px] text-ink-muted">
         {draft.productName && <Row text={`${t.customer.product}: ${draft.productName}`} />}
         {draft.quantity && <Row text={`${t.customer.quantity}: ${formatNumber(draft.quantity)}`} />}
@@ -121,21 +157,21 @@ function OrderDraftCard({ draft }: { draft: DraftInfo }) {
         />
       </div>
       {draft.missingFields.length > 0 ? (
-        <p className="mt-1.5 text-[10px] text-amber-700 dark:text-amber-400">
+        <p className="mt-1.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400">
           {t.inbox.draftMissing}: {draft.missingFields.join("، ")}
         </p>
       ) : (
-        <p className="mt-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">{t.inbox.draftReady}</p>
+        <p className="mt-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400">{t.inbox.draftReady}</p>
       )}
-    </Card>
+    </div>
   );
 }
 
 function Row({ icon, text, ok }: { icon?: React.ReactNode; text: string; ok?: boolean }) {
   return (
-    <p className={ok === false ? "text-amber-700 dark:text-amber-400" : "text-ink-muted"}>
+    <p className={ok === false ? "flex items-center gap-1.5 text-amber-700 dark:text-amber-400" : "flex items-center gap-1.5 text-ink-muted"}>
       {icon}
-      {text}
+      <span className="min-w-0 flex-1 truncate">{text}</span>
     </p>
   );
 }

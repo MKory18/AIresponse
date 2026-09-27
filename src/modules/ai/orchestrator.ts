@@ -23,8 +23,8 @@ import { handleOrderIntent } from "@/modules/orders/intelligence";
 
 const log = childLogger("orchestrator");
 
-const HANDOFF_ACK = "طھظ…ط§ظ…طŒ ط±ط­ ط£ط­ظˆظ‘ظ„ظƒ ط¹ظ„ظ‰ ظ…ظˆط¸ظپ ظ…ظ† ط§ظ„ظپط±ظٹظ‚ ظٹطھظˆط§طµظ„ ظ…ط¹ظƒ ط­ط§ظ„ظ‹ط§ ًںŒ¹";
-const LOW_CONFIDENCE_ACK = "ظ…ط§ ظپظ‡ظ…طھ ظ‚طµط¯ظƒ ط¨ط§ظ„ط¶ط¨ط· ًںŒ¹ ظ…ظ…ظƒظ† طھظˆط¶ط­ظ„ظٹ ط£ظƒط«ط±طں";
+const HANDOFF_ACK = "تمام، رح أحوّلك على موظف من الفريق يتواصل معك حالًا 🌹";
+const LOW_CONFIDENCE_ACK = "ما فهمت قصدك بالضبط 🌹 ممكن توضحلي أكثر؟";
 
 export interface AIExecutionResult {
   status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND";
@@ -44,17 +44,17 @@ export interface OrchestratorDeps {
 }
 
 /**
- * AIOrchestrator.process â€” the central pipeline:
+ * AIOrchestrator.process — the central pipeline:
  *
- * load message â†’ idempotency â†’ load conversation/customer/persona/settings â†’
- * intent+extraction (structured, Zod-validated, retry, heuristic fallback) â†’
- * memory load/save â†’ context (Phase 3 buildAIContext, intent-scoped) â†’
- * deterministic response plan â†’ handoff policy (injection/complaint/low
- * confidence) â†’ generate response (retry) â†’ guardrails (validate/regenerate/
- * fallback) â†’ send as AI sender â†’ citations + usage log.
+ * load message → idempotency → load conversation/customer/persona/settings →
+ * intent+extraction (structured, Zod-validated, retry, heuristic fallback) →
+ * memory load/save → context (Phase 3 buildAIContext, intent-scoped) →
+ * deterministic response plan → handoff policy (injection/complaint/low
+ * confidence) → generate response (retry) → guardrails (validate/regenerate/
+ * fallback) → send as AI sender → citations + usage log.
  *
  * Deterministic guarantees:
- * - Only INBOUND messages are processed (AI outbound never re-enters â€” loop prevention).
+ * - Only INBOUND messages are processed (AI outbound never re-enters — loop prevention).
  * - The same messageId is processed once (idempotency).
  * - A failed provider never fabricates a reply: AI_FAILED + original message preserved.
  */
@@ -68,7 +68,7 @@ export async function processAIMessage(
   },
   deps: OrchestratorDeps = {}
 ): Promise<AIExecutionResult> {
-  // 1. Load message â€” only inbound customer messages drive the AI.
+  // 1. Load message — only inbound customer messages drive the AI.
   const message = await db.message.findUnique({ where: { id: params.messageId } });
   if (!message || message.workspaceId !== params.workspaceId || message.conversationId !== params.conversationId) {
     return { status: "SKIPPED" };
@@ -101,7 +101,7 @@ export async function processAIMessage(
     orderBy: { updatedAt: "desc" },
   });
   const persona: PersonaConfig = {
-    name: personaRow?.name ?? "ط§ظ„ظ…ط³ط§ط¹ط¯",
+    name: personaRow?.name ?? "المساعد",
     language: personaRow?.language ?? "ar",
     dialect: personaRow?.dialect ?? null,
     tone: personaRow?.tone ?? "friendly",
@@ -118,7 +118,7 @@ export async function processAIMessage(
   if (!customer) throw new NotFoundError("Customer");
 
   const provider = deps.provider ?? getAIProvider();
-  const customerText = message.text ?? "[ط±ط³ط§ظ„ط© ظˆط³ط§ط¦ط·]";
+  const customerText = message.text ?? "[رسالة وسائط]";
   const recentMessages = await db.message.findMany({
     where: { conversationId: conversation.id, deletedAt: null },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -132,7 +132,7 @@ export async function processAIMessage(
     customerText,
     recentMessages.reverse().map((m) => ({
       sender: m.senderType,
-      text: m.text ?? "[ظˆط³ط§ط¦ط·]",
+      text: m.text ?? "[وسائط]",
     }))
   );
   const extractionSystem = [
@@ -224,7 +224,7 @@ export async function processAIMessage(
   // 6. Memory (load before context, save curated candidates after).
   const memories = await loadMemory(db, params.workspaceId, customer.id);
 
-  // 7. Context per intent (Phase 3 buildAIContext â€” bounded retrieval).
+  // 7. Context per intent (Phase 3 buildAIContext — bounded retrieval).
   const productId = await resolveProductId(db, params.workspaceId, extraction, customerText);
   const vectorStore = deps.vectorStore ?? getVectorStore();
   const context = await buildAIContext(db, vectorStore, {
@@ -234,7 +234,7 @@ export async function processAIMessage(
     knowledgeLimit: 4,
   });
 
-  // 8. Deterministic response plan (rules, not generation â€” spec آ§17).
+  // 8. Deterministic response plan (rules, not generation — spec §17).
   const plan = buildPlan(extraction, context);
   if (orderResult?.handled && orderResult.action !== "NONE") {
     plan.goal = "complete_order";
@@ -343,8 +343,8 @@ export async function processAIMessage(
 
   const userPrompt = [
     extractionUser,
-    `ط§ظ„ظ†ظٹط©: ${extraction.intent} (ط«ظ‚ط© ${extraction.confidence})`,
-    `ط§ظ„ط®ط·ط©: ${JSON.stringify(plan)}`,
+    `النية: ${extraction.intent} (ثقة ${extraction.confidence})`,
+    `الخطة: ${JSON.stringify(plan)}`,
     responseInstruction(persona),
   ].join("\n\n");
 
@@ -391,7 +391,7 @@ export async function processAIMessage(
       log.warn({ violations }, "guardrail_violation_regen");
       // One corrective regeneration, then deterministic fallback.
       const retry = await provider.generateText({
-        system: `${system}\n\nط±ط¯ظƒ ط§ظ„ط³ط§ط¨ظ‚ ط±ظڈظپط¶ ظ„ظ„ط£ط³ط¨ط§ط¨ ط§ظ„طھط§ظ„ظٹط©: ${violations.join(", ")}. ط£ط¹ط¯ ظƒطھط§ط¨ط© ط§ظ„ط±ط¯ ظ…ظ„طھط²ظ…ط§ظ‹ طھظ…ط§ظ…ط§ظ‹ ط¨ط§ظ„ظ‚ظˆط§ط¹ط¯.`,
+        system: `${system}\n\nردك السابق رُفض للأسباب التالية: ${violations.join(", ")}. أعد كتابة الرد ملتزماً تماماً بالقواعد.`,
         user: userPrompt,
         model: responseModelCfg.model,
         temperature: 0.2,
@@ -502,18 +502,18 @@ export async function processAIMessage(
   };
 }
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function resolveProductId(db: Db, workspaceId: string, extraction: ExtractionResult, customerText = ""): Promise<string | null> {
   const candidates: string[] = [];
   if (extraction.entities.product) candidates.push(extraction.entities.product);
   // Context-based fallback: match product names against words in the message
-  // ("ط¨ط¯ظٹ 3" after a product mention resolves via this path).
-  for (const word of customerText.split(/[\sطŒ,.!طں?]+/)) {
+  // ("بدي 3" after a product mention resolves via this path).
+  for (const word of customerText.split(/[\s،,.!؟?]+/)) {
     if (word.length >= 3) candidates.push(word);
   }
   for (const name of candidates) {
-    const cleaned = name.replace(/^(ط§ظ„|ط§ظ„ظ€)/, "");
+    const cleaned = name.replace(/^(ال|الـ)/, "");
     const product = await db.product.findFirst({
       where: {
         workspaceId,
@@ -557,7 +557,7 @@ function buildPlan(extraction: ExtractionResult, context: Awaited<ReturnType<typ
     goal: goalMap[extraction.intent] ?? "clarify",
     needsClarification,
     missingFields: extraction.missingFields,
-    sendMedia: /ط´ظƒظ„|طµظˆط±ط©|طµظˆط±|ظƒظٹظپ ظٹط¨ط¯ظˆ/.test(JSON.stringify(extraction.entities)),
+    sendMedia: /شكل|صورة|صور|كيف يبدو/.test(JSON.stringify(extraction.entities)),
     useFeedback: extraction.intent === "FEEDBACK_REQUEST",
     knowledgeSources: ["product", "faq", "policy"],
   };

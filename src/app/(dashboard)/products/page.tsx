@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ImagePlus, Package, Plus, Search } from "lucide-react";
+import { label, t } from "@/lib/i18n";
+import { StatusBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Field, Input, Select } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog } from "@/components/ui/dialog";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type Product = {
   id: string;
@@ -16,8 +25,6 @@ type Product = {
   isArchived: boolean;
   mediaLinks: { mediaAsset: { url: string; type: string } }[];
 };
-
-const input = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500";
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -45,8 +52,8 @@ export default function ProductsPage() {
 
   useEffect(() => {
     setLoading(true);
-    const t = setTimeout(() => load().finally(() => setLoading(false)), q ? 300 : 0);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => load().finally(() => setLoading(false)), q ? 300 : 0);
+    return () => clearTimeout(timer);
   }, [load, q]);
 
   async function createProduct(e: React.FormEvent<HTMLFormElement>) {
@@ -96,89 +103,127 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-bold">المنتجات</h1>
-        <button
-          onClick={() => setShowCreate((s) => !s)}
-          className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
-        >
-          {showCreate ? "إغلاق" : "+ منتج جديد"}
-        </button>
-      </div>
+    <div className="page-wrap">
+      <PageHeader
+        title={t.pages.productsTitle}
+        description={t.pages.productsDesc}
+        actions={
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            <Plus size={15} /> منتج جديد
+          </Button>
+        }
+      />
 
-      {showCreate && (
-        <form ref={formRef} onSubmit={createProduct} className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-3">
-          <input name="name" required placeholder="اسم المنتج" className={input} />
-          <input name="sku" required placeholder="SKU" dir="ltr" className={input} />
-          <input name="price" required type="number" step="0.01" min="0" placeholder="السعر" className={input} />
-          <input name="currency" defaultValue="USD" placeholder="العملة" dir="ltr" className={input} />
-          <input name="category" placeholder="التصنيف" className={input} />
-          <input name="shortDescription" placeholder="وصف قصير" className={input} />
-          <button
-            type="submit"
-            disabled={creating}
-            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50 md:col-span-3"
-          >
-            {creating ? "جارٍ الإنشاء..." : "إنشاء المنتج"}
-          </button>
-        </form>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث بالاسم أو SKU أو الوسم…" className={`${input} max-w-xs`} />
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={`${input} max-w-40`}>
+      <GlassCard level="glass-subtle" className="flex flex-wrap items-center gap-2 p-3">
+        <div className="relative min-w-52 flex-1">
+          <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث بالاسم أو SKU أو الوسم…" aria-label={t.common.search} className="ps-9" />
+        </div>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t.common.status} className="w-40">
           <option value="active">النشطة</option>
           <option value="inactive">غير النشطة</option>
           <option value="archived">المؤرشفة</option>
           <option value="all">الكل</option>
-        </select>
-      </div>
+        </Select>
+      </GlassCard>
 
-      {loading && <p className="text-sm text-slate-400">جارٍ التحميل…</p>}
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {products.map((p) => {
-          const primary = p.mediaLinks[0]?.mediaAsset;
-          return (
-            <div key={p.id} className="flex flex-col rounded-xl border border-slate-200 bg-white p-4">
-              {primary?.type === "IMAGE" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={primary.url} alt={p.name} className="mb-3 h-36 w-full rounded-lg object-cover" />
-              ) : (
-                <div className="mb-3 flex h-36 w-full items-center justify-center rounded-lg bg-slate-100 text-slate-400">لا توجد صورة</div>
-              )}
-              <Link href={`/products/${p.id}`} className="text-sm font-bold text-slate-800 hover:text-brand-600">
-                {p.name}
-              </Link>
-              <p className="mt-0.5 text-xs text-slate-500" dir="ltr">{p.sku}</p>
-              <div className="mt-2 flex items-center justify-between">
-                <p className="text-sm font-semibold text-brand-600" dir="ltr">
-                  {Number(p.price).toLocaleString()} {p.currency}
-                </p>
-                <span className={`rounded px-1.5 py-0.5 text-[10px] ${p.isArchived ? "bg-slate-100 text-slate-500" : p.isActive ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                  {p.isArchived ? "مؤرشف" : p.isActive ? "نشط" : "غير نشط"}
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                <button onClick={() => toggleActive(p)} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50">
-                  {p.isActive ? "تعطيل" : "تفعيل"}
-                </button>
-                <button onClick={() => toggleArchive(p)} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50">
-                  {p.isArchived ? "استعادة" : "أرشفة"}
-                </button>
-                <Link href={`/products/${p.id}`} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50">
-                  تفاصيل
-                </Link>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {!loading && products.length === 0 && !error && (
-        <p className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">لا توجد منتجات.</p>
+      {error && (
+        <GlassCard className="p-2">
+          <EmptyState title="حدث خطأ" description={error} action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>} />
+        </GlassCard>
       )}
+
+      {loading && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-64 rounded-2xl" />)}
+        </div>
+      )}
+
+      {!loading && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {products.map((p) => {
+            const primary = p.mediaLinks[0]?.mediaAsset;
+            return (
+              <GlassCard key={p.id} className="group flex flex-col overflow-hidden p-0 transition-all duration-200 hover:-translate-y-1 hover:shadow-glass">
+                {primary?.type === "IMAGE" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={primary.url} alt={p.name} className="h-40 w-full object-cover" loading="lazy" />
+                ) : (
+                  <div className="flex h-40 w-full items-center justify-center bg-surface-3/60 text-ink-subtle">
+                    <ImagePlus size={28} strokeWidth={1.5} />
+                  </div>
+                )}
+                <div className="flex flex-1 flex-col p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <Link href={`/products/${p.id}`} className="block truncate text-sm font-bold text-ink transition hover:text-brand-600">
+                        {p.name}
+                      </Link>
+                      <p className="num mt-0.5 text-[11px] text-ink-subtle" dir="ltr">{p.sku}</p>
+                    </div>
+                    <StatusBadge value={p.isArchived ? "CLOSED" : p.isActive ? "IN_STOCK" : "PENDING"} />
+                  </div>
+                  <div className="mt-2.5 flex items-center justify-between">
+                    <p className="num text-base font-bold text-brand-600 dark:text-brand-400" dir="ltr">
+                      {Number(p.price).toLocaleString()} {p.currency}
+                    </p>
+                    <span className="text-[11px] text-ink-subtle">{label(p.stockStatus)}{p.category ? ` · ${p.category}` : ""}</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line/60 pt-3">
+                    <Button size="sm" variant="secondary" onClick={() => toggleActive(p)}>
+                      {p.isActive ? "تعطيل" : "تفعيل"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => toggleArchive(p)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+                      {p.isArchived ? "استعادة" : "أرشفة"}
+                    </Button>
+                    <Link href={`/products/${p.id}`} className="ms-auto inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-semibold text-ink-muted transition hover:bg-surface-3 hover:text-ink">
+                      {t.common.details}
+                    </Link>
+                  </div>
+                </div>
+              </GlassCard>
+            );
+          })}
+        </div>
+      )}
+      {!loading && products.length === 0 && !error && (
+        <GlassCard>
+          <EmptyState
+            icon={<Package size={28} strokeWidth={1.5} />}
+            title="لا توجد منتجات"
+            description="أضف أول منتج لبدء البيع عبر المحادثات."
+            action={<Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> منتج جديد</Button>}
+          />
+        </GlassCard>
+      )}
+
+      <Dialog open={showCreate} onClose={() => setShowCreate(false)} title="منتج جديد">
+        <form ref={formRef} onSubmit={createProduct} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="اسم المنتج" className="sm:col-span-2">
+            <Input name="name" required placeholder="مثال: عسل طبيعي" />
+          </Field>
+          <Field label="SKU">
+            <Input name="sku" required placeholder="HONEY-001" dir="ltr" className="num" />
+          </Field>
+          <Field label="السعر">
+            <Input name="price" required type="number" step="0.01" min="0" placeholder="0.00" dir="ltr" className="num" />
+          </Field>
+          <Field label="العملة">
+            <Input name="currency" defaultValue="USD" dir="ltr" className="num" />
+          </Field>
+          <Field label="التصنيف">
+            <Input name="category" placeholder="اختياري" />
+          </Field>
+          <Field label="وصف قصير" className="sm:col-span-2">
+            <Input name="shortDescription" placeholder="اختياري" />
+          </Field>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            <Button type="button" variant="ghost" onClick={() => setShowCreate(false)}>{t.common.cancel}</Button>
+            <Button type="submit" loading={creating}>{creating ? "جارٍ الإنشاء…" : "إنشاء المنتج"}</Button>
+          </div>
+        </form>
+      </Dialog>
+
     </div>
   );
 }

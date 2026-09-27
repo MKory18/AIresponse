@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeftRight, Bot, MessagesSquare, Receipt, TrendingUp, Users, Workflow, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Bot, Hand, MessagesSquare, Receipt, Sparkles, TrendingUp, Users, Workflow } from "lucide-react";
 import { formatNumber, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { GlassCard } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
@@ -27,20 +27,43 @@ const RANGES: [string, string][] = [
 
 function Section({ title, icon, link, children }: { title: string; icon: React.ReactNode; link?: string; children: React.ReactNode }) {
   return (
-    <Card>
-      <div className="mb-3 flex items-center justify-between border-b border-line px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-          {icon}
+    <GlassCard>
+      <div className="mb-1 flex items-center justify-between px-4 py-3">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+            {icon}
+          </span>
           {title}
         </h2>
         {link && (
-          <Link href={link} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
-            {t.common.details} ←
+          <Link href={link} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 transition hover:gap-2 dark:text-brand-400">
+            {t.common.details}
+            <ArrowLeft size={13} />
           </Link>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">{children}</div>
-    </Card>
+      <div className="grid grid-cols-2 gap-3 px-4 pb-4 md:grid-cols-4">{children}</div>
+    </GlassCard>
+  );
+}
+
+function MiniStat({ label, value, tone }: { label: string; value: string | number; tone?: "brand" | "emerald" | "amber" | "sky" | "red" | "violet" }) {
+  const tones: Record<string, string> = {
+    brand: "text-brand-600 dark:text-brand-300",
+    emerald: "text-emerald-600 dark:text-emerald-300",
+    amber: "text-amber-600 dark:text-amber-300",
+    sky: "text-sky-600 dark:text-sky-300",
+    red: "text-red-600 dark:text-red-300",
+    violet: "text-violet-600 dark:text-violet-300",
+  };
+  return (
+    <div className="glass-subtle rounded-xl px-3.5 py-3 transition-all duration-200 hover:-translate-y-0.5">
+      <p className="num text-lg font-bold leading-6 text-ink">{value}</p>
+      <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-ink-muted">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${(tones[tone ?? "brand"])}`} aria-hidden />
+        {label}
+      </p>
+    </div>
   );
 }
 
@@ -74,38 +97,55 @@ export default function DashboardPage() {
       : null;
 
   return (
-    <div className="space-y-5 p-4 lg:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-ink">{t.dashboard.greeting} 👋</h1>
-          <p className="mt-0.5 text-xs text-ink-muted">نظرة سريعة على أداء متجرك خلال الفترة المحددة.</p>
-        </div>
-        <div className="flex gap-2">
-          <Select value={range} onChange={(e) => setRange(e.target.value)} aria-label="الفترة الزمنية">
-            {RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </Select>
-          <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="المنطقة الزمنية">
-            {["UTC", "Asia/Damascus", "Asia/Riyadh", "Asia/Dubai", "Africa/Cairo"].map((tz) => (
-              <option key={tz} value={tz}>{tz}</option>
-            ))}
-          </Select>
+    <div className="page-wrap">
+      {/* Hero */}
+      <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 sm:px-6">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -start-20 -top-24 h-64 w-64 rounded-full bg-brand-500/15 blur-3xl dark:bg-brand-500/20"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-28 end-10 h-56 w-56 rounded-full bg-violet-500/10 blur-3xl"
+        />
+        <div className="relative flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-bold text-brand-700 dark:text-brand-300">
+              <Sparkles size={12} />
+              {t.app.tagline}
+            </p>
+            <h1 className="mt-2 text-xl font-bold leading-8 text-ink">{t.dashboard.greeting}</h1>
+            <p className="mt-1 text-[13px] text-ink-muted">{t.dashboard.welcomeBack}</p>
+          </div>
+          <div className="flex gap-2">
+            <Select value={range} onChange={(e) => setRange(e.target.value)} aria-label="الفترة الزمنية" className="w-auto">
+              {RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Select>
+            <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="المنطقة الزمنية" className="w-auto">
+              {["UTC", "Asia/Damascus", "Asia/Riyadh", "Asia/Dubai", "Africa/Cairo"].map((tz) => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </Select>
+          </div>
         </div>
       </div>
 
       {error && (
-        <EmptyState
-          title="تعذّر تحميل البيانات"
-          description={error}
-          action={<Button size="sm" variant="secondary" onClick={load}>إعادة المحاولة</Button>}
-        />
+        <GlassCard className="p-2">
+          <EmptyState
+            title="تعذّر تحميل البيانات"
+            description={error}
+            action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>}
+          />
+        </GlassCard>
       )}
 
       {loading && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
           </div>
-          <Skeleton className="h-40" />
+          <Skeleton className="h-44 rounded-2xl" />
         </div>
       )}
 
@@ -113,47 +153,49 @@ export default function DashboardPage() {
         <div className="space-y-4">
           {/* Top KPIs */}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            <StatCard label={t.dashboard.conversations} value={formatNumber(data.conversations.total)} icon={<MessagesSquare size={18} />} />
-            <StatCard label={t.dashboard.orders} value={formatNumber(data.orders.created)} icon={<Receipt size={18} />} />
-            <StatCard label={t.dashboard.customers} value={formatNumber(data.conversations.total)} icon={<Users size={18} />} />
+            <StatCard label={t.dashboard.conversations} value={formatNumber(data.conversations.total)} tone="brand" icon={<MessagesSquare size={18} />} />
+            <StatCard label={t.dashboard.orders} value={formatNumber(data.orders.created)} tone="sky" icon={<Receipt size={18} />} />
+            <StatCard label={t.dashboard.customers} value={formatNumber(data.conversations.total)} tone="violet" icon={<Users size={18} />} />
             <StatCard label={t.dashboard.conversion} value={conversion === null ? "—" : `${conversion}%`} tone="emerald" icon={<TrendingUp size={18} />} />
-            <StatCard label={t.dashboard.aiMessages} value={formatNumber(data.ai.calls)} tone="violet" icon={<Sparkles size={18} />} />
-            <StatCard label={t.dashboard.needsHuman} value={formatNumber(data.handoffs.open)} tone="amber" icon={<ArrowLeftRight size={18} />} />
+            <StatCard label={t.dashboard.aiMessages} value={formatNumber(data.ai.calls)} tone="violet" icon={<Bot size={18} />} />
+            <StatCard label={t.dashboard.needsHuman} value={formatNumber(data.handoffs.open)} tone="amber" icon={<Hand size={18} />} />
           </div>
 
-          <Section title="المبيعات" icon={<Receipt size={14} className="text-ink-subtle" />}>
-            <StatCard label="طلبات مؤكدة" value={formatNumber(data.orders.confirmed)} tone="emerald" />
-            <StatCard label="طلبات مُسلَّمة" value={formatNumber(data.orders.delivered)} tone="emerald" />
-            <StatCard label="إيرادات مؤكدة" value={formatNumber(data.revenue.confirmed)} />
-            <StatCard label="إيرادات مُسلَّمة" value={formatNumber(data.revenue.delivered)} />
+          <Section title="المبيعات" icon={<Receipt size={15} />} link="/orders">
+            <MiniStat label="طلبات مؤكدة" value={formatNumber(data.orders.confirmed)} tone="emerald" />
+            <MiniStat label="طلبات مُسلَّمة" value={formatNumber(data.orders.delivered)} tone="emerald" />
+            <MiniStat label="إيرادات مؤكدة" value={formatNumber(data.revenue.confirmed)} tone="brand" />
+            <MiniStat label="إيرادات مُسلَّمة" value={formatNumber(data.revenue.delivered)} tone="sky" />
           </Section>
 
-          <Section title="المحادثات" icon={<MessagesSquare size={14} className="text-ink-subtle" />} link="/conversations">
-            <StatCard label="محادثات جديدة" value={formatNumber(data.conversations.total)} />
-            <StatCard label="نشطة" value={formatNumber(data.conversations.active)} tone="sky" />
-            <StatCard label="رسائل واردة" value={formatNumber(data.messages.inbound)} />
-            <StatCard label="رسائل صادرة" value={formatNumber(data.messages.outbound)} />
+          <Section title="المحادثات" icon={<MessagesSquare size={15} />} link="/conversations">
+            <MiniStat label="محادثات جديدة" value={formatNumber(data.conversations.total)} tone="brand" />
+            <MiniStat label="نشطة" value={formatNumber(data.conversations.active)} tone="sky" />
+            <MiniStat label="رسائل واردة" value={formatNumber(data.messages.inbound)} tone="violet" />
+            <MiniStat label="رسائل صادرة" value={formatNumber(data.messages.outbound)} tone="emerald" />
           </Section>
 
-          <Section title="الذكاء الاصطناعي" icon={<Bot size={14} className="text-ink-subtle" />} link="/ai/playground">
-            <StatCard label="استدعاءات AI" value={formatNumber(data.ai.calls)} tone="violet" />
-            <StatCard label="استدعاءات فاشلة" value={formatNumber(data.ai.failed)} tone="red" />
-            <StatCard label="Tokens" value={formatNumber(data.ai.tokens)} />
-            <StatCard label="التكلفة التقديرية" value={formatNumber(data.ai.estimatedCost)} />
+          <Section title="الذكاء الاصطناعي" icon={<Bot size={15} />} link="/ai/playground">
+            <MiniStat label="استدعاءات AI" value={formatNumber(data.ai.calls)} tone="violet" />
+            <MiniStat label="استدعاءات فاشلة" value={formatNumber(data.ai.failed)} tone="red" />
+            <MiniStat label="Tokens" value={formatNumber(data.ai.tokens)} tone="brand" />
+            <MiniStat label="التكلفة التقديرية" value={formatNumber(data.ai.estimatedCost)} tone="amber" />
           </Section>
 
-          <Section title="الدعم البشري" icon={<ArrowLeftRight size={14} className="text-ink-subtle" />} link="/handoffs">
-            <StatCard label="تحويلات مفتوحة" value={formatNumber(data.handoffs.open)} tone="amber" />
-            <StatCard label="إجمالي التحويلات" value={formatNumber(data.handoffs.total)} />
-            <StatCard label="متوسط زمن الحل (دقيقة)" value={formatNumber(data.handoffs.avgResolutionMinutes)} />
-          </Section>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Section title="الدعم البشري" icon={<ArrowLeftRight size={15} />} link="/handoffs">
+              <MiniStat label="تحويلات مفتوحة" value={formatNumber(data.handoffs.open)} tone="amber" />
+              <MiniStat label="إجمالي التحويلات" value={formatNumber(data.handoffs.total)} tone="brand" />
+              <MiniStat label="متوسط زمن الحل (دقيقة)" value={formatNumber(data.handoffs.avgResolutionMinutes)} tone="sky" />
+            </Section>
 
-          <Section title="الأتمتة" icon={<Workflow size={14} className="text-ink-subtle" />} link="/automation">
-            <StatCard label="تنفيذات" value={formatNumber(data.automation.executions)} />
-            <StatCard label="ناجحة" value={formatNumber(data.automation.completed)} tone="emerald" />
-            <StatCard label="فاشلة" value={formatNumber(data.automation.failed)} tone="red" />
-            <StatCard label="متجاوزة" value={formatNumber(data.automation.skipped)} />
-          </Section>
+            <Section title="الأتمتة" icon={<Workflow size={15} />} link="/automation">
+              <MiniStat label="تنفيذات" value={formatNumber(data.automation.executions)} tone="brand" />
+              <MiniStat label="ناجحة" value={formatNumber(data.automation.completed)} tone="emerald" />
+              <MiniStat label="فاشلة" value={formatNumber(data.automation.failed)} tone="red" />
+              <MiniStat label="متجاوزة" value={formatNumber(data.automation.skipped)} tone="amber" />
+            </Section>
+          </div>
         </div>
       )}
     </div>

@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ArrowRight, BadgeDollarSign, FileText, Images, Package, Star } from "lucide-react";
+import { label } from "@/lib/i18n";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Field, Input, Textarea } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { GlassCard, PageHeader } from "@/components/ui/card";
+import { Tabs } from "@/components/ui/tabs";
 
 type MediaAsset = { id: string; url: string; type: string; title: string | null; category: string };
 type Faq = { id: string; question: string; answer: string; isActive: boolean };
@@ -31,7 +41,13 @@ type ProductDetail = {
   faqs: Faq[];
 };
 
-const input = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500";
+const TABS = [
+  { key: "overview", label: "نظرة عامة" },
+  { key: "pricing", label: "التسعير" },
+  { key: "content", label: "المحتوى البيعي" },
+  { key: "media", label: "الوسائط" },
+  { key: "faqs", label: "الأسئلة الشائعة" },
+];
 
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
@@ -41,6 +57,7 @@ export default function ProductDetailPage() {
   const [saved, setSaved] = useState(false);
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [newFaq, setNewFaq] = useState({ question: "", answer: "" });
+  const [tab, setTab] = useState("overview");
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/products/${params.id}`);
@@ -135,146 +152,261 @@ export default function ProductDetailPage() {
     load();
   }
 
-  if (error && !product) return <p className="text-sm text-red-600">{error}</p>;
-  if (!product) return <p className="text-sm text-slate-400">جارٍ التحميل…</p>;
+  if (error && !product) {
+    return (
+      <div className="page-wrap">
+        <GlassCard className="p-2">
+          <EmptyState
+            icon={<Package size={28} strokeWidth={1.5} />}
+            title="المنتج غير موجود"
+            description={error}
+            action={<Link href="/products"><Button size="sm" variant="secondary">العودة للمنتجات</Button></Link>}
+          />
+        </GlassCard>
+      </div>
+    );
+  }
+  if (!product) {
+    return (
+      <div className="page-wrap space-y-3">
+        <Skeleton className="h-20 rounded-2xl" />
+        <Skeleton className="h-72 rounded-2xl" />
+      </div>
+    );
+  }
 
   const attachedIds = new Set(product.mediaLinks.map((l) => l.mediaAsset.id));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold">{product.name}</h1>
-          <p className="text-xs text-slate-500" dir="ltr">{product.sku} · {product.stockStatus}</p>
-        </div>
-        {saved && <span className="rounded-lg bg-emerald-50 px-3 py-1 text-xs text-emerald-700">تم الحفظ ✓</span>}
-      </div>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+    <div className="page-wrap">
+      <PageHeader
+        title={product.name}
+        description={`${product.sku} · ${label(product.stockStatus)}`}
+        actions={
+          <>
+            <Link href="/products" className="inline-flex h-9 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold text-ink-muted transition hover:bg-surface-3 hover:text-ink">
+              <ArrowRight size={14} />
+              المنتجات
+            </Link>
+            {saved && <Badge tone="DELIVERED" dot>تم الحفظ</Badge>}
+          </>
+        }
+      />
+      {error && (
+        <GlassCard level="glass-subtle" className="border-red-500/20 px-4 py-2.5 text-sm text-red-600 dark:text-red-400">{error}</GlassCard>
+      )}
+
+      <Tabs items={TABS} activeKey={tab} onSelect={setTab} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* Overview */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            patchSection("overview", e.currentTarget);
-          }}
-          className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"
-        >
-          <h2 className="text-sm font-bold text-slate-700">نظرة عامة</h2>
-          <input name="name" defaultValue={product.name} className={input} />
-          <input name="sku" defaultValue={product.sku} dir="ltr" className={input} />
-          <input name="shortDescription" defaultValue={product.shortDescription ?? ""} placeholder="وصف قصير" className={input} />
-          <textarea name="description" defaultValue={product.description ?? ""} placeholder="الوصف الكامل" rows={4} className={input} />
-          <input name="category" defaultValue={product.category ?? ""} placeholder="التصنيف" className={input} />
-          <textarea name="tags" defaultValue={product.tags.join("\n")} placeholder="الوسوم (سطر لكل وسم)" rows={2} className={input} />
-          <button disabled={saving} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:opacity-50">حفظ</button>
-        </form>
+        {tab === "overview" && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              patchSection("overview", e.currentTarget);
+            }}
+            className="space-y-3 xl:col-span-2"
+          >
+            <GlassCard className="grid grid-cols-1 gap-3 p-4 sm:p-5 md:grid-cols-2">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-ink md:col-span-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+                  <Package size={15} />
+                </span>
+                نظرة عامة
+              </h2>
+              <Field label="الاسم">
+                <Input name="name" defaultValue={product.name} />
+              </Field>
+              <Field label="SKU">
+                <Input name="sku" defaultValue={product.sku} dir="ltr" className="num" />
+              </Field>
+              <Field label="وصف قصير" className="md:col-span-2">
+                <Input name="shortDescription" defaultValue={product.shortDescription ?? ""} />
+              </Field>
+              <Field label="الوصف الكامل" className="md:col-span-2">
+                <Textarea name="description" defaultValue={product.description ?? ""} rows={4} />
+              </Field>
+              <Field label="التصنيف">
+                <Input name="category" defaultValue={product.category ?? ""} />
+              </Field>
+              <Field label="الوسوم (سطر لكل وسم)">
+                <Textarea name="tags" defaultValue={product.tags.join("\n")} rows={2} />
+              </Field>
+              <div className="flex justify-end md:col-span-2">
+                <Button type="submit" loading={saving} disabled={saving}>حفظ</Button>
+              </div>
+            </GlassCard>
+          </form>
+        )}
 
         {/* Pricing */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            patchSection("pricing", e.currentTarget);
-          }}
-          className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"
-        >
-          <h2 className="text-sm font-bold text-slate-700">التسعير</h2>
-          <label className="block text-xs text-slate-500">السعر (المصدر الوحيد للحقيقة في النظام)</label>
-          <input name="price" type="number" step="0.01" min="0" defaultValue={product.price} dir="ltr" className={input} />
-          <input name="compareAtPrice" type="number" step="0.01" min="0" defaultValue={product.compareAtPrice ?? ""} placeholder="السعر قبل الخصم" dir="ltr" className={input} />
-          <input name="currency" defaultValue={product.currency} dir="ltr" className={input} />
-          {product.variants.length > 0 && (
-            <div>
-              <h3 className="mb-1 text-xs font-semibold text-slate-500">الخيارات</h3>
-              {product.variants.map((v) => (
-                <p key={v.id} className="flex justify-between text-xs text-slate-600" dir="ltr">
-                  <span>{v.name} ({v.sku})</span>
-                  <span>{Number(v.price).toLocaleString()} · {v.stockQty}</span>
-                </p>
-              ))}
-            </div>
-          )}
-          <button disabled={saving} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:opacity-50">حفظ</button>
-        </form>
+        {tab === "pricing" && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              patchSection("pricing", e.currentTarget);
+            }}
+            className="space-y-3 xl:col-span-2"
+          >
+            <GlassCard className="space-y-3 p-4 sm:p-5">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+                  <BadgeDollarSign size={15} />
+                </span>
+                التسعير
+              </h2>
+              <p className="rounded-xl bg-brand-500/10 px-3 py-2 text-xs leading-relaxed text-brand-700 ring-1 ring-inset ring-brand-500/20 dark:text-brand-300">
+                السعر هنا هو المصدر الوحيد للحقيقة في النظام — الذكاء الاصطناعي لا يحدد الأسعار أبدًا.
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <Field label="السعر">
+                  <Input name="price" type="number" step="0.01" min="0" defaultValue={product.price} dir="ltr" className="num" />
+                </Field>
+                <Field label="السعر قبل الخصم">
+                  <Input name="compareAtPrice" type="number" step="0.01" min="0" defaultValue={product.compareAtPrice ?? ""} dir="ltr" className="num" />
+                </Field>
+                <Field label="العملة">
+                  <Input name="currency" defaultValue={product.currency} dir="ltr" className="num" />
+                </Field>
+              </div>
+              {product.variants.length > 0 && (
+                <div>
+                  <h3 className="mb-1.5 text-xs font-bold text-ink-muted">الخيارات</h3>
+                  <div className="space-y-1">
+                    {product.variants.map((v) => (
+                      <p key={v.id} className="glass-subtle flex justify-between rounded-lg px-3 py-1.5 text-xs text-ink-muted" dir="ltr">
+                        <span>{v.name} ({v.sku})</span>
+                        <span className="num">{Number(v.price).toLocaleString()} · {v.stockQty}</span>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Button type="submit" loading={saving} disabled={saving}>حفظ</Button>
+              </div>
+            </GlassCard>
+          </form>
+        )}
 
         {/* Benefits / usage / objections */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            patchSection("content", e.currentTarget);
-          }}
-          className="space-y-3 rounded-xl border border-slate-200 bg-white p-4"
-        >
-          <h2 className="text-sm font-bold text-slate-700">الفوائد والاستخدام والملاحظات</h2>
-          <textarea name="benefits" defaultValue={product.benefits.join("\n")} placeholder="الفوائد (سطر لكل فائدة)" rows={3} className={input} />
-          <textarea name="ingredients" defaultValue={product.ingredients ?? ""} placeholder="المكونات" rows={2} className={input} />
-          <textarea name="usage" defaultValue={product.usage ?? ""} placeholder="طريقة الاستخدام" rows={2} className={input} />
-          <textarea name="warnings" defaultValue={product.warnings ?? ""} placeholder="التحذيرات" rows={2} className={input} />
-          <textarea name="objections" defaultValue={product.objections.join("\n")} placeholder="الاعتراضات الشائعة (سطر لكل اعتراض)" rows={2} className={input} />
-          <textarea name="salesNotes" defaultValue={product.salesNotes ?? ""} placeholder="ملاحظات البيع" rows={2} className={input} />
-          <button disabled={saving} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:opacity-50">حفظ</button>
-        </form>
+        {tab === "content" && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              patchSection("content", e.currentTarget);
+            }}
+            className="space-y-3 xl:col-span-2"
+          >
+            <GlassCard className="grid grid-cols-1 gap-3 p-4 sm:p-5 md:grid-cols-2">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-ink md:col-span-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300">
+                  <FileText size={15} />
+                </span>
+                الفوائد والاستخدام والملاحظات
+              </h2>
+              <Field label="الفوائد (سطر لكل فائدة)">
+                <Textarea name="benefits" defaultValue={product.benefits.join("\n")} rows={3} />
+              </Field>
+              <Field label="المكونات">
+                <Textarea name="ingredients" defaultValue={product.ingredients ?? ""} rows={3} />
+              </Field>
+              <Field label="طريقة الاستخدام">
+                <Textarea name="usage" defaultValue={product.usage ?? ""} rows={2} />
+              </Field>
+              <Field label="التحذيرات">
+                <Textarea name="warnings" defaultValue={product.warnings ?? ""} rows={2} />
+              </Field>
+              <Field label="الاعتراضات الشائعة (سطر لكل اعتراض)">
+                <Textarea name="objections" defaultValue={product.objections.join("\n")} rows={2} />
+              </Field>
+              <Field label="ملاحظات البيع">
+                <Textarea name="salesNotes" defaultValue={product.salesNotes ?? ""} rows={2} />
+              </Field>
+              <div className="flex justify-end md:col-span-2">
+                <Button type="submit" loading={saving} disabled={saving}>حفظ</Button>
+              </div>
+            </GlassCard>
+          </form>
+        )}
 
         {/* Media */}
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-bold text-slate-700">وسائط المنتج</h2>
-          <div className="grid grid-cols-3 gap-2">
-            {product.mediaLinks.map((link) => (
-              <div key={link.mediaAsset.id} className="space-y-1 rounded-lg border border-slate-200 p-1.5 text-center">
-                {link.mediaAsset.type === "IMAGE" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={link.mediaAsset.url} alt="" className="h-20 w-full rounded object-cover" />
-                ) : (
-                  <div className="flex h-20 items-center justify-center rounded bg-slate-100 text-xs">{link.mediaAsset.type}</div>
-                )}
-                {link.isPrimary && <span className="block text-[10px] text-brand-600">رئيسية ★</span>}
-                <div className="flex justify-center gap-1">
-                  {!link.isPrimary && (
-                    <button onClick={() => setPrimary(link.mediaAsset.id)} className="rounded border border-slate-300 px-1.5 text-[10px] hover:bg-slate-50">رئيسية</button>
-                  )}
-                  <button onClick={() => detachMedia(link.mediaAsset.id)} className="rounded border border-red-200 px-1.5 text-[10px] text-red-600 hover:bg-red-50">إزالة</button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <details>
-            <summary className="cursor-pointer text-xs text-slate-500">ربط وسائط موجودة من المكتبة</summary>
-            <div className="mt-2 grid max-h-52 grid-cols-3 gap-2 overflow-y-auto">
-              {mediaAssets.filter((m) => !attachedIds.has(m.id)).map((m) => (
-                <button key={m.id} onClick={() => attachMedia(m.id)} className="rounded border border-slate-200 p-1 text-[10px] hover:border-brand-500">
-                  {m.type === "IMAGE" ? (
+        {tab === "media" && (
+          <GlassCard className="space-y-3 p-4 sm:p-5 xl:col-span-2">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+                <Images size={15} />
+              </span>
+              وسائط المنتج
+            </h2>
+            <div className="grid grid-cols-3 gap-2">
+              {product.mediaLinks.map((link) => (
+                <div key={link.mediaAsset.id} className="glass-subtle space-y-1.5 rounded-xl p-1.5 text-center">
+                  {link.mediaAsset.type === "IMAGE" ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={m.url} alt="" className="h-16 w-full rounded object-cover" />
+                    <img src={link.mediaAsset.url} alt="" className="h-20 w-full rounded-lg object-cover" loading="lazy" />
                   ) : (
-                    <span>{m.type}</span>
+                    <div className="flex h-20 items-center justify-center rounded-lg bg-surface-3 text-xs font-semibold text-ink-subtle">{link.mediaAsset.type}</div>
                   )}
-                  <span className="mt-1 block truncate">{m.title ?? m.id}</span>
-                </button>
+                  {link.isPrimary && (
+                    <Badge tone="NEW" className="mx-auto">
+                      <Star size={9} fill="currentColor" />
+                      رئيسية
+                    </Badge>
+                  )}
+                  <div className="flex justify-center gap-1">
+                    {!link.isPrimary && (
+                      <Button size="sm" variant="secondary" onClick={() => setPrimary(link.mediaAsset.id)}>رئيسية</Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => detachMedia(link.mediaAsset.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">إزالة</Button>
+                  </div>
+                </div>
               ))}
             </div>
-          </details>
-        </div>
+            <details className="glass-subtle rounded-xl p-3">
+              <summary className="cursor-pointer text-xs font-bold text-ink-muted">ربط وسائط موجودة من المكتبة</summary>
+              <div className="mt-2 grid max-h-52 grid-cols-3 gap-2 overflow-y-auto">
+                {mediaAssets.filter((m) => !attachedIds.has(m.id)).map((m) => (
+                  <button key={m.id} onClick={() => attachMedia(m.id)} className="rounded-xl border border-line p-1 text-[10px] text-ink-muted transition hover:border-brand-400 hover:text-ink">
+                    {m.type === "IMAGE" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.url} alt="" className="h-16 w-full rounded-lg object-cover" loading="lazy" />
+                    ) : (
+                      <span>{m.type}</span>
+                    )}
+                    <span className="mt-1 block truncate">{m.title ?? m.id}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          </GlassCard>
+        )}
 
         {/* FAQs */}
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-bold text-slate-700">أسئلة شائعة (بيانات منظمة — يستخدمها AI مباشرة)</h2>
-          {product.faqs.map((f) => (
-            <div key={f.id} className="flex items-start justify-between gap-2 rounded-lg bg-slate-50 p-2">
-              <div>
-                <p className="text-xs font-semibold">{f.question}</p>
-                <p className="text-xs text-slate-500">{f.answer}</p>
+        {tab === "faqs" && (
+          <GlassCard className="space-y-3 p-4 sm:p-5 xl:col-span-2">
+            <h2 className="text-sm font-bold text-ink">أسئلة شائعة (بيانات منظمة — يستخدمها AI مباشرة)</h2>
+            {product.faqs.map((f) => (
+              <div key={f.id} className="glass-subtle flex items-start justify-between gap-2 rounded-xl p-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-ink">{f.question}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{f.answer}</p>
+                </div>
+                <button onClick={() => toggleFaq(f)} className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset transition ${f.isActive ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300" : "bg-slate-500/10 text-slate-500 ring-slate-500/20"}`}>
+                  {f.isActive ? "نشط" : "معطل"}
+                </button>
               </div>
-              <button onClick={() => toggleFaq(f)} className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${f.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                {f.isActive ? "نشط" : "معطل"}
-              </button>
+            ))}
+            <div className="grid gap-2 border-t border-line/60 pt-3 sm:grid-cols-2">
+              <Input value={newFaq.question} onChange={(e) => setNewFaq((s) => ({ ...s, question: e.target.value }))} placeholder="السؤال" aria-label="السؤال" />
+              <Input value={newFaq.answer} onChange={(e) => setNewFaq((s) => ({ ...s, answer: e.target.value }))} placeholder="الإجابة" aria-label="الإجابة" />
+              <div className="sm:col-span-2">
+                <Button size="sm" variant="secondary" onClick={addFaq}>+ إضافة سؤال</Button>
+              </div>
             </div>
-          ))}
-          <div className="space-y-2 border-t border-slate-100 pt-2">
-            <input value={newFaq.question} onChange={(e) => setNewFaq((s) => ({ ...s, question: e.target.value }))} placeholder="السؤال" className={input} />
-            <input value={newFaq.answer} onChange={(e) => setNewFaq((s) => ({ ...s, answer: e.target.value }))} placeholder="الإجابة" className={input} />
-            <button onClick={addFaq} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">+ إضافة سؤال</button>
-          </div>
-        </div>
+          </GlassCard>
+        )}
       </div>
     </div>
   );

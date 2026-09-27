@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Bot, Cpu, Timer, Wallet } from "lucide-react";
+import { formatNumber, t } from "@/lib/i18n";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatCard } from "@/components/ui/stat-card";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type AIGroup = { key: string; calls: number; inputTokens: number; outputTokens: number; estimatedCost: number | null };
 type AIAnalytics = {
@@ -18,13 +25,13 @@ type AIAnalytics = {
 function Bar({ label, value, max }: { label: string; value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
-    <div className="mb-2">
-      <p className="mb-1 flex justify-between text-xs text-slate-600">
-        <span>{label}</span>
-        <span className="tabular-nums">{value.toLocaleString()}</span>
+    <div className="mb-2.5 last:mb-0">
+      <p className="mb-1 flex justify-between text-xs">
+        <span className="font-semibold text-ink">{label}</span>
+        <span className="num text-ink-muted">{value.toLocaleString()}</span>
       </p>
-      <div className="h-2 rounded bg-slate-100">
-        <div className="h-2 rounded bg-brand-500" style={{ width: `${pct}%` }} />
+      <div className="h-2 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className="h-full rounded-full bg-gradient-to-l from-brand-400 to-brand-600 transition-all" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -44,52 +51,67 @@ export default function AIAnalyticsPage() {
     load();
   }, [load]);
 
-  if (loading) return <p className="text-sm text-slate-400">جارٍ التحميل…</p>;
-  if (!data) return <p className="text-sm text-red-600">فشل التحميل</p>;
-
-  const maxTaskCalls = Math.max(1, ...data.byTask.map((t) => t.calls));
-
-  return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-bold">استخدام AI</h1>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          ["استدعاءات", data.calls],
-          ["ناجحة", data.successful],
-          ["فاشلة", data.failed],
-          ["متوسط الاستجابة (ms)", data.avgLatencyMs],
-          ["Input tokens", data.inputTokens],
-          ["Output tokens", data.outputTokens],
-        ].map(([label, value]) => (
-          <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs text-slate-500">{label}</p>
-            <p className="mt-1 text-xl font-bold tabular-nums">{value === null ? "—" : Number(value).toLocaleString()}</p>
-          </div>
-        ))}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 md:col-span-2">
-          <p className="text-xs text-slate-500">التكلفة التقديرية</p>
-          <p className="mt-1 text-xl font-bold tabular-nums">
-            {data.estimatedCost === null ? "غير متاحة (لا يوجد pricing مُعدّ)" : `$${data.estimatedCost.toFixed(4)}`}
-          </p>
+  if (loading) {
+    return (
+      <div className="page-wrap">
+        <PageHeader title="استخدام AI" description="آخر 30 يومًا." />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
         </div>
       </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="page-wrap">
+        <PageHeader title="استخدام AI" description="آخر 30 يومًا." />
+        <GlassCard className="p-2">
+          <EmptyState title="فشل التحميل" description="تعذّر تحميل بيانات استخدام AI." action={null} />
+        </GlassCard>
+      </div>
+    );
+  }
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="mb-3 text-sm font-bold text-slate-700">حسب المهمة</h2>
-        {data.byTask.map((t) => <Bar key={t.key} label={t.key} value={t.calls} max={maxTaskCalls} />)}
-        {data.byTask.length === 0 && <p className="text-xs text-slate-400">لا توجد بيانات.</p>}
-      </section>
+  const maxTaskCalls = Math.max(1, ...data.byTask.map((item) => item.calls));
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="mb-3 text-sm font-bold text-slate-700">حسب النموذج</h2>
-        {data.byModel.map((m) => (
-          <div key={m.key} className="mb-2 flex justify-between text-xs text-slate-600" dir="ltr">
-            <span>{m.key}</span>
-            <span>{m.calls} calls · {m.inputTokens + m.outputTokens} tokens</span>
-          </div>
-        ))}
-        {data.byModel.length === 0 && <p className="text-xs text-slate-400">لا توجد بيانات.</p>}
-      </section>
+  return (
+    <div className="page-wrap">
+      <PageHeader title="استخدام AI" description="آخر 30 يومًا — الاستدعاءات والنماذج والتكلفة." />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="استدعاءات" value={formatNumber(data.calls)} tone="violet" icon={<Bot size={18} />} />
+        <StatCard label="ناجحة" value={formatNumber(data.successful)} tone="emerald" />
+        <StatCard label="فاشلة" value={formatNumber(data.failed)} tone="red" />
+        <StatCard label="متوسط الاستجابة" value={data.avgLatencyMs === null ? "—" : `${formatNumber(data.avgLatencyMs)}ms`} tone="sky" icon={<Timer size={18} />} />
+        <StatCard label="Input tokens" value={formatNumber(data.inputTokens)} tone="brand" icon={<Cpu size={18} />} />
+        <StatCard label="Output tokens" value={formatNumber(data.outputTokens)} tone="brand" />
+        <StatCard
+          label="التكلفة التقديرية"
+          value={data.estimatedCost === null ? "غير متاحة" : `$${data.estimatedCost.toFixed(4)}`}
+          hint={data.estimatedCost === null ? "لا يوجد pricing مُعدّ" : undefined}
+          tone="amber"
+          icon={<Wallet size={18} />}
+          className="col-span-2"
+        />
+      </div>
+
+      <GlassCard className="p-4 sm:p-5">
+        <h2 className="mb-3 text-sm font-bold text-ink">حسب المهمة</h2>
+        {data.byTask.map((item) => <Bar key={item.key} label={item.key} value={item.calls} max={maxTaskCalls} />)}
+        {data.byTask.length === 0 && <p className="text-xs text-ink-subtle">{t.common.noData}.</p>}
+      </GlassCard>
+
+      <GlassCard className="p-4 sm:p-5">
+        <h2 className="mb-3 text-sm font-bold text-ink">حسب النموذج</h2>
+        <div className="space-y-1.5">
+          {data.byModel.map((m) => (
+            <div key={m.key} className="glass-subtle flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs">
+              <Badge className="num" dir="ltr">{m.key}</Badge>
+              <span className="num text-ink-muted">{m.calls} calls · {m.inputTokens + m.outputTokens} tokens</span>
+            </div>
+          ))}
+        </div>
+        {data.byModel.length === 0 && <p className="text-xs text-ink-subtle">{t.common.noData}.</p>}
+      </GlassCard>
     </div>
   );
 }

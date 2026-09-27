@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ArrowLeft, History, MapPin, Receipt, UserRound } from "lucide-react";
+import { label } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type OrderDetail = {
   id: string;
@@ -32,8 +40,6 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   OUT_FOR_DELIVERY: ["DELIVERED"],
   DELIVERED: ["RETURNED"],
 };
-
-const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -69,94 +75,138 @@ export default function OrderDetailPage() {
     load();
   }
 
-  if (error && !order) return <p className="text-sm text-red-600">{error}</p>;
-  if (!order) return <p className="text-sm text-slate-400">جارٍ التحميل…</p>;
+  if (error && !order) {
+    return (
+      <div className="page-wrap">
+        <GlassCard className="p-2">
+          <EmptyState title="الطلب غير موجود" description={error} action={<Link href="/orders"><Button size="sm" variant="secondary">العودة للطلبات</Button></Link>} />
+        </GlassCard>
+      </div>
+    );
+  }
+  if (!order) {
+    return (
+      <div className="page-wrap space-y-3">
+        <Skeleton className="h-20 rounded-2xl" />
+        <Skeleton className="h-64 rounded-2xl" />
+      </div>
+    );
+  }
 
   const transitions = ALLOWED_TRANSITIONS[order.status] ?? [];
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold" dir="ltr">{order.orderNumber}</h1>
-          <p className="text-xs text-slate-500">{order.createdAt && new Date(order.createdAt).toLocaleString("ar")}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {transitions.map((t) => (
-            <button
-              key={t}
-              onClick={() => changeStatus(t)}
-              disabled={saving}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
-                t === "CANCELLED" ? "border border-red-300 text-red-600 hover:bg-red-50" : "border border-slate-300 text-slate-700 hover:bg-slate-50"
-              } disabled:opacity-50`}
-            >
-              → {t}
-            </button>
-          ))}
-        </div>
-      </div>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+    <div className="page-wrap">
+      <PageHeader
+        title={`طلب ${order.orderNumber}`}
+        description={order.createdAt ? new Date(order.createdAt).toLocaleString("ar") : undefined}
+        actions={transitions.map((next) => (
+          <Button
+            key={next}
+            size="sm"
+            variant={next === "CANCELLED" ? "danger" : "secondary"}
+            onClick={() => changeStatus(next)}
+            disabled={saving}
+            loading={saving}
+          >
+            <ArrowLeft size={13} />
+            {label(next)}
+          </Button>
+        ))}
+      />
+      {error && (
+        <GlassCard level="glass-subtle" className="border-red-500/20 px-4 py-2.5 text-sm text-red-600 dark:text-red-400">{error}</GlassCard>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="space-y-4 xl:col-span-2">
-          <section className="rounded-xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-bold text-slate-700">البنود</h2>
-            {order.items.map((i) => (
-              <div key={i.id} className="flex items-center justify-between border-b border-slate-50 py-2 text-sm">
-                <div>
-                  <p className="font-medium">{i.productNameSnapshot}</p>
-                  <p className="text-xs text-slate-400" dir="ltr">{i.skuSnapshot}</p>
+          <GlassCard className="p-4 sm:p-5">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+                <Receipt size={15} />
+              </span>
+              البنود
+            </h2>
+            <div className="mt-3 divide-y divide-line/60">
+              {order.items.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-ink">{item.productNameSnapshot}</p>
+                    <p className="num mt-0.5 text-xs text-ink-subtle" dir="ltr">{item.skuSnapshot}</p>
+                  </div>
+                  <div className="num shrink-0 text-end" dir="ltr">
+                    <p className="font-semibold text-ink">{Number(item.unitPrice).toLocaleString()} × {item.quantity}</p>
+                    <p className="text-xs text-ink-muted">{Number(item.subtotal).toLocaleString()} {order.currency}</p>
+                  </div>
                 </div>
-                <div className="text-left" dir="ltr">
-                  <p>{Number(i.unitPrice).toLocaleString()} × {i.quantity}</p>
-                  <p className="text-xs text-slate-500">{Number(i.subtotal).toLocaleString()} {order.currency}</p>
-                </div>
-              </div>
-            ))}
-            <div className="mt-3 space-y-1 text-sm" dir="ltr">
-              <p className="flex justify-between"><span>Subtotal</span><span>{Number(order.subtotal).toLocaleString()}</span></p>
-              <p className="flex justify-between"><span>Discount</span><span>{Number(order.discount).toLocaleString()}</span></p>
-              <p className="flex justify-between"><span>Delivery</span><span>{Number(order.deliveryFee).toLocaleString()}</span></p>
-              <p className="flex justify-between font-bold"><span>Total</span><span>{Number(order.total).toLocaleString()} {order.currency}</span></p>
+              ))}
             </div>
-          </section>
+            <div className="num mt-3 space-y-1.5 rounded-xl bg-surface-3/60 p-3.5 text-sm" dir="ltr">
+              <p className="flex justify-between text-ink-muted"><span>Subtotal</span><span>{Number(order.subtotal).toLocaleString()}</span></p>
+              <p className="flex justify-between text-ink-muted"><span>Discount</span><span>{Number(order.discount).toLocaleString()}</span></p>
+              <p className="flex justify-between text-ink-muted"><span>Delivery</span><span>{Number(order.deliveryFee).toLocaleString()}</span></p>
+              <p className="flex justify-between border-t border-line pt-1.5 text-base font-bold text-ink"><span>Total</span><span>{Number(order.total).toLocaleString()} {order.currency}</span></p>
+            </div>
+          </GlassCard>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-bold text-slate-700">السجل الزمني (Audit)</h2>
-            {order.timeline.map((t) => (
-              <div key={t.id} className="border-b border-slate-50 py-2 text-xs">
-                <p className="font-medium text-slate-700">{t.action}</p>
-                <p className="text-slate-400">{new Date(t.createdAt).toLocaleString("ar")}</p>
-              </div>
-            ))}
-            {order.timeline.length === 0 && <p className="text-xs text-slate-400">لا يوجد سجل.</p>}
-          </section>
+          <GlassCard className="p-4 sm:p-5">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-3 text-ink-muted">
+                <History size={15} />
+              </span>
+              السجل الزمني
+            </h2>
+            {order.timeline.length === 0 && <p className="mt-2 text-xs text-ink-subtle">لا يوجد سجل.</p>}
+            <ol className="relative mt-3 space-y-3 border-s border-line ps-4">
+              {order.timeline.map((entry) => (
+                <li key={entry.id} className="text-xs">
+                  <span aria-hidden className="absolute -start-[5px] mt-1 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-surface-2" />
+                  <p className="font-bold text-ink">{label(entry.action) ?? entry.action}</p>
+                  <p className="mt-0.5 text-ink-subtle">{new Date(entry.createdAt).toLocaleString("ar")}</p>
+                </li>
+              ))}
+            </ol>
+          </GlassCard>
         </div>
 
         <div className="space-y-4">
-          <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-            <h2 className="mb-3 text-sm font-bold text-slate-700">العميل</h2>
-            <p className="font-medium">{order.customer.name ?? "—"}</p>
-            <p className="text-xs text-slate-500" dir="ltr">{order.customer.phone ?? ""}</p>
-          </section>
-          <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-            <h2 className="mb-3 text-sm font-bold text-slate-700">التوصيل</h2>
-            <p className="text-xs text-slate-500">العنوان</p>
-            <p>{order.deliveryAddress ?? "—"}</p>
-            <p className="mt-2 text-xs text-slate-500">المحافظة</p>
-            <p>{order.province ?? "—"}</p>
-          </section>
-          <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs">
-            <h2 className="mb-2 text-sm font-bold text-slate-700">الحالات</h2>
-            <p>Order: {order.status}</p>
-            <p>Confirmation: {order.confirmationStatus}</p>
-            <p>Payment: {order.paymentStatus}</p>
-            <p>Fulfillment: {order.fulfillmentStatus}</p>
-          </section>
+          <GlassCard className="p-4 text-sm">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+                <UserRound size={15} />
+              </span>
+              العميل
+            </h2>
+            <p className="mt-2.5 font-bold text-ink">{order.customer.name ?? "—"}</p>
+            <p className="num mt-0.5 text-xs text-ink-muted" dir="ltr">{order.customer.phone ?? ""}</p>
+          </GlassCard>
+          <GlassCard className="p-4 text-sm">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
+                <MapPin size={15} />
+              </span>
+              التوصيل
+            </h2>
+            <p className="mt-2.5 text-xs text-ink-subtle">العنوان</p>
+            <p className="font-medium text-ink">{order.deliveryAddress ?? "—"}</p>
+            <p className="mt-2 text-xs text-ink-subtle">المحافظة</p>
+            <p className="font-medium text-ink">{order.province ?? "—"}</p>
+            {order.notes && (
+              <>
+                <p className="mt-2 text-xs text-ink-subtle">ملاحظات</p>
+                <p className="font-medium text-ink">{order.notes}</p>
+              </>
+            )}
+          </GlassCard>
+          <GlassCard className="space-y-1.5 p-4 text-xs">
+            <h2 className="mb-1 text-sm font-bold text-ink">الحالات</h2>
+            <p className="flex items-center justify-between text-ink-muted">الطلب <StatusBadge value={order.status} dot /></p>
+            <p className="flex items-center justify-between text-ink-muted">التأكيد <StatusBadge value={order.confirmationStatus} dot /></p>
+            <p className="flex items-center justify-between text-ink-muted">الدفع <StatusBadge value={order.paymentStatus} dot /></p>
+            <p className="flex items-center justify-between text-ink-muted">التنفيذ <StatusBadge value={order.fulfillmentStatus} dot /></p>
+          </GlassCard>
         </div>
       </div>
-      <div className="flex gap-2">{/* reserved: conversation link */}</div>
     </div>
   );
 }

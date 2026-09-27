@@ -1,6 +1,15 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { MessageCircle, Package, Plus, Star } from "lucide-react";
+import { t } from "@/lib/i18n";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog } from "@/components/ui/dialog";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type FeedbackItem = {
   id: string;
@@ -14,8 +23,6 @@ type FeedbackItem = {
   product: { id: string; name: string } | null;
   media: { url: string; type: string } | null;
 };
-
-const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500";
 
 export default function FeedbackPage() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
@@ -52,8 +59,8 @@ export default function FeedbackPage() {
 
   useEffect(() => {
     setLoading(true);
-    const t = setTimeout(() => load().finally(() => setLoading(false)), q ? 300 : 0);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => load().finally(() => setLoading(false)), q ? 300 : 0);
+    return () => clearTimeout(timer);
   }, [load, q]);
 
   async function create(e: React.FormEvent<HTMLFormElement>) {
@@ -100,95 +107,126 @@ export default function FeedbackPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">آراء العملاء والشهادات</h1>
-        <button
-          onClick={() => setShowCreate((s) => !s)}
-          className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
-        >
-          {showCreate ? "إغلاق" : "+ إضافة رأي"}
-        </button>
-      </div>
+    <div className="page-wrap">
+      <PageHeader
+        title={t.pages.feedbackTitle}
+        description={t.pages.feedbackDesc}
+        actions={
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            <Plus size={14} /> إضافة رأي
+          </Button>
+        }
+      />
 
-      {showCreate && (
-        <form onSubmit={create} className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2">
-          <textarea name="content" required placeholder="نص الرأي — يُحفظ كما ورد حرفيًا (لا يُنسب لشخص لم يقله)" rows={3} className={`${input} md:col-span-2`} />
-          <select name="productId" className={input}>
-            <option value="">بدون منتج</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-          <input name="source" placeholder="المصدر (مثال: واتساب — محادثة رقم 12)" className={input} />
-          <input name="rating" type="number" min="1" max="5" placeholder="التقييم (1-5) اختياري" className={input} />
-          <button disabled={creating} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">
-            {creating ? "جارٍ الإضافة…" : "إضافة"}
-          </button>
-        </form>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث في النص…" className={`${input} max-w-xs`} />
-        <select value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)} className={input}>
+      <GlassCard level="glass-subtle" className="flex flex-wrap items-center gap-2 p-3">
+        <div className="min-w-44 flex-1">
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث في النص…" aria-label={t.common.search} />
+        </div>
+        <Select value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)} aria-label="المنتج" className="w-44">
           <option value="">كل المنتجات</option>
           {products.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
-        </select>
-        <select value={filterSentiment} onChange={(e) => setFilterSentiment(e.target.value)} className={input}>
+        </Select>
+        <Select value={filterSentiment} onChange={(e) => setFilterSentiment(e.target.value)} aria-label="المشاعر" className="w-36">
           <option value="">كل المشاعر</option>
           {["positive", "negative", "neutral"].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
-        <select value={approvedFilter} onChange={(e) => setApprovedFilter(e.target.value)} className={input}>
+        </Select>
+        <Select value={approvedFilter} onChange={(e) => setApprovedFilter(e.target.value)} aria-label="الاعتماد" className="w-36">
           <option value="">الكل</option>
           <option value="true">معتمد فقط</option>
           <option value="false">غير معتمد</option>
-        </select>
-      </div>
+        </Select>
+      </GlassCard>
 
-      {loading && <p className="text-sm text-slate-400">جارٍ التحميل…</p>}
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-
-      <div className="space-y-3">
-        {items.map((f) => (
-          <div key={f.id} className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 md:flex-row md:items-start">
-            {f.media?.type === "IMAGE" && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={f.media.url} alt="" className="h-20 w-20 rounded-lg object-cover" />
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className={`rounded px-1.5 py-0.5 ${f.isApproved ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                  {f.isApproved ? "معتمد" : "بانتظار الاعتماد"}
-                </span>
-                {f.sentiment && (
-                  <span className={`rounded px-1.5 py-0.5 ${f.sentiment === "positive" ? "bg-emerald-50 text-emerald-700" : f.sentiment === "negative" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"}`}>
-                    {f.sentiment}
-                  </span>
-                )}
-                {f.rating && <span className="text-amber-500">{"★".repeat(f.rating)}</span>}
-                {f.product && <span className="text-slate-500">📦 {f.product.name}</span>}
-                {f.source && <span className="text-slate-400">· {f.source}</span>}
-              </div>
-              <p className="mt-2 text-sm text-slate-700">{f.content ?? "—"}</p>
-            </div>
-            <div className="flex shrink-0 gap-1.5">
-              {!f.isApproved ? (
-                <button onClick={() => setApproved(f.id, true)} className="rounded-lg border border-emerald-300 px-2.5 py-1 text-xs text-emerald-700 hover:bg-emerald-50">اعتماد</button>
-              ) : (
-                <button onClick={() => setApproved(f.id, false)} className="rounded-lg border border-amber-300 px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-50">إلغاء الاعتماد</button>
-              )}
-              <button onClick={() => archive(f.id)} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50">أرشفة</button>
-            </div>
-          </div>
-        ))}
-      </div>
-      {!loading && items.length === 0 && !error && (
-        <p className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">لا توجد آراء.</p>
+      {error && (
+        <GlassCard className="p-2">
+          <EmptyState title="حدث خطأ" description={error} action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>} />
+        </GlassCard>
       )}
+      {loading && (
+        <div className="space-y-2.5">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+        </div>
+      )}
+
+      {!loading && (
+        <div className="space-y-2.5">
+          {items.map((f) => (
+            <GlassCard key={f.id} className="flex flex-col gap-3 p-4 transition-all hover:shadow-glass md:flex-row md:items-start">
+              {f.media?.type === "IMAGE" && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={f.media.url} alt="" className="h-20 w-20 shrink-0 rounded-xl object-cover" loading="lazy" />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <Badge tone={f.isApproved ? "DELIVERED" : "CONFIRMATION_PENDING"} dot>
+                    {f.isApproved ? "معتمد" : "بانتظار الاعتماد"}
+                  </Badge>
+                  {f.sentiment && (
+                    <Badge tone={f.sentiment === "positive" ? "DELIVERED" : f.sentiment === "negative" ? "FAILED" : "NORMAL"}>
+                      {f.sentiment}
+                    </Badge>
+                  )}
+                  {f.rating != null && (
+                    <span className="inline-flex items-center gap-0.5 text-amber-500" aria-label={`تقييم ${f.rating} من 5`}>
+                      {Array.from({ length: f.rating }).map((_, i) => <Star key={i} size={12} fill="currentColor" />)}
+                    </span>
+                  )}
+                  {f.product && (
+                    <span className="inline-flex items-center gap-1 text-ink-muted">
+                      <Package size={12} /> {f.product.name}
+                    </span>
+                  )}
+                  {f.source && <span className="text-ink-subtle">· {f.source}</span>}
+                </div>
+                <p className="mt-2 text-sm leading-relaxed text-ink">{f.content ?? "—"}</p>
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                {!f.isApproved ? (
+                  <Button size="sm" variant="success" onClick={() => setApproved(f.id, true)}>اعتماد</Button>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => setApproved(f.id, false)}>إلغاء الاعتماد</Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => archive(f.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">أرشفة</Button>
+              </div>
+            </GlassCard>
+          ))}
+        </div>
+      )}
+      {!loading && items.length === 0 && !error && (
+        <GlassCard>
+          <EmptyState icon={<MessageCircle size={28} strokeWidth={1.5} />} title="لا توجد آراء" description="أضف أول رأي لعميل لعرضه هنا." />
+        </GlassCard>
+      )}
+
+      <Dialog open={showCreate} onClose={() => setShowCreate(false)} title="إضافة رأي">
+        <form onSubmit={create} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="نص الرأي" hint="يُحفظ كما ورد حرفيًا — لا يُنسب لشخص لم يقله." className="sm:col-span-2">
+            <Textarea name="content" required rows={3} placeholder="نص الرأي…" />
+          </Field>
+          <Field label="المنتج">
+            <Select name="productId" defaultValue="">
+              <option value="">بدون منتج</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="المصدر">
+            <Input name="source" placeholder="مثال: محادثة رقم 12" />
+          </Field>
+          <Field label="التقييم (1-5)">
+            <Input name="rating" type="number" min="1" max="5" dir="ltr" className="num" />
+          </Field>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            <Button type="button" variant="ghost" onClick={() => setShowCreate(false)}>{t.common.cancel}</Button>
+            <Button type="submit" loading={creating}>{creating ? "جارٍ الإضافة…" : "إضافة"}</Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }

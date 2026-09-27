@@ -1,18 +1,21 @@
+import { t } from "@/lib/i18n";
 import type { Permission } from "@/modules/rbac/permissions";
 
-export const NAV_ITEMS: { href: string; label: string; icon: string; permission: Permission }[] = [
-  { href: "/dashboard", label: "لوحة التحكم", icon: "LayoutDashboard", permission: "analytics.read" },
-  { href: "/conversations", label: "المحادثات", icon: "MessagesSquare", permission: "conversations.read" },
-  { href: "/customers", label: "العملاء", icon: "Users", permission: "customers.read" },
-  { href: "/orders", label: "الطلبات", icon: "Package", permission: "orders.read" },
-  { href: "/products", label: "المنتجات", icon: "ShoppingBag", permission: "products.read" },
-  { href: "/media", label: "الوسائط", icon: "Image", permission: "media.read" },
-  { href: "/feedback", label: "آراء العملاء", icon: "Star", permission: "feedback.read" },
-  { href: "/knowledge", label: "قاعدة المعرفة", icon: "BookOpen", permission: "knowledge.read" },
-  { href: "/personas", label: "شخصية AI", icon: "Bot", permission: "personas.read" },
-  { href: "/ai/playground", label: "ملعب AI", icon: "Bot", permission: "ai.configure" },
-  { href: "/channels", label: "القنوات", icon: "Radio", permission: "channels.read" },
-  { href: "/automation", label: "الأتمتة", icon: "Workflow", permission: "automation.read" },
-  { href: "/analytics", label: "التحليلات", icon: "BarChart3", permission: "analytics.read" },
-  { href: "/settings", label: "الإعدادات", icon: "Settings", permission: "settings.manage" },
+export const NAV_ITEMS: { href: string; label: string; icon: string; permission: Permission; badge?: string }[] = [
+  { href: "/dashboard", label: t.nav.dashboard, icon: "LayoutDashboard", permission: "analytics.read" },
+  { href: "/conversations", label: t.nav.inbox, icon: "MessageSquare", permission: "conversations.read" },
+  { href: "/customers", label: t.nav.customers, icon: "Users", permission: "customers.read" },
+  { href: "/orders", label: t.nav.orders, icon: "ShoppingBag", permission: "orders.read" },
+  { href: "/products", label: t.nav.products, icon: "Package", permission: "products.read" },
+  { href: "/media", label: t.nav.media, icon: "Images", permission: "media.read" },
+  { href: "/feedback", label: t.nav.feedback, icon: "MessageCircle", permission: "feedback.read" },
+  { href: "/knowledge", label: t.nav.knowledge, icon: "BookOpen", permission: "knowledge.read" },
+  { href: "/personas", label: t.nav.personas, icon: "UserRound", permission: "personas.read" },
+  { href: "/ai/playground", label: t.nav.playground, icon: "FlaskConical", permission: "ai.configure" },
+  { href: "/channels", label: t.nav.channels, icon: "Radio", permission: "channels.read" },
+  { href: "/automation", label: t.nav.automation, icon: "Workflow", permission: "automation.read" },
+  { href: "/follow-ups", label: t.nav.followups, icon: "Clock", permission: "followups.read" },
+  { href: "/handoffs", label: t.nav.handoffs, icon: "Hand", permission: "handoffs.read" },
+  { href: "/analytics", label: t.nav.analytics, icon: "ChartNoAxesCombined", permission: "analytics.read" },
+  { href: "/settings", label: t.nav.settings, icon: "Settings", permission: "settings.manage" },
 ];

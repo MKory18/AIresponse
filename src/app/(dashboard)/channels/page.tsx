@@ -1,6 +1,13 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Facebook, PlugZap, Unplug } from "lucide-react";
+import { t } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type Connection = {
   channelId: string;
@@ -12,8 +19,6 @@ type Connection = {
   lastSendAt: string | null;
   tokenStatus: string;
 };
-
-const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500";
 
 export default function ChannelsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -67,7 +72,7 @@ export default function ChannelsPage() {
     if (res.ok) {
       setPendingPages([]);
       setSelectionToken(null);
-      setMessage("تم ربط الصفحة بنجاح ✓");
+      setMessage("تم ربط الصفحة بنجاح.");
       load();
     } else {
       const data = await res.json().catch(() => ({}));
@@ -93,81 +98,99 @@ export default function ChannelsPage() {
       body: JSON.stringify({ pageId }),
     });
     setTesting(null);
-    setMessage(res.ok ? "الاتصال سليم ✓" : "فشل اختبار الاتصال");
+    setMessage(res.ok ? "الاتصال سليم." : "فشل اختبار الاتصال");
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-bold">القنوات</h1>
-      {message && <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">{message}</p>}
+    <div className="page-wrap">
+      <PageHeader title={t.pages.channelsTitle} description={t.pages.channelsDesc} />
+      {message && (
+        <GlassCard level="glass-subtle" className="border-brand-500/20 px-4 py-2.5 text-sm font-medium text-brand-700 dark:text-brand-300">
+          {message}
+        </GlassCard>
+      )}
 
       {pendingPages.length > 0 && (
-        <section className="rounded-xl border border-brand-200 bg-white p-4">
-          <h2 className="mb-2 text-sm font-bold text-slate-700">اختر الصفحة المرتبطة</h2>
+        <GlassCard className="space-y-2 p-4">
+          <h2 className="text-sm font-bold text-ink">اختر الصفحة المرتبطة</h2>
           {pendingPages.map((p) => (
             <button
               key={p.id}
               onClick={() => selectPage(p.id)}
-              className="block w-full rounded-lg border border-slate-200 p-3 text-right text-sm hover:border-brand-500"
+              className="glass-subtle block w-full rounded-xl p-3 text-right text-sm font-medium text-ink transition hover:border-brand-400 hover:shadow-glass"
             >
-              {p.name} <span className="text-xs text-slate-400" dir="ltr">({p.id})</span>
+              {p.name} <span className="num text-xs text-ink-subtle" dir="ltr">({p.id})</span>
             </button>
           ))}
-        </section>
+        </GlassCard>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-bold text-slate-700">Facebook Messenger</h2>
-            <p className="text-xs text-slate-500">ربط صفحة فيسبوك رسميًا عبر Meta Graph API.</p>
+      <GlassCard className="p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+              <Facebook size={20} />
+            </span>
+            <div>
+              <h2 className="text-sm font-bold text-ink">Facebook Messenger</h2>
+              <p className="mt-0.5 text-xs text-ink-muted">ربط صفحة فيسبوك رسميًا عبر Meta Graph API.</p>
+            </div>
           </div>
           {oauthConfigured && (
             <a
               href="/api/channels/facebook/connect"
-              className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-b from-brand-400 to-brand-600 px-3.5 text-[13px] font-semibold text-white shadow-xs transition hover:brightness-110"
             >
+              <PlugZap size={14} />
               ربط صفحة Facebook
             </a>
           )}
         </div>
         {!oauthConfigured && (
-          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-           META_APP_ID و META_APP_SECRET غير مضبوطين على الخادم — أضفهما لتفعيل الربط.
+          <p className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300">
+            META_APP_ID و META_APP_SECRET غير مضبوطين على الخادم — أضفهما لتفعيل الربط.
           </p>
         )}
-      </section>
+      </GlassCard>
 
-      {loading && <p className="text-sm text-slate-400">جارٍ التحميل…</p>}
+      {loading && <Skeleton className="h-36 rounded-2xl" />}
       {connections.map((c) => (
-        <div key={c.channelId} className="rounded-xl border border-slate-200 bg-white p-4">
+        <GlassCard key={c.channelId} className="p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-sm font-bold text-slate-800">{c.pageName ?? "صفحة فيسبوك"}</p>
-              <p className="text-xs text-slate-400" dir="ltr">{c.pageId}</p>
+              <p className="text-sm font-bold text-ink">{c.pageName ?? "صفحة فيسبوك"}</p>
+              <p className="num mt-0.5 text-xs text-ink-subtle" dir="ltr">{c.pageId}</p>
             </div>
-            <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${c.status === "CONNECTED" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-              {c.status}
-            </span>
+            <StatusBadge value={c.status} dot />
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500 md:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-ink-muted md:grid-cols-4">
             <p>آخر Webhook: {c.lastWebhookAt ? new Date(c.lastWebhookAt).toLocaleString("ar") : "—"}</p>
             <p>آخر إرسال: {c.lastSendAt ? new Date(c.lastSendAt).toLocaleString("ar") : "—"}</p>
             <p>حالة التوكن: {c.tokenStatus}</p>
             <p>رُبطت: {c.connectedAt ? new Date(c.connectedAt).toLocaleDateString("ar") : "—"}</p>
           </div>
           <div className="mt-3 flex gap-1.5">
-            <button onClick={() => testConnection(c.pageId!)} disabled={testing === c.pageId} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50 disabled:opacity-50">
+            <Button size="sm" variant="secondary" onClick={() => testConnection(c.pageId!)} loading={testing === c.pageId} disabled={testing === c.pageId}>
               {testing === c.pageId ? "جارٍ الاختبار…" : "اختبار الاتصال"}
-            </button>
+            </Button>
             {c.status === "CONNECTED" && (
-              <button onClick={() => disconnect(c.pageId!)} className="rounded-lg border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50">
+              <Button size="sm" variant="ghost" onClick={() => disconnect(c.pageId!)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+                <Unplug size={13} />
                 فصل
-              </button>
+              </Button>
             )}
           </div>
-        </div>
+        </GlassCard>
       ))}
+      {!loading && connections.length === 0 && pendingPages.length === 0 && (
+        <GlassCard>
+          <EmptyState
+            icon={<Facebook size={28} strokeWidth={1.5} />}
+            title="لا توجد قنوات مربوطة"
+            description="اربط صفحة فيسبوك لبدء استقبال رسائل العملاء."
+          />
+        </GlassCard>
+      )}
     </div>
   );
 }

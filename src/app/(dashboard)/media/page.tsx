@@ -1,6 +1,13 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FileUp, Images, Search, Trash2, Upload } from "lucide-react";
+import { t } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Field, Input, Select } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type MediaAsset = {
   id: string;
@@ -13,7 +20,6 @@ type MediaAsset = {
   createdAt: string;
 };
 
-const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500";
 const CATEGORIES = ["PRODUCT", "FEEDBACK", "TESTIMONIAL", "BRAND", "EDUCATIONAL", "OTHER"];
 
 export default function MediaPage() {
@@ -42,8 +48,8 @@ export default function MediaPage() {
 
   useEffect(() => {
     setLoading(true);
-    const t = setTimeout(() => load().finally(() => setLoading(false)), q ? 300 : 0);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => load().finally(() => setLoading(false)), q ? 300 : 0);
+    return () => clearTimeout(timer);
   }, [load, q]);
 
   async function upload(e: React.FormEvent<HTMLFormElement>) {
@@ -67,61 +73,94 @@ export default function MediaPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-bold">مكتبة الوسائط</h1>
+    <div className="page-wrap">
+      <PageHeader title={t.pages.mediaTitle} description={t.pages.mediaDesc} />
 
-      <form ref={formRef} onSubmit={upload} className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-4">
-        <input name="file" type="file" required accept="image/*,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,application/pdf,text/plain,text/markdown,application/json,text/csv" className="text-sm" />
-        <select name="category" className={input}>
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <input name="title" placeholder="عنوان" className={input} />
-        <input name="tags" placeholder="وسوم مفصولة بفواصل" className={input} />
-        <button disabled={uploading} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">
-          {uploading ? "جارٍ الرفع…" : "رفع"}
-        </button>
-      </form>
+      <GlassCard className="p-4">
+        <form ref={formRef} onSubmit={upload} className="flex flex-wrap items-end gap-2.5">
+          <Field label="الملف" className="min-w-48 flex-1">
+            <Input name="file" type="file" required accept="image/*,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,application/pdf,text/plain,text/markdown,application/json,text/csv" className="cursor-pointer pt-1.5" />
+          </Field>
+          <Field label="التصنيف" className="w-36">
+            <Select name="category" defaultValue="PRODUCT">
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="عنوان" className="w-40">
+            <Input name="title" placeholder="اختياري" />
+          </Field>
+          <Field label="وسوم" className="w-44">
+            <Input name="tags" placeholder="وسوم مفصولة بفواصل" />
+          </Field>
+          <Button type="submit" loading={uploading} disabled={uploading}>
+            <Upload size={14} />
+            {uploading ? "جارٍ الرفع…" : "رفع"}
+          </Button>
+        </form>
+      </GlassCard>
 
-      <div className="flex flex-wrap gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث…" className={`${input} max-w-xs`} />
-        <select value={category} onChange={(e) => setCategory(e.target.value)} className={input}>
+      <GlassCard level="glass-subtle" className="flex flex-wrap items-center gap-2 p-3">
+        <div className="relative min-w-48 flex-1">
+          <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`${t.common.search}…`} aria-label={t.common.search} className="ps-9" />
+        </div>
+        <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="التصنيف" className="w-40">
           <option value="">كل التصنيفات</option>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
-        </select>
-        <select value={type} onChange={(e) => setType(e.target.value)} className={input}>
+        </Select>
+        <Select value={type} onChange={(e) => setType(e.target.value)} aria-label="النوع" className="w-36">
           <option value="">كل الأنواع</option>
-          {["IMAGE", "VIDEO", "AUDIO", "DOCUMENT"].map((t) => (
-            <option key={t} value={t}>{t}</option>
+          {["IMAGE", "VIDEO", "AUDIO", "DOCUMENT"].map((cat) => (
+            <option key={cat} value={cat}>{cat}</option>
           ))}
-        </select>
-      </div>
+        </Select>
+      </GlassCard>
 
-      {loading && <p className="text-sm text-slate-400">جارٍ التحميل…</p>}
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+      {error && (
+        <GlassCard className="p-2">
+          <EmptyState title="حدث خطأ" description={error} action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>} />
+        </GlassCard>
+      )}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-        {items.map((m) => (
-          <div key={m.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            {m.type === "IMAGE" ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={m.url} alt={m.title ?? ""} className="h-28 w-full object-cover" />
-            ) : (
-              <div className="flex h-28 items-center justify-center bg-slate-100 text-xs text-slate-500">{m.type}</div>
-            )}
-            <div className="p-2">
-              <p className="truncate text-xs font-medium" title={m.title ?? ""}>{m.title ?? m.id}</p>
-              <p className="text-[10px] text-slate-400">{m.category} · {(m.size / 1024).toFixed(0)}KB</p>
-              <button onClick={() => remove(m.id)} className="mt-1 text-[10px] text-red-600 hover:underline">حذف</button>
-            </div>
-          </div>
-        ))}
-      </div>
+      {loading && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}
+        </div>
+      )}
+
+      {!loading && items.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+          {items.map((m) => (
+            <GlassCard key={m.id} className="group overflow-hidden p-0 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass">
+              {m.type === "IMAGE" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={m.url} alt={m.title ?? ""} className="h-28 w-full object-cover" loading="lazy" />
+              ) : (
+                <div className="flex h-28 items-center justify-center gap-1.5 bg-surface-3/60 text-xs font-semibold text-ink-subtle">
+                  <FileUp size={16} />
+                  {m.type}
+                </div>
+              )}
+              <div className="p-2.5">
+                <p className="truncate text-xs font-bold text-ink" title={m.title ?? ""}>{m.title ?? m.id}</p>
+                <p className="num mt-0.5 text-[10px] text-ink-subtle">{m.category} · {(m.size / 1024).toFixed(0)}KB</p>
+                <button onClick={() => remove(m.id)} className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-red-600 transition hover:text-red-700 dark:text-red-400">
+                  <Trash2 size={11} />
+                  {t.common.delete}
+                </button>
+              </div>
+            </GlassCard>
+          ))}
+        </div>
+      )}
       {!loading && items.length === 0 && !error && (
-        <p className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">المكتبة فارغة.</p>
+        <GlassCard>
+          <EmptyState icon={<Images size={28} strokeWidth={1.5} />} title="المكتبة فارغة" description="ارفع أول ملف لاستخدامه في المنتجات والمحادثات." />
+        </GlassCard>
       )}
     </div>
   );

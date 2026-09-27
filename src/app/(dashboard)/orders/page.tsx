@@ -2,15 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ClipboardList, PackageSearch, Printer } from "lucide-react";
+import { ClipboardList, PackageSearch, Printer, Search } from "lucide-react";
 import { formatNumber, label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Select } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Input, Select } from "@/components/ui/input";
+import { SkeletonTable } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
+import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type Order = {
   id: string;
@@ -30,6 +30,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [status, setStatus] = useState("");
   const [confirmationStatus, setConfirmationStatus] = useState("");
+  const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,21 +60,29 @@ export default function OrdersPage() {
     needsReview: orders.filter((o) => ["CANCELLED", "FAILED", "RETURNED"].includes(o.status)).length,
   };
 
+  const visible = q.trim()
+    ? orders.filter((o) =>
+        [o.orderNumber, o.customer.name ?? "", o.customer.phone ?? "", o.items[0]?.productNameSnapshot ?? ""]
+          .join(" ")
+          .includes(q.trim())
+      )
+    : orders;
+
   return (
-    <div className="space-y-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-ink">{t.orders.title}</h1>
-          <p className="mt-0.5 text-xs text-ink-muted">متابعة ومتابعة حالات الطلبات وتأكيدها.</p>
-        </div>
-        <Button size="sm" variant="secondary" onClick={() => window.print()}>
-          <Printer size={12} /> {t.common.export}
-        </Button>
-      </div>
+    <div className="page-wrap">
+      <PageHeader
+        title={t.orders.title}
+        description="تابع حالات الطلبات وتأكيدها لحظة بلحظة."
+        actions={
+          <Button size="sm" variant="secondary" onClick={() => window.print()}>
+            <Printer size={14} /> {t.common.export}
+          </Button>
+        }
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <StatCard label={t.orders.statTotal} value={formatNumber(stats.total)} icon={<ClipboardList size={18} />} />
+        <StatCard label={t.orders.statTotal} value={formatNumber(stats.total)} tone="brand" icon={<ClipboardList size={18} />} />
         <StatCard label={t.orders.statNew} value={formatNumber(stats.new)} tone="sky" />
         <StatCard label={t.orders.statConfirming} value={formatNumber(stats.confirming)} tone="amber" />
         <StatCard label={t.orders.statCompleted} value={formatNumber(stats.completed)} tone="emerald" />
@@ -81,99 +90,105 @@ export default function OrdersPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t.orders.status} className="w-48">
+      <GlassCard level="glass-subtle" className="flex flex-wrap items-center gap-2 p-3">
+        <div className="relative min-w-52 flex-1">
+          <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`${t.common.search} برقم الطلب أو العميل…`} aria-label={t.common.search} className="ps-9" />
+        </div>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t.orders.status} className="w-44">
           <option value="">{t.common.all} — الحالات</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>{label(s)}</option>
           ))}
         </Select>
-        <Select value={confirmationStatus} onChange={(e) => setConfirmationStatus(e.target.value)} aria-label="حالة التأكيد" className="w-52">
+        <Select value={confirmationStatus} onChange={(e) => setConfirmationStatus(e.target.value)} aria-label="حالة التأكيد" className="w-48">
           <option value="">{t.common.all} — حالات التأكيد</option>
           {["PENDING", "CONFIRMED_BY_CUSTOMER", "CONFIRMED_BY_AGENT", "DECLINED"].map((s) => (
             <option key={s} value={s}>{label(s)}</option>
           ))}
         </Select>
-      </div>
+      </GlassCard>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950 dark:text-red-400">{error}</p>}
+      {error && (
+        <GlassCard className="p-2">
+          <EmptyState title="تعذّر تحميل الطلبات" description={error} action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>} />
+        </GlassCard>
+      )}
       {loading && (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-14 animate-pulse rounded-xl bg-surface-3" />
-          ))}
-        </div>
+        <GlassCard className="p-4">
+          <SkeletonTable rows={6} />
+        </GlassCard>
       )}
 
       {/* Desktop table */}
-      {!loading && orders.length > 0 && (
+      {!loading && visible.length > 0 && (
         <>
-          <Card className="hidden overflow-hidden md:block">
-            <table className="w-full text-right text-sm">
-              <thead className="border-b border-line text-xs text-ink-muted">
-                <tr className="bg-surface-1">
-                  <th className="p-3 font-medium">{t.orders.id}</th>
-                  <th className="p-3 font-medium">{t.orders.customer}</th>
-                  <th className="p-3 font-medium">{t.orders.phone}</th>
-                  <th className="p-3 font-medium">{t.orders.product}</th>
-                  <th className="p-3 font-medium">{t.orders.quantity}</th>
-                  <th className="p-3 font-medium">{t.orders.total}</th>
-                  <th className="p-3 font-medium">{t.orders.status}</th>
-                  <th className="p-3 font-medium">{t.orders.date}</th>
+          <GlassCard className="hidden overflow-hidden md:block">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t.orders.id}</th>
+                  <th>{t.orders.customer}</th>
+                  <th>{t.orders.phone}</th>
+                  <th>{t.orders.product}</th>
+                  <th>{t.orders.quantity}</th>
+                  <th>{t.orders.total}</th>
+                  <th>{t.orders.status}</th>
+                  <th>{t.orders.date}</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.map((o) => (
-                  <tr key={o.id} className="border-b border-line/50 transition-colors last:border-0 hover:bg-surface-1">
-                    <td className="p-3">
-                      <Link href={`/orders/${o.id}`} className="num font-medium text-brand-600 hover:underline dark:text-brand-400">
+                {visible.map((o) => (
+                  <tr key={o.id}>
+                    <td>
+                      <Link href={`/orders/${o.id}`} className="num font-bold text-brand-600 hover:underline dark:text-brand-400">
                         {o.orderNumber}
                       </Link>
                     </td>
-                    <td className="p-3 text-ink">{o.customer.name ?? "—"}</td>
-                    <td className="num p-3 text-ink-muted">{o.customer.phone ?? "—"}</td>
-                    <td className="p-3 text-ink-muted">{o.items[0]?.productNameSnapshot ?? "—"}</td>
-                    <td className="num p-3 text-ink-muted">{o.items[0]?.quantity ?? "—"}</td>
-                    <td className="num p-3 font-medium text-ink" dir="ltr">
+                    <td className="font-medium">{o.customer.name ?? "—"}</td>
+                    <td className="num text-ink-muted">{o.customer.phone ?? "—"}</td>
+                    <td className="max-w-44 truncate text-ink-muted">{o.items[0]?.productNameSnapshot ?? "—"}</td>
+                    <td className="num text-ink-muted">{o.items[0]?.quantity ?? "—"}</td>
+                    <td className="num font-bold" dir="ltr">
                       {Number(o.total).toLocaleString()} {o.currency}
                     </td>
-                    <td className="p-3"><StatusBadge value={o.status} /></td>
-                    <td className="p-3 text-xs text-ink-muted">{new Date(o.createdAt).toLocaleDateString("ar")}</td>
+                    <td><StatusBadge value={o.status} dot /></td>
+                    <td className="whitespace-nowrap text-xs text-ink-muted">{new Date(o.createdAt).toLocaleDateString("ar")}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </Card>
+          </GlassCard>
 
           {/* Mobile cards */}
-          <div className="space-y-3 md:hidden">
-            {orders.map((o) => (
-              <Card key={o.id} className="p-4">
+          <div className="grid gap-3 md:hidden">
+            {visible.map((o) => (
+              <GlassCard key={o.id} className="p-4 transition-all active:scale-[0.99]">
                 <div className="flex items-center justify-between gap-2">
                   <Link href={`/orders/${o.id}`} className="num text-sm font-bold text-brand-600 dark:text-brand-400">
                     {o.orderNumber}
                   </Link>
-                  <StatusBadge value={o.status} />
+                  <StatusBadge value={o.status} dot />
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs text-ink-muted">
-                  <span className="truncate">{o.customer.name ?? o.customer.phone ?? "—"}</span>
-                  <span className="num text-end font-medium text-ink">{Number(o.total).toLocaleString()} {o.currency}</span>
+                <div className="mt-2.5 grid grid-cols-2 gap-1.5 text-xs text-ink-muted">
+                  <span className="truncate font-medium text-ink">{o.customer.name ?? o.customer.phone ?? "—"}</span>
+                  <span className="num text-end font-bold text-ink">{Number(o.total).toLocaleString()} {o.currency}</span>
                   <span className="col-span-2 truncate">{o.items[0]?.productNameSnapshot ?? "—"}</span>
                 </div>
-              </Card>
+              </GlassCard>
             ))}
           </div>
         </>
       )}
 
-      {!loading && orders.length === 0 && !error && (
-        <Card>
+      {!loading && visible.length === 0 && !error && (
+        <GlassCard>
           <EmptyState
             icon={<PackageSearch size={28} strokeWidth={1.5} />}
             title={t.orders.emptyTitle}
             description={t.orders.emptyDesc}
           />
-        </Card>
+        </GlassCard>
       )}
     </div>
   );

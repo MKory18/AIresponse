@@ -1,10 +1,11 @@
 "use client";
 
+import { Bot, Check, CheckCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatTime, label, t } from "@/lib/i18n";
 import type { MessageItem } from "./types";
 
-/** Professional chat bubble: incoming left (RTL visual right for customer), outgoing brand-filled. */
+/** Premium chat bubble: compact, elegant, clearly separated incoming/outgoing. */
 export function MessageBubble({ message }: { message: MessageItem }) {
   const m = message;
   const outbound = m.direction === "OUTBOUND";
@@ -12,24 +13,23 @@ export function MessageBubble({ message }: { message: MessageItem }) {
 
   if (system) {
     return (
-      <div className="flex justify-center">
-        <span className="rounded-full bg-surface-3 px-3 py-1 text-[11px] text-ink-muted">{m.text}</span>
+      <div className="flex justify-center py-1">
+        <span className="bubble-sys">{m.text}</span>
       </div>
     );
   }
 
   return (
-    <div className={cn("flex w-full", outbound ? "justify-start" : "justify-end")}>
-      <div
-        className={cn(
-          "max-w-[75%] rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed shadow-xs sm:max-w-[60%]",
-          outbound
-            ? "rounded-br-md bg-brand-500 text-white"
-            : "rounded-bl-md border border-line bg-surface-2 text-ink"
+    <div className={cn("flex w-full animate-fade-in", outbound ? "justify-start" : "justify-end")}>
+      <div className={cn("max-w-[78%] sm:max-w-[62%]", outbound ? "bubble-out" : "bubble-in")}>
+        {m.senderType === "AI" && !outbound && (
+          <p className="mb-1 flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-300">
+            <Bot size={11} />
+            {t.roles.ai}
+          </p>
         )}
-      >
         {m.type !== "TEXT" && (
-          <p className={cn("mb-1 text-[10px] font-medium", outbound ? "text-white/70" : "text-ink-subtle")}>
+          <p className={cn("mb-1 text-[10px] font-semibold", outbound ? "text-white/75" : "text-ink-subtle")}>
             {m.mediaUrl ? t.inbox.attachment : label(m.type)}
           </p>
         )}
@@ -39,17 +39,26 @@ export function MessageBubble({ message }: { message: MessageItem }) {
             href={m.mediaUrl}
             target="_blank"
             rel="noreferrer"
-            className={cn("mt-1 inline-block text-[11px] underline", outbound ? "text-white/90" : "text-brand-600 dark:text-brand-400")}
+            className={cn("mt-1 inline-block text-[11px] font-medium underline underline-offset-2", outbound ? "text-white/90" : "text-brand-600 dark:text-brand-400")}
           >
             {t.inbox.attachment} ({label(m.type)})
           </a>
         )}
         <p className={cn("mt-1 flex items-center gap-1 text-[10px]", outbound ? "text-white/70" : "text-ink-subtle")}>
-          <span>{formatTime(m.createdAt)}</span>
-          {m.senderType === "AI" && <span>· {t.roles.ai}</span>}
+          <span className="num">{formatTime(m.createdAt)}</span>
           {outbound && m.senderType === "HUMAN" && (
-            <span>
-              · {m.deliveryStatus === "FAILED" ? "فشل الإرسال" : m.deliveryStatus === "PENDING" ? "جارٍ الإرسال…" : "أُرسلت"}
+            <span className="inline-flex items-center gap-0.5">
+              ·
+              {m.deliveryStatus === "FAILED" ? (
+                "فشل الإرسال"
+              ) : m.deliveryStatus === "PENDING" ? (
+                "جارٍ الإرسال…"
+              ) : (
+                <span className="inline-flex items-center gap-0.5">
+                  <CheckCheck size={12} />
+                  أُرسلت
+                </span>
+              )}
             </span>
           )}
         </p>
@@ -61,10 +70,17 @@ export function MessageBubble({ message }: { message: MessageItem }) {
 /** Day separator between message groups. */
 export function DateSeparator({ day }: { day: string }) {
   return (
-    <div className="flex items-center gap-3 py-2">
-      <span className="h-px flex-1 bg-line" />
-      <span className="text-[10px] font-medium text-ink-subtle">{day}</span>
-      <span className="h-px flex-1 bg-line" />
+    <div className="flex items-center gap-3 py-2.5">
+      <span className="h-px flex-1 bg-gradient-to-l from-transparent via-line to-transparent" />
+      <span className="glass-subtle rounded-full px-3 py-0.5 text-[10px] font-semibold text-ink-muted">{day}</span>
+      <span className="h-px flex-1 bg-gradient-to-r from-transparent via-line to-transparent" />
     </div>
   );
+}
+
+export function DeliveryTick({ status }: { status: string }) {
+  if (status === "READ" || status === "DELIVERED" || status === "SENT") {
+    return <CheckCheck size={13} className="text-brand-500" aria-label={status} />;
+  }
+  return <Check size={13} className="text-ink-subtle" aria-label={status} />;
 }
