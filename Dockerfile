@@ -42,7 +42,7 @@ COPY --from=builder /app/scripts ./scripts
 # (worker, seed) resolves them by reading tsconfig.json at runtime.
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# No Dockerfile HEALTHCHECK: this image is shared by the web container and the
+# No image-level health probe: this image is shared by the web container and the
 # non-HTTP worker container. Health checks are managed per-service in Coolify
 # instead (web: GET /api/health; worker: none). See docs/COOLIFY-STAGING.md.
 USER nextjs
