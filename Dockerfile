@@ -45,6 +45,10 @@ COPY --from=builder /app/tsconfig.json ./tsconfig.json
 # No image-level health probe: this image is shared by the web container and the
 # non-HTTP worker container. Health checks are managed per-service in Coolify
 # instead (web: GET /api/health; worker: none). See docs/COOLIFY-STAGING.md.
+# Writable data dir for LocalStorageProvider (STORAGE_DIR=/app/.data/storage).
+# Pre-created + owned by nextjs so bind/volume mounts inherit usable
+# ownership on first mount and uploads never fail with EACCES as non-root.
+RUN mkdir -p /app/.data/storage && chown -R nextjs:nodejs /app/.data
 USER nextjs
 EXPOSE 3000
 CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]

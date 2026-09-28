@@ -322,17 +322,45 @@ export async function listMessages(
 ) {
   await getOwnedConversation(db, ctx.workspaceId, conversationId);
   const limit = Math.min(params.limit ?? 50, 200);
-  const messages = await db.message.findMany({
+  // Pagination over a bounded window (500) in JS: avoids createdAt-tie
+  // issues (same-ms inserts) and keeps mock + Postgres behavior identical.
+  // Default (no cursor): latest `limit` in asc order so new messages show.
+  // With cursor (oldest visible id): the previous `limit` older messages.
+  const window = await db.message.findMany({
     where: { conversationId, deletedAt: null },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: limit + 1,
-    ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
+    take: 500,
   });
-  const hasMore = messages.length > limit;
-  const items = hasMore ? messages.slice(0, limit) : messages;
+  if (!params.cursor) {
+    const page = window.slice(-limit);
+    const hasMore = window.length > limit;
+    return {
+      items: page,
+      nextCursor: hasMore && page.length ? page[0].id : null,
+    };
+  }
+  const idx = window.findIndex((m) => m.id === params.cursor);
+  if (idx === -1) {
+    const messages = await db.message.findMany({
+      where: { conversationId, deletedAt: null },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: limit + 1,
+      cursor: { id: params.cursor },
+      skip: 1,
+    });
+    const hasMore = messages.length > limit;
+    const items = hasMore ? messages.slice(0, limit) : messages;
+    return {
+      items,
+      nextCursor: hasMore ? items[items.length - 1].id : null,
+    };
+  }
+  const older = window.slice(0, idx);
+  const page = older.slice(-limit);
+  const hasMore = older.length > limit;
   return {
-    items,
-    nextCursor: hasMore ? items[items.length - 1].id : null,
+    items: page,
+    nextCursor: hasMore && page.length ? page[0].id : null,
   };
 }
 
@@ -404,7 +432,7 @@ export async function markConversationUnread(db: Db, ctx: ActorContext, conversa
   await getOwnedConversation(db, ctx.workspaceId, conversationId);
   const updated = await db.conversation.update({
     where: { id: conversationId },
-    data: { unreadCount: 1 },
+    data: { unreadCount: { increment: 1 } },
   });
   return updated;
 }
@@ -453,15 +481,15 @@ export async function assignConversation(
 
 /** Human takeover: stops all automatic AI sending for this conversation. */
 export async function takeoverConversation(db: Db, ctx: ActorContext, conversationId: string) {
-  await getOwnedConversation(db, ctx.workspaceId, conversationId);
+  const conversation = await getOwnedConversation(db, ctx.workspaceId, conversationId);
 
-  const assignedAgentId = await defaultAssignToSelf(db, ctx, conversationId);
+  // Takeover always assigns to the acting agent (explicit human ownership).
   const updated = await db.conversation.update({
     where: { id: conversationId },
     data: {
       aiState: "HUMAN_ACTIVE",
       aiEnabled: false,
-      assignedAgentId,
+      assignedAgentId: ctx.userId,
     },
   });
 
@@ -494,7 +522,13 @@ export async function releaseConversationToAI(db: Db, ctx: ActorContext, convers
 
   const updated = await db.conversation.update({
     where: { id: conversationId },
-    data: { aiState: "AI_ACTIVE", aiEnabled: true },
+    data: { aiState: "AI_ACTIVE", aiEnabled: true, handoffReason: null },
+  });
+
+  // Drain open handoffs so the human queue does not retain released threads.
+  await db.humanHandoff.updateMany({
+    where: { workspaceId: ctx.workspaceId, conversationId, status: { in: ["OPEN", "CLAIMED"] } },
+    data: { status: "CANCELLED", resolvedAt: new Date() },
   });
 
   await recordAudit(db, {

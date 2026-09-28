@@ -146,10 +146,52 @@ export async function attachProductMedia(
   const existing = await db.productMedia.findUnique({
     where: { productId_mediaAssetId: { productId, mediaAssetId } },
   });
-  if (existing) throw new ConflictError("Media already attached to this product");
+  // Idempotent re-attach: update flags instead of 409 so UI retries and
+  // upload-then-attach flows (upload auto-links) never break.
+  if (existing) {
+    if (opts?.isPrimary) {
+      await db.productMedia.updateMany({ where: { productId }, data: { isPrimary: false } });
+    }
+    return db.productMedia.update({
+      where: { id: existing.id },
+      data: {
+        ...(opts?.isPrimary !== undefined ? { isPrimary: opts.isPrimary } : {}),
+        ...(opts?.sortOrder !== undefined ? { sortOrder: opts.sortOrder } : {}),
+      },
+    });
+  }
 
   if (opts?.isPrimary) {
+    // Best-effort atomic flip via interactive transaction when available.
+    const anyDb = db as unknown as {
+      $transaction?: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>;
+    };
+    if (typeof anyDb.$transaction === "function") {
+      return anyDb.$transaction((tx) =>
+        (async () => {
+          await tx.productMedia.updateMany({ where: { productId }, data: { isPrimary: false } });
+          return tx.productMedia.create({
+            data: {
+              productId,
+              mediaAssetId,
+              workspaceId: ctx.workspaceId,
+              sortOrder: opts?.sortOrder ?? 0,
+              isPrimary: true,
+            },
+          });
+        })()
+      );
+    }
     await db.productMedia.updateMany({ where: { productId }, data: { isPrimary: false } });
+    return db.productMedia.create({
+      data: {
+        productId,
+        mediaAssetId,
+        workspaceId: ctx.workspaceId,
+        sortOrder: opts?.sortOrder ?? 0,
+        isPrimary: true,
+      },
+    });
   }
   const link = await db.productMedia.create({
     data: {

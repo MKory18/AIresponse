@@ -32,21 +32,42 @@ export async function uploadMedia(db: Db, ctx: ActorContext, input: UploadMediaI
   const storageKey = generateStorageKey(ctx.workspaceId, safeName);
   const stored = await getStorage().put(storageKey, input.data, input.mimeType);
 
-  const asset = await db.mediaAsset.create({
-    data: {
-      workspaceId: ctx.workspaceId,
-      url: stored.url,
-      storageKey,
-      mimeType: input.mimeType,
-      size: input.size,
-      title: input.title ?? safeName,
-      type: mediaType,
-      category: input.category ?? (input.productId ? "PRODUCT" : "OTHER"),
-      productId: input.productId ?? null,
-      tags: input.tags ?? [],
-      description: input.description ?? null,
-    },
-  });
+  let asset;
+  try {
+    asset = await db.mediaAsset.create({
+      data: {
+        workspaceId: ctx.workspaceId,
+        url: stored.url,
+        storageKey,
+        mimeType: input.mimeType,
+        size: input.size,
+        title: input.title ?? safeName,
+        type: mediaType,
+        category: input.category ?? (input.productId ? "PRODUCT" : "OTHER"),
+        productId: input.productId ?? null,
+        tags: input.tags ?? [],
+        description: input.description ?? null,
+      },
+    });
+  } catch (err) {
+    // No orphan files: storage write succeeded but DB failed.
+    await getStorage().delete(storageKey).catch(() => {});
+    throw err;
+  }
+
+  // Single source of truth going forward is the ProductMedia join table.
+  // Keep the legacy direct FK in sync AND create the join row atomically.
+  if (input.productId) {
+    try {
+      await db.productMedia.upsert({
+        where: { productId_mediaAssetId: { productId: input.productId, mediaAssetId: asset.id } },
+        create: { productId: input.productId, mediaAssetId: asset.id, workspaceId: ctx.workspaceId },
+        update: {},
+      });
+    } catch {
+      // Join sync is best-effort; direct FK already preserves the link.
+    }
+  }
 
   await eventBus.publish(makeEvent("MediaCreated", ctx.workspaceId, { mediaId: asset.id, type: mediaType }));
   return asset;
@@ -126,8 +147,10 @@ export async function updateMedia(
 
 export async function deleteMedia(db: Db, ctx: ActorContext, mediaId: string) {
   const asset = await getOwnedMedia(db, ctx.workspaceId, mediaId);
-  await getStorage().delete(asset.storageKey);
+  // DB first, then file: a failed DB delete must not leave a dead URL row.
+  // ProductMedia links cascade via FK; detaching beforehand is unnecessary.
   await db.mediaAsset.delete({ where: { id: asset.id } });
+  await getStorage().delete(asset.storageKey).catch(() => {});
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,
@@ -141,11 +164,36 @@ export async function deleteMedia(db: Db, ctx: ActorContext, mediaId: string) {
 // ── Media retrieval (metadata/tags based — no vision AI per search) ─────────
 
 export async function findProductMedia(db: Db, workspaceId: string, productId: string, limit = 5) {
-  return db.mediaAsset.findMany({
-    where: { workspaceId, productId, type: "IMAGE" },
-    orderBy: [{ createdAt: "desc" }],
-    take: limit,
-  });
+  // Dual-source read during migration: legacy direct FK + canonical join table.
+  const [direct, links] = await Promise.all([
+    db.mediaAsset.findMany({
+      where: { workspaceId, productId, type: "IMAGE" },
+      orderBy: [{ createdAt: "desc" }],
+      take: limit,
+    }),
+    db.productMedia.findMany({
+      where: { productId, workspaceId },
+      include: { mediaAsset: true },
+      orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
+      take: limit,
+    }),
+  ]);
+  const seen = new Set<string>();
+  const merged: typeof direct = [];
+  for (const l of links) {
+    const a = (l as { mediaAsset?: (typeof direct)[number] }).mediaAsset;
+    if (a && a.workspaceId === workspaceId && !seen.has(a.id)) {
+      seen.add(a.id);
+      merged.push(a);
+    }
+  }
+  for (const a of direct) {
+    if (!seen.has(a.id)) {
+      seen.add(a.id);
+      merged.push(a);
+    }
+  }
+  return merged.slice(0, limit);
 }
 
 export async function findFeedbackMedia(db: Db, workspaceId: string, productId: string, limit = 3) {

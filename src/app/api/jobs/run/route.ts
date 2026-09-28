@@ -21,6 +21,9 @@ export const POST = createHandler(
       if (provided !== secret) {
         return new Response(JSON.stringify({ error: "AUTHORIZATION_ERROR" }), { status: 403 });
       }
+    } else if (process.env.NODE_ENV === "production") {
+      // Open job-runner in production = remote job-execution trigger.
+      return new Response(JSON.stringify({ error: "JOBS_SECRET_NOT_CONFIGURED" }), { status: 403 });
     }
     // Durable automation bridge: trusted domain events → evaluation jobs.
     registerAutomationBridge(prisma);

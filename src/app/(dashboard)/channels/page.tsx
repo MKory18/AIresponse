@@ -28,6 +28,8 @@ export default function ChannelsPage() {
   const [pendingPages, setPendingPages] = useState<{ id: string; name: string }[]>([]);
   const [selectionToken, setSelectionToken] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  const [confirmPageId, setConfirmPageId] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/channels/facebook");
@@ -81,13 +83,21 @@ export default function ChannelsPage() {
   }
 
   async function disconnect(pageId: string) {
-    await fetch("/api/channels/facebook/disconnect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pageId }),
-    });
-    setMessage("تم فصل الصفحة.");
-    load();
+    setDisconnecting(true);
+    try {
+      const res = await fetch("/api/channels/facebook/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId }),
+      });
+      setMessage(res.ok ? "تمت إزالة ربط الصفحة." : "تعذر إزالة ربط الصفحة — حاول مجددًا.");
+    } catch {
+      setMessage("تعذر إزالة ربط الصفحة — حاول مجددًا.");
+    } finally {
+      setDisconnecting(false);
+      setConfirmPageId(null);
+      load();
+    }
   }
 
   async function testConnection(pageId: string) {
@@ -174,9 +184,9 @@ export default function ChannelsPage() {
               {testing === c.pageId ? "جارٍ الاختبار…" : "اختبار الاتصال"}
             </Button>
             {c.status === "CONNECTED" && (
-              <Button size="sm" variant="ghost" onClick={() => disconnect(c.pageId!)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+              <Button size="sm" variant="ghost" onClick={() => setConfirmPageId(c.pageId!)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
                 <Unplug size={13} />
-                فصل
+                إزالة الربط
               </Button>
             )}
           </div>
@@ -190,6 +200,30 @@ export default function ChannelsPage() {
             description="اربط صفحة فيسبوك لبدء استقبال رسائل العملاء."
           />
         </GlassCard>
+      )}
+      {confirmPageId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
+            <h2 className="text-base font-bold text-ink">إزالة ربط الصفحة؟</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+              سيتم إيقاف اتصال هذه الصفحة بالنظام ولن يتم استقبال رسائل جديدة منها. لن يتم حذف المحادثات أو العملاء أو الطلبات السابقة.
+            </p>
+            <div className="mt-4 flex justify-start gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setConfirmPageId(null)} disabled={disconnecting}>
+                تراجع
+              </Button>
+              <Button
+                size="sm"
+                className="bg-red-600 text-white hover:bg-red-700"
+                onClick={() => disconnect(confirmPageId)}
+                loading={disconnecting}
+                disabled={disconnecting}
+              >
+                {disconnecting ? "جارٍ إزالة الربط…" : "إزالة الربط"}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

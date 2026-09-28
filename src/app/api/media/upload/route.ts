@@ -6,7 +6,7 @@ import { uploadMedia } from "@/modules/media/service";
 
 export const runtime = "nodejs";
 
-const MAX_BYTES = 100 * 1024 * 1024;
+const MEDIA_CATEGORIES = ["PRODUCT", "KNOWLEDGE", "FEEDBACK", "AVATAR", "BANNER", "OTHER"] as const;
 
 /**
  * Multipart upload. Validation (mime/extension/size) happens inside
@@ -25,18 +25,32 @@ export const POST = createHandler({ permission: "media.write" }, async ({ auth, 
     return typeof v === "string" && v.length > 0 ? v : undefined;
   };
 
+  const categoryRaw = str("category");
+  if (categoryRaw && !(MEDIA_CATEGORIES as readonly string[]).includes(categoryRaw)) {
+    throw new AppError(`Invalid category: ${categoryRaw}`, 422, "VALIDATION_ERROR");
+  }
+  const productIdRaw = str("productId") ?? null;
+  if (productIdRaw && !/^[A-Za-z0-9_-]{8,}$/.test(productIdRaw)) {
+    throw new AppError("Invalid productId", 422, "VALIDATION_ERROR");
+  }
+
+  const data = Buffer.from(await file.arrayBuffer());
+  // Validate real bytes, not just the client-supplied File.size.
+  if (data.length !== file.size) {
+    throw new AppError("File size mismatch", 422, "VALIDATION_ERROR");
+  }
+
   const asset = await uploadMedia(prisma, auth!, {
     filename: file.name,
     mimeType: file.type || "application/octet-stream",
-    size: file.size,
-    data: Buffer.from(await file.arrayBuffer()),
-    category: str("category") as never,
-    productId: str("productId") ?? null,
+    size: data.length,
+    data,
+    category: (categoryRaw as (typeof MEDIA_CATEGORIES)[number] | undefined) as never,
+    productId: productIdRaw,
     title: str("title") ?? null,
     description: str("description") ?? null,
     tags: str("tags") ? str("tags")!.split(",").map((t) => t.trim()).filter(Boolean) : [],
   });
 
-  void MAX_BYTES;
   return ok(asset, 201);
 });

@@ -56,6 +56,9 @@ export async function dispatchOutbound(
   db: Db,
   params: DispatchOutboundParams
 ): Promise<DispatchOutboundResult> {
+  if (!params.text?.trim()) {
+    return { messageId: "", deliveryStatus: "FAILED", error: "تعذر إرسال الرد — نص فارغ" };
+  }
   const outboundKey = `${params.conversationId}:${params.sourceMessageId}`;
 
   // 1. Idempotency (pre-check).
@@ -153,12 +156,10 @@ export async function dispatchOutbound(
       where: { id: account!.id },
       data: { lastSendAt: new Date() },
     });
-    if ((params.senderType ?? "AI") === "HUMAN") {
-      await db.conversation.update({
-        where: { id: params.conversationId },
-        data: { lastAgentMessageAt: new Date() },
-      });
-    }
+    await db.conversation.update({
+      where: { id: params.conversationId },
+      data: { lastAgentMessageAt: new Date() },
+    });
     try {
       const { incrementUsage } = await import("@/core/analytics/usage-service");
       await incrementUsage(db as never, params.workspaceId, { messagesOutbound: 1 });

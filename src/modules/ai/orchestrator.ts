@@ -117,7 +117,54 @@ export async function processAIMessage(
   const customer = await db.customer.findUnique({ where: { id: conversation.customerId } });
   if (!customer) throw new NotFoundError("Customer");
 
-  const provider = deps.provider ?? getAIProvider();
+  // Fail-closed: a misconfigured real provider must never produce fake
+  // replies. Surface AI_FAILED (job retry + handoff + audit) with zero
+  // outbound sends and zero order/memory writes.
+  let provider: AIProvider;
+  try {
+    provider = deps.provider ?? getAIProvider();
+  } catch (err) {
+    const message_text = err instanceof Error ? err.message : String(err);
+    log.error({ err: message_text, conversationId: conversation.id }, "ai_provider_not_configured");
+    if (!params.dryRun) {
+      await logUsage(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        purpose: "RESPONSE",
+        provider: "unconfigured",
+        model: "none",
+        promptVersion: PROMPT_VERSIONS.RESPONSE,
+        promptTokens: 0,
+        completionTokens: 0,
+        latencyMs: 0,
+        success: false,
+        status: "AI_FAILED",
+        error: message_text,
+      });
+      const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+      await createHandoff(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        reason: "AI_FAILURE",
+        metadata: { messageId: message.id, error: message_text },
+        actorUserId: "ai-agent",
+      });
+      await db.conversation.update({
+        where: { id: conversation.id },
+        data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "AI_FAILED" },
+      });
+      await recordAudit(db, {
+        workspaceId: params.workspaceId,
+        action: "conversation.ai_paused",
+        entityType: "Conversation",
+        entityId: conversation.id,
+        metadata: { reason: "AI_NOT_CONFIGURED" },
+      });
+    }
+    return { status: "AI_FAILED", error: message_text };
+  }
   const customerText = message.text ?? "[رسالة وسائط]";
   const recentMessages = await db.message.findMany({
     where: { conversationId: conversation.id, deletedAt: null },
@@ -244,6 +291,26 @@ export async function processAIMessage(
   void extractionOk;
 
   if (orderResult?.needsHumanReview) {
+    // Persist any extracted memories before handing off — never lose facts.
+    if (extraction.memories.length && !params.dryRun) {
+      await saveMemories(db, {
+        workspaceId: params.workspaceId,
+        customerId: customer.id,
+        source: `ai_extraction:${message.id}`,
+        memories: extraction.memories,
+      });
+    }
+    const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+    if (!params.dryRun) {
+      await createHandoff(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        reason: "ORDER_BLOCKED",
+        metadata: { messageId: message.id, confidence: extraction.confidence },
+        actorUserId: "ai-agent",
+      });
+    }
     await db.conversation.update({
       where: { id: conversation.id },
       data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "ORDER_REQUIRES_HUMAN" },
@@ -274,6 +341,15 @@ export async function processAIMessage(
     extraction.confidence < handoffThreshold;
 
   if (mustHandoff && !params.dryRun) {
+    // Save memories even on handoff turns — complaints/requests carry facts.
+    if (extraction.memories.length) {
+      await saveMemories(db, {
+        workspaceId: params.workspaceId,
+        customerId: customer.id,
+        source: `ai_extraction:${message.id}`,
+        memories: extraction.memories,
+      });
+    }
     const { createHandoff } = await import("@/modules/handoffs/handoff-service");
     const handoffReasonMap: Record<string, "INJECTION_DETECTED" | "COMPLAINT" | "CUSTOMER_REQUEST" | "LOW_CONFIDENCE"> = {
       PROMPT_INJECTION: "INJECTION_DETECTED",
@@ -321,8 +397,8 @@ export async function processAIMessage(
       product: context.product
         ? {
             name: context.product.name,
-            price: `${context.product.price} ${context.product.currency}`,
-            currency: "",
+            price: `${context.product.price} ${context.product.currency ?? ""}`.trim(),
+            currency: context.product.currency ?? "",
             stockStatus: context.product.stockStatus,
             shortDescription: context.product.shortDescription,
             benefits: context.product.benefits,
@@ -363,6 +439,9 @@ export async function processAIMessage(
       { attempts: 2 }
     );
     responseText = res.text.trim();
+    if (!responseText) {
+      throw new AIProviderError("Model returned an empty response");
+    }
     await logUsage(db, {
       workspaceId: params.workspaceId,
       conversationId: conversation.id,
@@ -407,6 +486,7 @@ export async function processAIMessage(
     }
   } catch (err) {
     // AI failure: never fabricate. Keep the message; surface AI_FAILED.
+    // Record usage + create a visible handoff so the failure never disappears.
     await logUsage(db, {
       workspaceId: params.workspaceId,
       conversationId: conversation.id,
@@ -424,6 +504,15 @@ export async function processAIMessage(
       error: err instanceof AIProviderError ? err.message : String(err),
     });
     if (!params.dryRun) {
+      const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+      await createHandoff(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        reason: "AI_FAILURE",
+        metadata: { messageId: message.id, error: err instanceof Error ? err.message : String(err) },
+        actorUserId: "ai-agent",
+      });
       await db.conversation.update({
         where: { id: conversation.id },
         data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "AI_FAILED" },
@@ -467,7 +556,7 @@ export async function processAIMessage(
     });
   }
 
-  if (extraction.memories.length) {
+  if (extraction.memories.length && !params.dryRun) {
     await saveMemories(db, {
       workspaceId: params.workspaceId,
       customerId: customer.id,
@@ -478,7 +567,7 @@ export async function processAIMessage(
 
   // 12. Summary refresh at intervals (not every message).
   const inboundCount = await db.message.count({
-    where: { conversationId: conversation.id, direction: "INBOUND" },
+    where: { conversationId: conversation.id, direction: "INBOUND", deletedAt: null },
   });
   if (inboundCount % 6 === 0 && !params.dryRun) {
     await db.backgroundJob.create({

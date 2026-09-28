@@ -7,8 +7,9 @@ import { AppError, NotFoundError } from "@/core/errors";
 import { z } from "zod";
 
 /**
- * POST /api/channels/facebook/disconnect — deactivate the connection.
+ * POST /api/channels/facebook/disconnect — إزالة ربط الصفحة.
  * Conversations/orders/history are preserved; only the connection is disabled.
+ * Also best-effort unsubscribes the page from the Meta app so webhooks stop.
  */
 export const POST = createHandler(
   { body: z.object({ pageId: z.string().min(1) }), permission: "channels.connect" },
@@ -19,12 +20,27 @@ export const POST = createHandler(
     });
     if (!channel) throw new NotFoundError("Facebook channel");
 
+    // Best-effort Meta unsubscribe before revoking the token.
+    if (channel.account) {
+      try {
+        const token = decryptSecret(channel.account.encryptedCredentials);
+        if (token !== "revoked") {
+          const client = getFacebookClient();
+          await client.unsubscribePageFromApp(token, body.pageId);
+        }
+      } catch {
+        // Never block disconnect on Meta API failure; webhook gate drops
+        // further events once status !== CONNECTED.
+      }
+    }
+
     await prisma.channel.update({ where: { id: channel.id }, data: { status: "DISCONNECTED" } });
     if (channel.account) {
       // Destroy the stored token (encrypted) — connection is gone.
+      // tokenExpiresAt=now() makes health/policy report expired, not LONG_LIVED.
       await prisma.channelAccount.update({
         where: { id: channel.account.id },
-        data: { encryptedCredentials: encryptSecret("revoked"), tokenExpiresAt: null },
+        data: { encryptedCredentials: encryptSecret("revoked"), tokenExpiresAt: new Date() },
       });
     }
     await recordAudit(prisma, {
@@ -56,7 +72,15 @@ export const PUT = createHandler(
     });
     if (!channel?.account) throw new NotFoundError("Facebook channel");
 
-    const token = decryptSecret(channel.account.encryptedCredentials);
+    let token: string;
+    try {
+      token = decryptSecret(channel.account.encryptedCredentials);
+    } catch {
+      throw new AppError("تعذر الاتصال بالصفحة — التوكن تالف", 422, "TOKEN_DECRYPT_FAILED");
+    }
+    if (token === "revoked" || channel.status !== "CONNECTED") {
+      throw new AppError("تمت إزالة ربط هذه الصفحة — أعد ربطها أولًا", 422, "TOKEN_REVOKED");
+    }
     const client = getFacebookClient();
     const page = await client.getPage(token, pageId);
     await recordAudit(prisma, {

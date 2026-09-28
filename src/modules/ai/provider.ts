@@ -74,8 +74,12 @@ export class OpenAICompatibleProvider implements AIProvider {
       choices: { message: { content: string } }[];
       usage?: { prompt_tokens: number; completion_tokens: number };
     };
+    const text = json.choices[0]?.message?.content ?? "";
+    if (!text.trim()) {
+      throw new AIProviderError(`${this.name} returned an empty response`);
+    }
     return {
-      text: json.choices[0]?.message?.content ?? "",
+      text,
       promptTokens: json.usage?.prompt_tokens ?? 0,
       completionTokens: json.usage?.completion_tokens ?? 0,
       latencyMs: Date.now() - started,
@@ -228,23 +232,72 @@ function defaultMockResponse(user: string, system: string): string {
 export function getAIProvider(): AIProvider {
   if (globalForAI.__acreMockAI) return globalForAI.__acreMockAI;
   const env = getEnv();
-  if (env.AI_PROVIDER === "openai" && env.OPENAI_API_KEY) {
+  return resolveAIProvider({
+    aiProvider: env.AI_PROVIDER,
+    openaiKey: env.OPENAI_API_KEY,
+    openrouterKey: env.OPENROUTER_API_KEY,
+    responseModel: env.RESPONSE_MODEL,
+    nodeEnv: process.env.NODE_ENV,
+    allowMockAi: env.ALLOW_MOCK_AI,
+  });
+}
+
+/**
+ * Pure provider resolution (no env reads — unit-testable).
+ *
+ * Fail-closed contract for production:
+ * - An explicitly configured real provider with a missing key throws
+ *   AIProviderError(AI_NOT_CONFIGURED) — NEVER a silent mock.
+ * - Production with no provider configured at all also throws.
+ * - MockAIProvider is returned ONLY for explicit test/dev configuration:
+ *   injected mock, NODE_ENV=test, ALLOW_MOCK_AI=1/true/yes, or a
+ *   non-production run with no provider configured (local DX).
+ */
+export function resolveAIProvider(opts: {
+  aiProvider?: string;
+  openaiKey?: string;
+  openrouterKey?: string;
+  responseModel?: string;
+  nodeEnv?: string;
+  allowMockAi?: string;
+}): AIProvider {
+  if (globalForAI.__acreMockAI) return globalForAI.__acreMockAI;
+  if (opts.aiProvider === "openai" && opts.openaiKey) {
     return new OpenAICompatibleProvider({
       name: "openai",
-      apiKey: env.OPENAI_API_KEY,
+      apiKey: opts.openaiKey,
       baseUrl: OPENAI_URL,
-      defaultModel: env.RESPONSE_MODEL || "gpt-4o-mini",
+      defaultModel: opts.responseModel || "gpt-4o-mini",
     });
   }
-  if (env.AI_PROVIDER === "openrouter" && env.OPENROUTER_API_KEY) {
+  if (opts.aiProvider === "openrouter" && opts.openrouterKey) {
     return new OpenAICompatibleProvider({
       name: "openrouter",
-      apiKey: env.OPENROUTER_API_KEY,
+      apiKey: opts.openrouterKey,
       baseUrl: OPENROUTER_URL,
-      defaultModel: env.RESPONSE_MODEL || "openai/gpt-4o-mini",
+      defaultModel: opts.responseModel || "openai/gpt-4o-mini",
     });
   }
-  return new MockAIProvider();
+  if (opts.aiProvider === "openai" || opts.aiProvider === "openrouter") {
+    const expected = opts.aiProvider === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY";
+    throw new AIProviderError(
+      `AI_NOT_CONFIGURED: AI_PROVIDER="${opts.aiProvider}" is configured but ${expected} is missing. Refusing mock fallback — no fake replies will be sent.`
+    );
+  }
+  const mockAllowed =
+    opts.nodeEnv === "test" ||
+    ["1", "true", "yes"].includes((opts.allowMockAi ?? "").toLowerCase()) ||
+    (opts.nodeEnv !== "production" && !opts.aiProvider);
+  if (mockAllowed) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[AI] No real provider configured (AI_PROVIDER=${opts.aiProvider ?? "unset"}) — using MockAIProvider for test/development only.`
+    );
+    return new MockAIProvider();
+  }
+  throw new AIProviderError(
+    `AI_NOT_CONFIGURED: no AI provider configured (AI_PROVIDER=${opts.aiProvider ?? "unset"}). Set AI_PROVIDER + matching API key, or ALLOW_MOCK_AI=1 for explicit dev/test use.`
+  );
 }
 
 /** Test/dev helper: force the mock provider for the current process. */

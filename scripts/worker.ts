@@ -17,7 +17,9 @@ import { registerAutomationBridge } from "../src/modules/automation/engine";
 import { childLogger } from "../src/core/logger";
 
 const log = childLogger("worker");
-const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
+const POLL_INTERVAL_RAW = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
+const POLL_INTERVAL_MS =
+  Number.isFinite(POLL_INTERVAL_RAW) && POLL_INTERVAL_RAW >= 1000 ? POLL_INTERVAL_RAW : 5000;
 const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
 
 let stopping = false;
@@ -33,11 +35,15 @@ async function main(): Promise<void> {
   registerAutomationBridge(prisma);
 
   while (!stopping) {
-    currentCycle = cycle()
-      .catch((err) => log.error({ err }, "worker_cycle_failed"))
-      .finally(() => {
-        currentCycle = null;
-      });
+    currentCycle = cycle();
+    try {
+      await currentCycle;
+    } catch (err) {
+      log.error({ err }, "worker_cycle_failed");
+    } finally {
+      currentCycle = null;
+    }
+    if (stopping) break;
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
 

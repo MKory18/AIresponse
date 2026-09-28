@@ -13,6 +13,8 @@ services:
       REDIS_URL: redis://redis:6379
     env_file:
       - .env
+    volumes:
+      - storage:/app/.data/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +63,8 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public
       REDIS_URL: redis://redis:6379
+    volumes:
+      - storage:/app/.data/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,3 +73,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  storage:

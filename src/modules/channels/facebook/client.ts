@@ -123,6 +123,18 @@ export class FacebookClient {
     return { subscribed: true };
   }
 
+  /** Best-effort removal of the app subscription for a page (disconnect flow). */
+  async unsubscribePageFromApp(pageAccessToken: string, pageId: string): Promise<{ unsubscribed: boolean }> {
+    try {
+      await this.fetchImpl(`${this.graphUrl}/${pageId}/subscribed_apps?${new URLSearchParams({ access_token: pageAccessToken })}`, {
+        method: "DELETE",
+      }).then((r) => r.json().catch(() => ({})));
+      return { unsubscribed: true };
+    } catch {
+      return { unsubscribed: false };
+    }
+  }
+
   /**
    * Verification step: GET /{page-id}/subscribed_apps and return the apps
    * (id + name) the Page is currently subscribed to. Callers match our

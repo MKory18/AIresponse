@@ -23,6 +23,11 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   STORAGE_PROVIDER: z.string().default("local"),
   STORAGE_DIR: z.string().optional(),
+  APP_URL: z.string().optional(),
+  JOBS_SECRET: z.string().optional(),
+  WORKER_POLL_INTERVAL_MS: z.string().optional(),
+  LOG_LEVEL: z.string().default("info"),
+  ALLOW_MOCK_AI: z.string().optional(),
   EMBEDDING_DIMENSIONS: z.string().optional(),
   EMBEDDING_MODEL: z.string().optional(),
   CLASSIFICATION_MODEL: z.string().optional(),
@@ -35,6 +40,11 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 let cached: Env | null = null;
+
+/** Test-only: drop the cached env so process.env changes take effect. */
+export function resetEnvCache(): void {
+  cached = null;
+}
 
 export function getEnv(): Env {
   if (cached) return cached;

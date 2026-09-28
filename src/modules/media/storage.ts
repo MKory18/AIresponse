@@ -92,6 +92,10 @@ export class LocalStorageProvider implements StorageProvider {
 
   async put(key: string, data: Buffer): Promise<StoredFile> {
     const filePath = path.join(this.root, key);
+    // Path traversal guard (same as get/delete).
+    if (!path.resolve(filePath).startsWith(path.resolve(this.root) + path.sep)) {
+      throw new AppError("Invalid storage key", 400, "INVALID_STORAGE_KEY");
+    }
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, data);
     return { storageKey: key, url: `/api/media/file/${key}` };

@@ -7,7 +7,7 @@ import { getStorage } from "@/modules/media/storage";
 
 export const runtime = "nodejs";
 
-type Params = { key: string };
+type Params = { key: string | string[] };
 
 /**
  * Authenticated file streaming. The storageKey's workspace prefix is verified
@@ -18,7 +18,16 @@ export const GET = createHandler(
   { permission: "media.read" },
   async ({ auth, params }) => {
     const { key } = params as Params;
-    const decoded = decodeURIComponent(key);
+    const rawKey = Array.isArray(key) ? key.join("/") : key;
+    if (!rawKey || rawKey.length > 512) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(rawKey);
+    } catch {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
     const workspacePrefix = `${auth!.workspaceId}/`;
     if (!decoded.startsWith(workspacePrefix)) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });

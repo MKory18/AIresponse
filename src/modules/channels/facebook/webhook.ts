@@ -24,8 +24,28 @@ export async function ingestMetaWebhook(
     return { status: "NON_PAGE_OBJECT" };
   }
 
-  const pageId = (payload as { entry?: { id?: string }[] }).entry?.[0]?.id;
-  if (!pageId) return { status: "NON_PAGE_OBJECT" };
+  const entries = (payload as { entry?: { id?: string }[] }).entry ?? [];
+  if (entries.length === 0 || !entries[0]?.id) return { status: "NON_PAGE_OBJECT" };
+
+  // Meta may batch entries for different pages in one POST — route per entry
+  // so page B's messages are never recorded under page A's workspace.
+  const distinctPageIds = [...new Set(entries.map((e) => e?.id).filter(Boolean))] as string[];
+  if (distinctPageIds.length <= 1) {
+    return ingestSinglePage(db, payload, distinctPageIds[0]);
+  }
+
+  let total = 0;
+  let lastStatus: IngestResult["status"] = "OK";
+  for (const pageId of distinctPageIds) {
+    const subPayload = { object: "page", entry: entries.filter((e) => e?.id === pageId) };
+    const res = await ingestSinglePage(db, subPayload, pageId);
+    total += res.normalizedCount ?? 0;
+    if (res.status !== "OK" && res.status !== "DUPLICATE") lastStatus = res.status;
+  }
+  return { status: lastStatus, normalizedCount: total };
+}
+
+async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promise<IngestResult> {
 
   const account = await db.channelAccount.findFirst({
     where: { provider: "FACEBOOK", externalAccountId: pageId },
@@ -49,9 +69,15 @@ export async function ingestMetaWebhook(
         payload: payload as object,
       },
     });
-  } catch {
-    log.info({ event: "facebook.webhook.duplicate", pageId });
-    return { status: "DUPLICATE" };
+  } catch (err) {
+    // Only unique violations are duplicates; real DB errors must surface
+    // so the job retries instead of silently dropping the webhook.
+    const code = (err as { code?: string })?.code;
+    if (code === "P2002") {
+      log.info({ event: "facebook.webhook.duplicate", pageId });
+      return { status: "DUPLICATE" };
+    }
+    throw err;
   }
 
   await db.channelAccount.update({

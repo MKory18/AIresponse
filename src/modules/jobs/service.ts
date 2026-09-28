@@ -82,8 +82,10 @@ export async function processPendingJobs(
   let failed = 0;
 
   for (const job of jobs) {
-    await db.backgroundJob.update({
-      where: { id: job.id },
+    // Atomic claim: only PENDING jobs can transition. Concurrent workers
+    // racing on the same row get count===0 and skip it.
+    const claimed = await db.backgroundJob.updateMany({
+      where: { id: job.id, status: "PENDING" },
       data: {
         status: "PROCESSING",
         startedAt: new Date(),
@@ -92,6 +94,7 @@ export async function processPendingJobs(
         lockedBy: opts.workerId ?? "worker",
       },
     });
+    if (claimed.count === 0) continue;
 
     const handler = handlers[job.type];
     let result: JobResult;
@@ -113,13 +116,22 @@ export async function processPendingJobs(
       processed += 1;
     } else {
       failed += 1;
-      const exhausted = job.attempts + 1 >= job.maxAttempts;
+      // attempts was incremented at claim time; re-read for accuracy.
+      const fresh = await db.backgroundJob.findUnique({
+        where: { id: job.id },
+        select: { attempts: true, maxAttempts: true },
+      });
+      const attempts = fresh?.attempts ?? job.attempts + 1;
+      const maxAttempts = fresh?.maxAttempts ?? job.maxAttempts;
+      const exhausted = attempts >= maxAttempts;
+      // Exponential backoff: 30s, 60s, 120s... capped at 10min.
+      const backoffMs = Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 600_000);
       await db.backgroundJob.update({
         where: { id: job.id },
         data: {
           status: exhausted ? "FAILED" : "PENDING",
           lastError: result.error ?? "unknown error",
-          ...(exhausted ? { finishedAt: new Date() } : { runAfter: new Date(Date.now() + 30_000) }),
+          ...(exhausted ? { finishedAt: new Date() } : { runAfter: new Date(Date.now() + backoffMs), lockedAt: null, lockedBy: null }),
         },
       });
       log.warn({ jobId: job.id, type: job.type, error: result.error, exhausted }, "job_failed");

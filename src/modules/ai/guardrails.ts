@@ -32,6 +32,15 @@ export function validateResponse(params: {
   const violations: string[] = [];
   const { response, context, prohibitedPhrases = [], allowFeedbackQuote = false } = params;
 
+  // 0. Empty responses must never be sent.
+  if (!response || !response.trim()) {
+    return {
+      valid: false,
+      violations: ["EMPTY_RESPONSE"],
+      fallback: "شكرًا لتواصلك 🌹 لحظة وأحولك على زميلي يتأكدلك من هالمعلومة.",
+    };
+  }
+
   // 1. Secrets / credentials must never appear.
   if (SECRET_PATTERNS.some((p) => p.test(response))) {
     violations.push("SENSITIVE_DATA");
