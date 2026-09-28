@@ -1,6 +1,6 @@
 import { childLogger } from "@/core/logger";
 import { processPendingJobs, type JobHandler } from "@/modules/jobs/service";
-import { getEmbeddingProvider } from "@/modules/knowledge/embeddings";
+import { getEmbeddingProvider, getCurrentEmbeddingIdentity } from "@/modules/knowledge/embeddings";
 import { classifySentiment } from "@/modules/feedback/service";
 
 const log = childLogger("jobs");
@@ -8,8 +8,9 @@ const log = childLogger("jobs");
 type HandlerDb = Parameters<typeof processPendingJobs>[0];
 
 /**
- * process_knowledge_document: chunk â†’ embed â†’ persist active vectors.
+ * process_knowledge_document: chunk → embed → persist active vectors.
  * Idempotent: deactivates existing chunks first; safe to retry.
+ * Records embedding provider/model/dimensions for version tracking.
  */
 async function handleProcessDocument(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
   const documentId = String(payload.documentId ?? "");
@@ -19,6 +20,7 @@ async function handleProcessDocument(db: HandlerDb, payload: Record<string, unkn
   try {
     const { chunkText } = await import("@/modules/knowledge/chunker");
     const provider = getEmbeddingProvider();
+    const { provider: providerName, model, dimensions } = getCurrentEmbeddingIdentity();
 
     const chunks = chunkText(doc.content, {
       workspaceId: doc.workspaceId,
@@ -46,6 +48,9 @@ async function handleProcessDocument(db: HandlerDb, payload: Record<string, unkn
           },
           embedding: `[${embedding.join(",")}]`,
           isActive: true,
+          embeddingProvider: providerName,
+          embeddingModel: model,
+          embeddingDimensions: dimensions,
         } as never,
       });
     }
@@ -134,16 +139,33 @@ async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unk
 /** Builds an in-memory vector store from this workspace's active chunks. */
 async function buildWorkspaceVectorStore(db: HandlerDb, workspaceId: string) {
   const { InMemoryVectorStore } = await import("@/modules/knowledge/vector-store");
+  const { getCurrentEmbeddingIdentity } = await import("@/modules/knowledge/embeddings");
+  const filter = getCurrentEmbeddingIdentity();
   const chunks = await (db as any).knowledgeChunk.findMany({
-    where: { workspaceId, isActive: true },
+    where: {
+      workspaceId,
+      isActive: true,
+      embeddingProvider: filter.provider,
+      embeddingModel: filter.model,
+      embeddingDimensions: filter.dimensions,
+    },
     take: 1000,
   });
   const vectors = new Map<string, number[]>();
-  const rows = new Map<string, { documentId: string; workspaceId: string; content: string; metadata: Record<string, unknown>; isActive: boolean }>();
+  const rows = new Map<string, { documentId: string; workspaceId: string; content: string; metadata: Record<string, unknown>; isActive: boolean; embeddingProvider?: string; embeddingModel?: string; embeddingDimensions?: number }>();
   for (const c of chunks) {
     if (!c.embedding) continue;
     vectors.set(c.id, typeof c.embedding === "string" ? JSON.parse(c.embedding) : c.embedding);
-    rows.set(c.id, { documentId: c.documentId, workspaceId, content: c.content, metadata: c.metadata, isActive: true });
+    rows.set(c.id, {
+      documentId: c.documentId,
+      workspaceId,
+      content: c.content,
+      metadata: c.metadata,
+      isActive: true,
+      embeddingProvider: c.embeddingProvider,
+      embeddingModel: c.embeddingModel,
+      embeddingDimensions: c.embeddingDimensions,
+    });
   }
   return new InMemoryVectorStore(vectors, rows);
 }

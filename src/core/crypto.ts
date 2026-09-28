@@ -55,3 +55,47 @@ export function timingSafeEqual(a: string, b: string): boolean {
 export function randomId(bytes = 16): string {
   return crypto.randomBytes(bytes).toString("hex");
 }
+
+/** Signs a payload with HMAC-SHA256 using a derived key from ENCRYPTION_KEY. */
+export function signPayload(payload: Record<string, unknown>): string {
+  const key = deriveKey();
+  const data = Buffer.from(JSON.stringify(payload), "utf8");
+  const hmac = crypto.createHmac("sha256", key).update(data).digest();
+  const encodedData = data.toString("base64url");
+  const encodedSig = hmac.toString("base64url");
+  return `${encodedData}.${encodedSig}`;
+}
+
+/** Verifies a signed payload and returns the decoded payload if valid. */
+export function verifyPayload(token: string, maxAgeSeconds?: number): Record<string, unknown> | null {
+  const key = deriveKey();
+  const dotIndex = token.lastIndexOf(".");
+  if (dotIndex <= 0) return null;
+  const encodedData = token.slice(0, dotIndex);
+  const encodedSig = token.slice(dotIndex + 1);
+  let data: Buffer;
+  try {
+    data = Buffer.from(encodedData, "base64url");
+  } catch {
+    return null;
+  }
+  const expectedSig = crypto.createHmac("sha256", key).update(data).digest();
+  const providedSig = Buffer.from(encodedSig, "base64url");
+  if (providedSig.length !== expectedSig.length) return null;
+  if (!crypto.timingSafeEqual(providedSig, expectedSig)) return null;
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(data.toString("utf8"));
+  } catch {
+    return null;
+  }
+  // Always check exp if present in payload (absolute expiration)
+  const exp = typeof payload.exp === "number" ? payload.exp : 0;
+  if (exp !== 0 && Math.floor(Date.now() / 1000) > exp) return null;
+  // Optional: additional sliding window check
+  if (maxAgeSeconds !== undefined) {
+    const iat = typeof payload.iat === "number" ? payload.iat : 0;
+    if (iat !== 0 && Math.floor(Date.now() / 1000) - iat > maxAgeSeconds) return null;
+  }
+  return payload;
+}

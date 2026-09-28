@@ -227,6 +227,9 @@ describe("Phase 3 — knowledge documents & RAG", () => {
         content: c.content,
         metadata: c.metadata,
         isActive: c.isActive,
+        embeddingProvider: c.embeddingProvider,
+        embeddingModel: c.embeddingModel,
+        embeddingDimensions: c.embeddingDimensions,
       });
     }
     const store = new InMemoryVectorStore(vectors, rows);

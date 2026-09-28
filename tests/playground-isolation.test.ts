@@ -38,12 +38,21 @@ function sessionInput(over: Record<string, unknown> = {}) {
 
 async function memoryStore() {
   const vectors = new Map<string, number[]>();
-  const rows = new Map<string, { documentId: string; workspaceId: string; content: string; metadata: Record<string, unknown>; isActive: boolean }>();
+  const rows = new Map<string, { documentId: string; workspaceId: string; content: string; metadata: Record<string, unknown>; isActive: boolean; embeddingProvider?: string; embeddingModel?: string; embeddingDimensions?: number }>();
   const embedder = new HashEmbeddingProvider(1536);
-  for (const c of db._stores.knowledgeChunk as Array<{ id: string; documentId: string; content: string; workspaceId: string; isActive: boolean }>) {
+  for (const c of db._stores.knowledgeChunk as Array<{ id: string; documentId: string; content: string; workspaceId: string; isActive: boolean; embeddingProvider?: string; embeddingModel?: string; embeddingDimensions?: number }>) {
     if (!c.isActive) continue;
     vectors.set(c.id, await embedder.embed(c.content));
-    rows.set(c.id, { documentId: c.documentId, workspaceId: c.workspaceId, content: c.content, metadata: {}, isActive: true });
+    rows.set(c.id, { 
+      documentId: c.documentId, 
+      workspaceId: c.workspaceId, 
+      content: c.content, 
+      metadata: {}, 
+      isActive: true,
+      embeddingProvider: c.embeddingProvider,
+      embeddingModel: c.embeddingModel,
+      embeddingDimensions: c.embeddingDimensions,
+    });
   }
   return { store: new InMemoryVectorStore(vectors, rows), embedder };
 }

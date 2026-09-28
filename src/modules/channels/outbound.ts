@@ -3,6 +3,7 @@ import { decryptSecret } from "@/core/crypto";
 import { getFacebookClient } from "./facebook/client";
 import { FacebookApiError } from "./facebook/types";
 import { canSendToCustomer } from "./facebook/policy";
+import { generatePublicMediaUrl } from "@/modules/media/service";
 import type { Db } from "@/modules/customers/service";
 
 const log = childLogger("outbound");
@@ -15,6 +16,8 @@ export interface DispatchOutboundParams {
   text: string;
   senderType?: "AI" | "HUMAN";
   senderId?: string;
+  /** Optional media asset ID to attach (image/video/audio/file). */
+  mediaId?: string | null;
 }
 
 export interface DispatchOutboundResult {
@@ -203,7 +206,28 @@ export async function dispatchOutbound(
   }
   const recipientId = identity.channelExternalId;
 
-  // 6. Send via the Facebook client (the only Graph caller).
+  // 6. Prepare payload: text + optional media attachment via signed public URL.
+  let payload: { text?: string; attachment?: { type: "image" | "video" | "audio" | "file"; payload: { url: string } } };
+  if (params.mediaId) {
+    const publicUrl = await generatePublicMediaUrl(db, params.workspaceId, params.mediaId, 60);
+    // Determine attachment type from media asset
+    const asset = await (db as any).mediaAsset.findUnique({
+      where: { id: params.mediaId },
+      select: { type: true, mimeType: true },
+    });
+    let attachType: "image" | "video" | "audio" | "file" = "file";
+    if (asset?.type === "IMAGE") attachType = "image";
+    else if (asset?.type === "VIDEO") attachType = "video";
+    else if (asset?.type === "AUDIO") attachType = "audio";
+    payload = {
+      text: params.text?.trim() || undefined,
+      attachment: { type: attachType, payload: { url: publicUrl } },
+    };
+  } else {
+    payload = { text: params.text };
+  }
+
+  // 7. Send via the Facebook client (the only Graph caller).
   const client = getFacebookClient();
   let pageAccessToken: string;
   try {
@@ -215,7 +239,7 @@ export async function dispatchOutbound(
   }
 
   try {
-    const result = await client.sendMessage(pageAccessToken, recipientId, { text: params.text });
+    const result = await client.sendMessage(pageAccessToken, recipientId, payload);
     await db.message.update({
       where: { id: message.id },
       data: { deliveryStatus: "SENT", externalMessageId: result.messageId, deliveryError: null },

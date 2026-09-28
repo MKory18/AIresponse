@@ -553,21 +553,25 @@ model KnowledgeDocument {
 }
 
 model KnowledgeChunk {
-  id          String                       @id @default(cuid())
-  documentId  String
-  workspaceId String
-  content     String
-  embedding   Unsupported("vector(1536)")?
-  chunkIndex  Int
-  tokenCount  Int                          @default(0)
-  metadata    Json                         @default("{}")
-  isActive    Boolean                      @default(true)
-  createdAt   DateTime                     @default(now())
+  id                   String                       @id @default(cuid())
+  documentId           String
+  workspaceId          String
+  content              String
+  embedding            Unsupported("vector(1536)")?
+  chunkIndex           Int
+  tokenCount           Int                          @default(0)
+  metadata             Json                         @default("{}")
+  isActive             Boolean                      @default(true)
+  embeddingProvider    String?
+  embeddingModel       String?
+  embeddingDimensions  Int?
+  createdAt            DateTime                     @default(now())
 
   document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, documentId])
   @@index([workspaceId, isActive])
+  @@index([workspaceId, embeddingProvider, embeddingModel, embeddingDimensions])
 }
 
 // Architecture for AI answer provenance (populated by Phase 4).

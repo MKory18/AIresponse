@@ -37,7 +37,16 @@ function vectorsFromDb(): InMemoryVectorStore {
     if (!c.isActive || !c.embedding) continue;
     const vec = typeof c.embedding === "string" ? JSON.parse(c.embedding) : c.embedding;
     vectors.set(c.id, vec);
-    rows.set(c.id, { documentId: c.documentId, workspaceId: c.workspaceId, content: c.content, metadata: c.metadata, isActive: c.isActive });
+    rows.set(c.id, { 
+      documentId: c.documentId, 
+      workspaceId: c.workspaceId, 
+      content: c.content, 
+      metadata: c.metadata, 
+      isActive: c.isActive,
+      embeddingProvider: c.embeddingProvider,
+      embeddingModel: c.embeddingModel,
+      embeddingDimensions: c.embeddingDimensions,
+    });
   }
   return new InMemoryVectorStore(vectors, rows);
 }

@@ -4,6 +4,8 @@ import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
 import { getStorage, generateStorageKey, validateUpload } from "./storage";
+import { signPayload } from "@/core/crypto";
+import { getEnv } from "@/core/env";
 
 export interface UploadMediaInput {
   filename: string;
@@ -235,4 +237,19 @@ export async function findRelevantMedia(
     ];
   }
   return db.mediaAsset.findMany({ where, orderBy: { createdAt: "desc" }, take: params.limit ?? 5 });
+}
+
+/** Generates a short-lived signed public URL for outbound delivery (e.g., Facebook Graph API). */
+export async function generatePublicMediaUrl(
+  db: Db,
+  workspaceId: string,
+  mediaId: string,
+  ttlMinutes = 60
+): Promise<string> {
+  const asset = await getOwnedMedia(db, workspaceId, mediaId);
+  const env = getEnv();
+  const baseUrl = env.APP_URL ?? "";
+  const exp = Math.floor(Date.now() / 1000) + ttlMinutes * 60;
+  const token = signPayload({ mediaId: asset.id, workspaceId, exp });
+  return `${baseUrl}/api/media/public/${token}`;
 }

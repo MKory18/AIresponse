@@ -557,6 +557,8 @@ export async function processAIMessage(
     text: responseText,
     sourceMessageId: message.id,
     dryRun: params.dryRun,
+    sendMedia: plan.sendMedia,
+    productId: context.product?.id ?? null,
   });
   const sendMs = Date.now() - sendStarted;
   if (sent && sent.deliveryStatus !== "SENT" && sent.deliveryStatus !== "SKIPPED_DUPLICATE") {
@@ -737,15 +739,22 @@ function handoffReason(extraction: ExtractionResult, injection: boolean): string
 
 async function sendAI(
   db: Db,
-  params: { workspaceId: string; conversationId: string; text: string; sourceMessageId?: string; dryRun?: boolean }
+  params: { workspaceId: string; conversationId: string; text: string; sourceMessageId?: string; dryRun?: boolean; sendMedia?: boolean; productId?: string | null }
 ) {
   if (params.dryRun) return null;
   const { dispatchOutbound } = await import("@/modules/channels/outbound");
+  let mediaId: string | null = null;
+  if (params.sendMedia && params.productId) {
+    const { findProductMedia } = await import("@/modules/media/service");
+    const media = await findProductMedia(db, params.workspaceId, params.productId, 1);
+    if (media.length > 0) mediaId = media[0].id;
+  }
   const result = await dispatchOutbound(db, {
     workspaceId: params.workspaceId,
     conversationId: params.conversationId,
     sourceMessageId: params.sourceMessageId ?? "n/a",
     text: params.text,
+    mediaId: mediaId ?? undefined,
   });
   return { id: result.messageId, deliveryStatus: result.deliveryStatus };
 }
