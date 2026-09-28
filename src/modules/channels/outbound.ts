@@ -1,4 +1,3 @@
-import { prisma as defaultPrisma } from "@/core/db/prisma";
 import { childLogger } from "@/core/logger";
 import { decryptSecret } from "@/core/crypto";
 import { getFacebookClient } from "./facebook/client";
@@ -21,8 +20,15 @@ export interface DispatchOutboundParams {
 export interface DispatchOutboundResult {
   messageId: string;
   deliveryStatus: "SENT" | "FAILED" | "QUEUED" | "SKIPPED_DUPLICATE";
+  /** Delivery status of the pre-existing row when SKIPPED_DUPLICATE. */
+  existingStatus?: string;
   externalMessageId?: string;
   error?: string;
+  channelId?: string;
+  pageId?: string;
+  recipientId?: string;
+  graphCode?: string;
+  durationMs?: number;
 }
 
 /** Human agent reply through the SAME ChannelSender + policy + idempotency. */
@@ -41,65 +47,96 @@ export async function sendHumanReply(
 }
 
 /**
- * ChannelSender â€” the ONLY outbound path to external channels.
+ * ChannelSender — the ONLY outbound path to external channels.
  *
  * Guarantees:
  * - Outbound idempotency: `outboundIdempotencyKey = conversationId:sourceMessageId`
  *   has a UNIQUE constraint; a repeated execution never double-sends.
- * - Recipient resolution from trusted DB state (ChannelIdentity) â€” never from
- *   AI output.
+ * - Retry without duplicates: a pre-existing SENT row returns SKIPPED_DUPLICATE;
+ *   a FAILED/QUEUED/PENDING row is REUSED (same id, same key) and re-sent — so
+ *   UI retry never creates a second row or a second Graph message.
+ * - Recipient resolution from trusted DB state (ChannelIdentity) — never from
+ *   AI output — scoped to this conversation's page via channelConversationId.
  * - Messaging policy (Meta 24h window, connection status, token expiry) is
  *   enforced before any Graph call.
- * - Transient failures â†’ QUEUED (retryable by jobs); permanent â†’ FAILED.
+ * - Transient failures → QUEUED (retryable); permanent → FAILED with
+ *   providerErrorCode + providerErrorMessage + failedAt in metadata.
+ *   Nothing fails silently: every outcome is logged with ids + duration.
+ *   (No tokens, secrets, or API keys are ever logged.)
  */
 export async function dispatchOutbound(
   db: Db,
   params: DispatchOutboundParams
 ): Promise<DispatchOutboundResult> {
+  const started = Date.now();
   if (!params.text?.trim()) {
     return { messageId: "", deliveryStatus: "FAILED", error: "تعذر إرسال الرد — نص فارغ" };
   }
   const outboundKey = `${params.conversationId}:${params.sourceMessageId}`;
 
-  // 1. Idempotency (pre-check).
+  // 1. Idempotency: SENT rows are terminal (skip); FAILED/QUEUED/PENDING rows
+  // are reclaimed for resend under the same id — never a duplicate row.
   const existing = await (db as any).message.findUnique({
     where: { outboundIdempotencyKey: outboundKey },
     select: { id: true, deliveryStatus: true, externalMessageId: true },
   });
-  if (existing) {
+  if (existing && existing.deliveryStatus === "SENT") {
     return {
       messageId: existing.id,
       deliveryStatus: "SKIPPED_DUPLICATE",
+      existingStatus: "SENT",
       externalMessageId: existing.externalMessageId ?? undefined,
+      durationMs: Date.now() - started,
     };
   }
 
-  // 2. Claim the slot atomically via the unique constraint.
+  // 2. Claim the slot atomically via the unique constraint, or reclaim the
+  // failed row for this retry.
   let message;
   try {
-    message = await db.message.create({
-      data: {
-        conversationId: params.conversationId,
-        workspaceId: params.workspaceId,
-        senderType: params.senderType ?? "AI",
-        senderId: params.senderId ?? "ai-agent",
-        direction: "OUTBOUND",
-        type: "TEXT",
-        text: params.text,
-        provider: "facebook",
-        deliveryStatus: "PENDING",
-        outboundIdempotencyKey: outboundKey,
-      },
-    });
+    if (existing) {
+      message = await db.message.update({
+        where: { id: existing.id },
+        data: { text: params.text, deliveryStatus: "PENDING", deliveryError: null },
+      });
+    } else {
+      message = await db.message.create({
+        data: {
+          conversationId: params.conversationId,
+          workspaceId: params.workspaceId,
+          senderType: params.senderType ?? "AI",
+          senderId: params.senderId ?? "ai-agent",
+          direction: "OUTBOUND",
+          type: "TEXT",
+          text: params.text,
+          provider: "facebook",
+          deliveryStatus: "PENDING",
+          outboundIdempotencyKey: outboundKey,
+        },
+      });
+    }
   } catch {
     const raced = await (db as any).message.findUnique({
       where: { outboundIdempotencyKey: outboundKey },
       select: { id: true, deliveryStatus: true, externalMessageId: true },
     });
-    if (raced) {
-      return { messageId: raced.id, deliveryStatus: "SKIPPED_DUPLICATE", externalMessageId: raced.externalMessageId ?? undefined };
+    if (raced && raced.deliveryStatus === "SENT") {
+      return {
+        messageId: raced.id,
+        deliveryStatus: "SKIPPED_DUPLICATE",
+        existingStatus: "SENT",
+        externalMessageId: raced.externalMessageId ?? undefined,
+        durationMs: Date.now() - started,
+      };
     }
-    throw new Error("Outbound claim failed without duplicate");
+    if (raced) {
+      message = await db.message.update({
+        where: { id: raced.id },
+        data: { text: params.text, deliveryStatus: "PENDING", deliveryError: null },
+      });
+    } else {
+      throw new Error("Outbound claim failed without duplicate");
+    }
   }
 
   // 3. Load channel + account + recipient from trusted state.
@@ -107,12 +144,26 @@ export async function dispatchOutbound(
     where: { id: params.conversationId },
     include: { channel: { include: { account: true } }, customer: true },
   });
-  const channel = conversation.channel as { type: string; status: string; account?: { id: string; encryptedCredentials: string; tokenExpiresAt: Date | null } | null } | null;
+  const channel = conversation.channel as {
+    id: string;
+    type: string;
+    status: string;
+    externalId?: string | null;
+    account?: { id: string; encryptedCredentials: string; tokenExpiresAt: Date | null } | null;
+  } | null;
   const account = channel?.account;
+  const ctx = {
+    messageId: message.id,
+    conversationId: params.conversationId,
+    channelId: channel?.id,
+    pageId: channel?.externalId ?? undefined,
+    provider: "facebook",
+  };
 
   if (!channel || channel.type !== "FACEBOOK" || !account) {
-    await markFailed(db, message.id, "CHANNEL_NOT_CONFIGURED");
-    return { messageId: message.id, deliveryStatus: "FAILED", error: "CHANNEL_NOT_CONFIGURED" };
+    await markFailed(db, message.id, "CHANNEL_NOT_CONFIGURED", "القناة غير مربوطة");
+    log.warn({ ...ctx, status: "FAILED", reason: "CHANNEL_NOT_CONFIGURED", durationMs: Date.now() - started }, "facebook.message.failed");
+    return { messageId: message.id, deliveryStatus: "FAILED", error: "CHANNEL_NOT_CONFIGURED", channelId: ctx.channelId, pageId: ctx.pageId, durationMs: Date.now() - started };
   }
 
   // 4. Messaging policy.
@@ -122,19 +173,35 @@ export async function dispatchOutbound(
     lastCustomerMessageAt: conversation.lastCustomerMessageAt,
   });
   if (!policy.allowed) {
-    await markFailed(db, message.id, `POLICY_${policy.reason}`);
-    return { messageId: message.id, deliveryStatus: "FAILED", error: `POLICY_${policy.reason}` };
+    await markFailed(db, message.id, `POLICY_${policy.reason}`, "تعذر الإرسال حسب سياسة المنصة");
+    log.warn({ ...ctx, status: "FAILED", reason: `POLICY_${policy.reason}`, durationMs: Date.now() - started }, "facebook.message.failed");
+    return { messageId: message.id, deliveryStatus: "FAILED", error: `POLICY_${policy.reason}`, channelId: ctx.channelId, pageId: ctx.pageId, durationMs: Date.now() - started };
   }
 
-  // 5. Recipient from ChannelIdentity (trusted).
-  const identity = await db.channelIdentity.findFirst({
+  // 5. Recipient from ChannelIdentity (trusted), scoped to this conversation's
+  // page via channelConversationId — never AI output, never another page.
+  const conversationPsid = (conversation as { channelConversationId?: string }).channelConversationId;
+  let identity = conversationPsid
+    ? await db.channelIdentity.findFirst({
+        where: {
+          workspaceId: params.workspaceId,
+          customerId: conversation.customerId,
+          channelType: "FACEBOOK",
+          channelExternalId: conversationPsid,
+        },
+        select: { channelExternalId: true },
+      })
+    : null;
+  identity ??= await db.channelIdentity.findFirst({
     where: { workspaceId: params.workspaceId, customerId: conversation.customerId, channelType: "FACEBOOK" },
     select: { channelExternalId: true },
   });
   if (!identity) {
-    await markFailed(db, message.id, "RECIPIENT_NOT_FOUND");
-    return { messageId: message.id, deliveryStatus: "FAILED", error: "RECIPIENT_NOT_FOUND" };
+    await markFailed(db, message.id, "RECIPIENT_NOT_FOUND", "تعذر العثور على المستلم");
+    log.warn({ ...ctx, status: "FAILED", reason: "RECIPIENT_NOT_FOUND", durationMs: Date.now() - started }, "facebook.message.failed");
+    return { messageId: message.id, deliveryStatus: "FAILED", error: "RECIPIENT_NOT_FOUND", channelId: ctx.channelId, pageId: ctx.pageId, durationMs: Date.now() - started };
   }
+  const recipientId = identity.channelExternalId;
 
   // 6. Send via the Facebook client (the only Graph caller).
   const client = getFacebookClient();
@@ -142,15 +209,16 @@ export async function dispatchOutbound(
   try {
     pageAccessToken = decryptSecret(account.encryptedCredentials);
   } catch {
-    await markFailed(db, message.id, "TOKEN_DECRYPT_FAILED");
-    return { messageId: message.id, deliveryStatus: "FAILED", error: "TOKEN_DECRYPT_FAILED" };
+    await markFailed(db, message.id, "TOKEN_DECRYPT_FAILED", "تعذر الاتصال بالصفحة");
+    log.warn({ ...ctx, recipientId, status: "FAILED", reason: "TOKEN_DECRYPT_FAILED", durationMs: Date.now() - started }, "facebook.message.failed");
+    return { messageId: message.id, deliveryStatus: "FAILED", error: "TOKEN_DECRYPT_FAILED", channelId: ctx.channelId, pageId: ctx.pageId, recipientId, durationMs: Date.now() - started };
   }
 
   try {
-    const result = await client.sendMessage(pageAccessToken, identity.channelExternalId, { text: params.text });
+    const result = await client.sendMessage(pageAccessToken, recipientId, { text: params.text });
     await db.message.update({
       where: { id: message.id },
-      data: { deliveryStatus: "SENT", externalMessageId: result.messageId },
+      data: { deliveryStatus: "SENT", externalMessageId: result.messageId, deliveryError: null },
     });
     await db.channelAccount.update({
       where: { id: account!.id },
@@ -166,31 +234,52 @@ export async function dispatchOutbound(
     } catch {
       // never break sending
     }
-    log.info({ event: "facebook.message.sent", conversationId: params.conversationId, messageId: message.id });
-    return { messageId: message.id, deliveryStatus: "SENT", externalMessageId: result.messageId };
+    log.info({ ...ctx, recipientId, status: "SENT", graphCode: result.graphCode, durationMs: Date.now() - started }, "facebook.message.sent");
+    return { messageId: message.id, deliveryStatus: "SENT", externalMessageId: result.messageId, graphCode: result.graphCode, channelId: ctx.channelId, pageId: ctx.pageId, recipientId, durationMs: Date.now() - started };
   } catch (err) {
     const isTransient = err instanceof FacebookApiError && err.kind === ("TRANSIENT" as const);
     const code = err instanceof FacebookApiError ? `${err.code ?? ""}/${err.subcode ?? ""}` : "";
+    const httpStatus = err instanceof FacebookApiError ? err.httpStatus : undefined;
     await db.message.update({
       where: { id: message.id },
       data: {
         deliveryStatus: isTransient ? "QUEUED" : "FAILED",
         deliveryError: err instanceof Error ? err.message : String(err),
-        metadata: { providerErrorCode: code, retryable: isTransient, retryCount: 1 },
+        metadata: {
+          providerErrorCode: code || "UNKNOWN",
+          providerErrorMessage: err instanceof Error ? err.message : String(err),
+          failedAt: new Date().toISOString(),
+          retryable: isTransient,
+          retryCount: 1,
+        },
       },
     });
-    log.warn({ event: "facebook.message.failed", conversationId: params.conversationId, transient: isTransient, code });
+    log.warn({ ...ctx, recipientId, status: isTransient ? "QUEUED" : "FAILED", graphCode: code, httpStatus, durationMs: Date.now() - started }, "facebook.message.failed");
     return {
       messageId: message.id,
       deliveryStatus: isTransient ? "QUEUED" : "FAILED",
       error: err instanceof Error ? err.message : String(err),
+      graphCode: code || undefined,
+      channelId: ctx.channelId,
+      pageId: ctx.pageId,
+      recipientId,
+      durationMs: Date.now() - started,
     };
   }
 }
 
-async function markFailed(db: Db, messageId: string, reason: string) {
+async function markFailed(db: Db, messageId: string, reason: string, arabicMessage?: string) {
   await db.message.update({
     where: { id: messageId },
-    data: { deliveryStatus: "FAILED", deliveryError: reason, metadata: { retryable: false } },
+    data: {
+      deliveryStatus: "FAILED",
+      deliveryError: arabicMessage ? `${reason}: ${arabicMessage}` : reason,
+      metadata: {
+        providerErrorCode: reason,
+        providerErrorMessage: arabicMessage ?? reason,
+        failedAt: new Date().toISOString(),
+        retryable: false,
+      },
+    },
   });
 }

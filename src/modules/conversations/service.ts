@@ -10,6 +10,8 @@ import { childLogger } from "@/core/logger";
 export interface IncomingMessageInput {
   workspaceId: string;
   channelType: ChannelType;
+  /** Exact channel (page) the message arrived on — from webhook routing. */
+  channelId?: string;
   externalUserId: string;
   externalUserName?: string | null;
   externalConversationId: string;
@@ -61,14 +63,30 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
   });
 
   let conversationCreated = false;
+  // A soft-deleted thread never resurfaces via polling — but a brand-new
+  // inbound message from the same customer reopens it (history preserved).
+  if (conversation && (conversation as { deletedAt?: Date | null }).deletedAt) {
+    conversation = await db.conversation.update({
+      where: { id: conversation.id },
+      data: { deletedAt: null, deletedBy: null, status: "OPEN" as ConversationStatus, unreadCount: 0 },
+    });
+    await recordAudit(db, {
+      workspaceId: input.workspaceId,
+      userId: null,
+      action: "conversation.restored",
+      entityType: "Conversation",
+      entityId: conversation.id,
+    });
+  }
   if (!conversation) {
     conversation = await db.conversation.create({
       data: {
         workspaceId: input.workspaceId,
         customerId,
-        // Channel rows are managed by the channels module; pipeline requires
-        // a channel record per conversation for provider policy checks.
-        channelId: await ensureChannelId(db, input.workspaceId, input.channelType),
+        // Prefer the exact channel (page) resolved by webhook routing, so the
+        // reply later uses the right page token and the UI shows the right page.
+        // Fallback keeps single-page workspaces working unchanged.
+        channelId: input.channelId ?? (await ensureChannelId(db, input.workspaceId, input.channelType)),
         channelConversationId: input.externalConversationId,
       },
     });
@@ -235,6 +253,9 @@ export async function getOwnedConversation(db: Db, workspaceId: string, conversa
   if (!conversation || conversation.workspaceId !== workspaceId) {
     throw new NotFoundError("Conversation");
   }
+  if ((conversation as { deletedAt?: Date | null }).deletedAt) {
+    throw new NotFoundError("Conversation");
+  }
   return conversation;
 }
 
@@ -255,15 +276,33 @@ export async function listConversations(
   Paginated<
     Prisma.ConversationGetPayload<{
       include: {
-        customer: { select: { id: true; name: true; phone: true; status: true } };
-        channel: { select: { type: true } };
+        customer: {
+          select: {
+            id: true;
+            name: true;
+            phone: true;
+            status: true;
+            identities: { select: { displayName: true; channelType: true } };
+          };
+        };
+        channel: {
+          select: {
+            type: true;
+            displayName: true;
+            externalId: true;
+            account: { select: { pageName: true } };
+          };
+        };
         assignedAgent: { select: { id: true; name: true } };
       };
     }>
   >
 > {
   const limit = Math.min(params.limit ?? 30, 100);
-  const where: Prisma.ConversationWhereInput = { workspaceId: params.workspaceId };
+  const where: Prisma.ConversationWhereInput = {
+    workspaceId: params.workspaceId,
+    deletedAt: null,
+  };
   if (params.status) where.status = params.status;
   if (params.aiState) where.aiState = params.aiState;
   if (params.unreadOnly) where.unreadCount = { gt: 0 };
@@ -289,8 +328,23 @@ export async function listConversations(
   const conversations = await db.conversation.findMany({
     where,
     include: {
-      customer: { select: { id: true, name: true, phone: true, status: true } },
-      channel: { select: { type: true } },
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          status: true,
+          identities: { select: { displayName: true, channelType: true } },
+        },
+      },
+      channel: {
+        select: {
+          type: true,
+          displayName: true,
+          externalId: true,
+          account: { select: { pageName: true } },
+        },
+      },
       assignedAgent: { select: { id: true, name: true } },
     },
     orderBy: [{ lastCustomerMessageAt: "desc" }, { id: "desc" }],
@@ -305,13 +359,33 @@ export async function listConversations(
 
 export async function getConversationDetail(db: Db, ctx: ActorContext, conversationId: string) {
   const conversation = await getOwnedConversation(db, ctx.workspaceId, conversationId);
+  // Page identity for the header badge — same source as the list.
+  const channel = await db.channel.findUnique({
+    where: { id: conversation.channelId },
+    select: {
+      type: true,
+      displayName: true,
+      externalId: true,
+      account: { select: { pageName: true } },
+    },
+  });
+  const identities = await db.channelIdentity.findMany({
+    where: { workspaceId: ctx.workspaceId, customerId: conversation.customerId },
+    select: { displayName: true, channelType: true },
+  });
   const orders = await db.order.findMany({
     where: { workspaceId: ctx.workspaceId, customerId: conversation.customerId },
     orderBy: { createdAt: "desc" },
     take: 10,
     select: { id: true, orderNumber: true, status: true, total: true, currency: true, createdAt: true },
   });
-  return { ...conversation, orders, aiSummary: conversation.summary ?? null };
+  return {
+    ...conversation,
+    channel: channel ?? { type: "FACEBOOK", displayName: null, externalId: null, account: null },
+    customer: { ...conversation.customer, identities },
+    orders,
+    aiSummary: conversation.summary ?? null,
+  };
 }
 
 export async function listMessages(
@@ -434,6 +508,57 @@ export async function markConversationUnread(db: Db, ctx: ActorContext, conversa
     where: { id: conversationId },
     data: { unreadCount: { increment: 1 } },
   });
+  return updated;
+}
+
+// ── Soft delete (hide from inbox, preserve Customer/Orders/history) ─────────
+
+/**
+ * Soft-deletes a conversation: sets deletedAt/deletedBy so it disappears from
+ * the inbox list, detail, and polling — while Customer, Orders, Messages,
+ * usage logs, and audit history are fully preserved (nothing is hard-deleted).
+ * Open follow-ups/handoffs for the thread are cancelled so no future send
+ * targets a hidden conversation. Workspace-isolated + audited.
+ */
+export async function deleteConversation(db: Db, ctx: ActorContext, conversationId: string) {
+  const conversation = await getOwnedConversation(db, ctx.workspaceId, conversationId);
+
+  const updated = await db.conversation.update({
+    where: { id: conversationId },
+    data: { deletedAt: new Date(), deletedBy: ctx.userId, unreadCount: 0 },
+  });
+
+  // Cancel pending automation for the hidden thread (best-effort).
+  try {
+    await (db as unknown as {
+      followUp: { updateMany: (args: unknown) => Promise<unknown> };
+    }).followUp.updateMany({
+      where: { workspaceId: ctx.workspaceId, conversationId, status: "SCHEDULED" },
+      data: { status: "CANCELLED" },
+    });
+  } catch { /* never break deletion */ }
+  try {
+    await (db as unknown as {
+      humanHandoff: { updateMany: (args: unknown) => Promise<unknown> };
+    }).humanHandoff.updateMany({
+      where: { workspaceId: ctx.workspaceId, conversationId, status: { in: ["OPEN", "CLAIMED"] } },
+      data: { status: "CANCELLED", resolvedAt: new Date() },
+    });
+  } catch { /* never break deletion */ }
+
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "conversation.deleted",
+    entityType: "Conversation",
+    entityId: conversationId,
+    ip: ctx.ip,
+    metadata: { customerId: conversation.customerId },
+  });
+
+  await eventBus.publish(
+    makeEvent("ConversationUpdated", ctx.workspaceId, { conversationId, type: "ConversationDeleted" })
+  );
   return updated;
 }
 

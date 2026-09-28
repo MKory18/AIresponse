@@ -33,10 +33,32 @@ export async function resolveCustomerByChannelIdentity(
   });
 
   if (identity) {
-    // Identity exists â€” ensure it belongs to this workspace (identity ids are
+    // Identity exists — ensure it belongs to this workspace (identity ids are
     // globally unique per channel, so a mismatch would indicate data drift).
     if (identity.workspaceId !== input.workspaceId) {
       throw new AppError("Channel identity belongs to another workspace", 409, "IDENTITY_CONFLICT");
+    }
+    // Backfill names on every inbound (not just create): the Facebook webhook
+    // carries no profile name, but later enrichment (profile API, AI-extracted
+    // name, manual edit) must stick. Never overwrite a real name with null.
+    const updates: Record<string, string> = {};
+    if (input.displayName && !(identity as { displayName?: string | null }).displayName) {
+      updates.displayName = input.displayName;
+    }
+    if (Object.keys(updates).length > 0) {
+      await db.channelIdentity.update({ where: { id: identity.id }, data: updates });
+    }
+    if (input.displayName) {
+      const customer = await db.customer.findUnique({
+        where: { id: identity.customerId },
+        select: { id: true, name: true },
+      });
+      if (customer && !customer.name) {
+        await db.customer.update({
+          where: { id: customer.id },
+          data: { name: input.displayName },
+        });
+      }
     }
     return { customerId: identity.customerId, created: false };
   }
@@ -137,7 +159,7 @@ export async function getCustomerDetail(db: Db, ctx: ActorContext, customerId: s
       select: { id: true, orderNumber: true, status: true, total: true, currency: true, createdAt: true },
     }),
     db.conversation.findMany({
-      where: { workspaceId: ctx.workspaceId, customerId },
+      where: { workspaceId: ctx.workspaceId, customerId, deletedAt: null },
       orderBy: { updatedAt: "desc" },
       take: 10,
       select: { id: true, status: true, aiState: true, summary: true, updatedAt: true },

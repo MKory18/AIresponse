@@ -33,7 +33,8 @@ export class FacebookApiError extends Error {
     message: string,
     public readonly kind: FacebookErrorKind,
     public readonly code?: number,
-    public readonly subcode?: number
+    public readonly subcode?: number,
+    public readonly httpStatus?: number
   ) {
     super(message);
     this.name = "FacebookApiError";

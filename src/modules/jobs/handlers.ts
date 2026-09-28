@@ -214,32 +214,101 @@ async function handleGenerateSummary(db: HandlerDb, payload: Record<string, unkn
 
 /** process_webhook_event: normalized Facebook events → Conversation Engine. */
 async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const started = Date.now();
   const { processIncomingMessage } = await import("@/modules/conversations/service");
   const workspaceId = String(payload.workspaceId ?? "");
   const webhookEventId = String(payload.webhookEventId ?? "");
+  const channelAccountId = String(payload.channelAccountId ?? "");
   const messages = (payload.messages as Array<Record<string, unknown>>) ?? [];
 
-  for (const m of messages) {
-    await processIncomingMessage(db, {
-      workspaceId,
-      channelType: "FACEBOOK",
-      externalUserId: String(m.externalCustomerId ?? ""),
-      externalConversationId: String(m.externalConversationId ?? ""),
-      externalMessageId: String(m.externalMessageId ?? ""),
-      externalEventId: String(m.externalEventId ?? ""),
-      provider: "facebook",
-      type: "TEXT",
-      text: (m.text as string) ?? null,
-      metadata: { channelAccountId: m.channelAccountId, attachments: m.attachments ?? [] },
-      sentAt: m.timestamp ? new Date(m.timestamp as string) : undefined,
+  // Resolve the exact channel (page) once per batch for correct token + badge.
+  let channelId: string | undefined;
+  let pageToken: string | null = null;
+  try {
+    const account = await (db as any).channelAccount.findUnique({
+      where: { id: channelAccountId },
+      include: { channel: true },
     });
+    channelId = account?.channel?.id ?? account?.channelId;
+    if (account?.encryptedCredentials) {
+      const { decryptSecret } = await import("@/core/crypto");
+      try {
+        pageToken = decryptSecret(account.encryptedCredentials);
+      } catch {
+        pageToken = null;
+      }
+    }
+  } catch {
+    channelId = undefined;
   }
 
-  await (db as any).webhookEvent.update({
-    where: { id: webhookEventId },
-    data: { processedAt: new Date() },
-  });
-  return { success: true };
+  const { getFacebookClient } = await import("@/modules/channels/facebook/client");
+  const fbClient = getFacebookClient();
+  let processed = 0;
+  let failed = 0;
+  for (const m of messages) {
+    const psid = String(m.externalCustomerId ?? "");
+    // Best-effort sender profile name (cached per batch): fills Customer.name
+    // so the inbox shows the real name instead of the "عميل" fallback.
+    // Never breaks ingestion — failures fall through to null.
+    let senderName: string | null = null;
+    if (pageToken && psid) {
+      try {
+        const existing = await (db as any).channelIdentity.findFirst({
+          where: { workspaceId, channelType: "FACEBOOK", channelExternalId: psid },
+          select: { displayName: true },
+        });
+        if (!existing?.displayName) {
+          const profile = await fbClient.getSenderProfile(pageToken, psid);
+          senderName = profile?.name ?? null;
+        }
+      } catch {
+        senderName = null;
+      }
+    }
+    try {
+      await processIncomingMessage(db, {
+        workspaceId,
+        channelType: "FACEBOOK",
+        channelId,
+        externalUserId: psid,
+        externalUserName: (m.externalUserName as string | undefined) ?? senderName ?? undefined,
+        externalConversationId: String(m.externalConversationId ?? ""),
+        externalMessageId: String(m.externalMessageId ?? ""),
+        externalEventId: String(m.externalEventId ?? ""),
+        provider: "facebook",
+        type: "TEXT",
+        text: (m.text as string) ?? null,
+        metadata: { channelAccountId: m.channelAccountId, attachments: m.attachments ?? [] },
+        sentAt: m.timestamp ? new Date(m.timestamp as string) : undefined,
+      });
+      processed += 1;
+    } catch (err) {
+      // One poison message must not drop the whole batch — each message is
+      // independently idempotent and retried via its own job/redelivery.
+      failed += 1;
+      log.warn(
+        { webhookEventId, workspaceId, error: err instanceof Error ? err.message : String(err) },
+        "webhook_message_failed"
+      );
+    }
+  }
+
+  try {
+    await (db as any).webhookEvent.update({
+      where: { id: webhookEventId },
+      data: { processedAt: new Date() },
+    });
+  } catch {
+    // never fail the batch on bookkeeping
+  }
+  log.info(
+    { webhookEventId, workspaceId, processed, failed, durationMs: Date.now() - started },
+    "webhook_event_processed"
+  );
+  return failed > 0 && processed === 0
+    ? { success: false, error: `${failed} message(s) failed` }
+    : { success: true };
 }
 
 /** evaluate_automation: runs the Automation Engine for one trusted event. */

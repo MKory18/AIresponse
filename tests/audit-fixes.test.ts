@@ -26,6 +26,8 @@ import { ingestMetaWebhook } from "@/modules/channels/facebook/webhook";
 import { dispatchOutbound } from "@/modules/channels/outbound";
 import { processPendingJobs } from "@/modules/jobs/service";
 import { validateUpload } from "@/modules/media/storage";
+import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
+import { encryptSecret } from "@/core/crypto";
 
 const WS_A = "ws-audit-a";
 const WS_B = "ws-audit-b";
@@ -61,6 +63,33 @@ beforeEach(async () => {
   await db.aISettings.create({
     data: { workspaceId: WS_A, provider: "mock", temperature: 0.4, maxTokens: 500 },
   } as never);
+  // Production-faithful channel fixtures so outbound honestly succeeds.
+  const ch = (await db.channel.create({
+    data: { workspaceId: WS_A, type: "FACEBOOK", status: "CONNECTED", displayName: "Demo Page", externalId: "page-audit" },
+  } as never)) as any;
+  await db.channelAccount.create({
+    data: {
+      channelId: ch.id, provider: "FACEBOOK", externalAccountId: "page-audit", pageName: "Demo Page",
+      encryptedCredentials: encryptSecret("page-token-test"),
+    },
+  } as never);
+  setFacebookClientFactory(
+    () =>
+      new FacebookClient({
+        fetchImpl: (async (url: string, init?: { body?: string }) => {
+          const u = new URL(url as string);
+          if (u.pathname.endsWith("/me/messages")) {
+            let body: any = null;
+            try {
+              body = JSON.parse(String((init as any)?.body ?? ""));
+            } catch { /* ignore */ }
+            const recipientId = body?.recipient?.id ?? "psid";
+            return Response.json({ recipient_id: recipientId, message_id: `mid-${recipientId}` });
+          }
+          return Response.json({ id: "page-audit", name: "Demo Page" });
+        }) as typeof fetch,
+      })
+  );
 });
 
 describe("audit fixes — AI provider", () => {
@@ -345,7 +374,9 @@ describe("audit fixes — facebook + isolation + outbound", () => {
 
   it("18. failed outbound send is visible (FAILED, not silent)", async () => {
     const { conversationId } = await seedConversation("مرحبا");
-    // No channel configured → CHANNEL_NOT_CONFIGURED FAILED (visible error)
+    // Disconnect the page → POLICY failure with visible code + failedAt.
+    const ch = (db._stores.channel as any[]).find((c) => c.workspaceId === WS_A);
+    await db.channel.update({ where: { id: ch.id }, data: { status: "DISCONNECTED" } } as never);
     const res = await dispatchOutbound(db as Db, {
       workspaceId: WS_A,
       conversationId,
@@ -354,6 +385,9 @@ describe("audit fixes — facebook + isolation + outbound", () => {
     });
     expect(res.deliveryStatus).toBe("FAILED");
     expect(res.error).toBeTruthy();
+    const row = (db._stores.message as any[]).find((m) => m.id === res.messageId);
+    expect(row.metadata.providerErrorCode).toBeTruthy();
+    expect(row.metadata.failedAt).toBeTruthy();
   });
 
   it("empty outbound text never sends", async () => {

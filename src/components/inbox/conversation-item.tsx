@@ -1,13 +1,13 @@
 "use client";
 
-import { Bot, ShoppingBag, Sparkles, UserRound } from "lucide-react";
+import { Bot, Facebook, ShoppingBag, Sparkles, UserRound } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
 import { EmptyState } from "../ui/empty-state";
 import { Skeleton } from "../ui/skeleton";
-import { CHANNEL_ICONS, type ConversationListItem } from "./types";
+import { CHANNEL_ICONS, displayNameOf, pageNameOf, type ConversationListItem } from "./types";
 
 export function ConversationItem({
   conversation,
@@ -20,6 +20,8 @@ export function ConversationItem({
 }) {
   const c = conversation;
   const ChIcon = CHANNEL_ICONS[c.channel.type];
+  const name = displayNameOf(c) ?? t.inbox.unknownCustomer;
+  const pageName = pageNameOf(c);
   return (
     <button
       onClick={() => onSelect(c.id)}
@@ -40,7 +42,7 @@ export function ConversationItem({
       />
       <div className="flex items-center gap-2.5">
         <div className="relative shrink-0">
-          <Avatar name={c.customer.name ?? c.customer.phone} size="sm" ring={selected} />
+          <Avatar name={name} size="sm" ring={selected} />
           {ChIcon && (
             <span className="glass-subtle absolute -bottom-1 -end-1 flex h-4 w-4 items-center justify-center rounded-full text-ink-muted">
               <ChIcon size={9} />
@@ -50,10 +52,16 @@ export function ConversationItem({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <span className="truncate text-[13px] font-bold text-ink">
-              {c.customer.name ?? c.customer.phone ?? "عميل"}
+              {name}
             </span>
             <span className="shrink-0 text-[10px] text-ink-subtle">{timeAgo(c.lastCustomerMessageAt)}</span>
           </div>
+          {pageName && (
+            <p className="mt-0.5 flex min-w-0 items-center gap-1 truncate text-[11px] font-semibold text-brand-600 dark:text-brand-300">
+              <Facebook size={10} className="shrink-0" />
+              <span className="truncate">{pageName}</span>
+            </p>
+          )}
           {c.customer.phone ? (
             <p className={cn("num mt-0.5 text-[11px]", c.unreadCount > 0 ? "font-semibold text-ink" : "text-ink-subtle")}>{c.customer.phone}</p>
           ) : null}

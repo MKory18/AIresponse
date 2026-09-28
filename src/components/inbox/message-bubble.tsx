@@ -1,12 +1,12 @@
 "use client";
 
-import { Bot, Check, CheckCheck } from "lucide-react";
+import { Bot, Check, CheckCheck, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatTime, label, t } from "@/lib/i18n";
 import type { MessageItem } from "./types";
 
 /** Premium chat bubble: compact, elegant, clearly separated incoming/outgoing. */
-export function MessageBubble({ message }: { message: MessageItem }) {
+export function MessageBubble({ message, onRetry }: { message: MessageItem; onRetry?: (m: MessageItem) => void }) {
   const m = message;
   const outbound = m.direction === "OUTBOUND";
   const system = m.senderType === "SYSTEM";
@@ -46,17 +46,28 @@ export function MessageBubble({ message }: { message: MessageItem }) {
         )}
         <p className={cn("mt-1 flex items-center gap-1 text-[10px]", outbound ? "text-white/70" : "text-ink-subtle")}>
           <span className="num">{formatTime(m.createdAt)}</span>
-          {outbound && m.senderType === "HUMAN" && (
+          {outbound && (
             <span className="inline-flex items-center gap-0.5">
               ·
               {m.deliveryStatus === "FAILED" ? (
-                "فشل الإرسال"
-              ) : m.deliveryStatus === "PENDING" ? (
-                "جارٍ الإرسال…"
+                <span className="inline-flex items-center gap-1">
+                  {t.delivery.failed}
+                  {onRetry && (
+                    <button
+                      onClick={() => onRetry(m)}
+                      className="inline-flex items-center gap-0.5 font-bold underline underline-offset-2"
+                    >
+                      <RotateCcw size={11} />
+                      {t.delivery.retry}
+                    </button>
+                  )}
+                </span>
+              ) : m.deliveryStatus === "PENDING" || m.deliveryStatus === "QUEUED" ? (
+                t.delivery.sending
               ) : (
                 <span className="inline-flex items-center gap-0.5">
                   <CheckCheck size={12} />
-                  أُرسلت
+                  {t.delivery.sent}
                 </span>
               )}
             </span>

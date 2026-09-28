@@ -4,6 +4,7 @@ export const PERMISSIONS = [
   "conversations.read",
   "conversations.reply",
   "conversations.assign",
+  "conversations.delete",
   "orders.read",
   "orders.write",
   "products.read",
@@ -62,6 +63,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   MANAGER: [
     ...SALES_SUPPORT,
     "conversations.assign",
+    "conversations.delete",
     "products.write",
     "media.write",
     "feedback.write",

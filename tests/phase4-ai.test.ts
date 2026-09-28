@@ -7,6 +7,8 @@ import { heuristicIntent, looksLikeInjection } from "@/modules/ai/intent";
 import { extractionResultSchema, intentResultSchema, responsePlanSchema, validateStructured } from "@/modules/ai/structured";
 import { processAIMessage } from "@/modules/ai/orchestrator";
 import { runJobs } from "@/modules/jobs/handlers";
+import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
+import { encryptSecret } from "@/core/crypto";
 import { processIncomingMessage } from "@/modules/conversations/service";
 import { takeoverConversation } from "@/modules/conversations/service";
 import { createProduct } from "@/modules/products/service";
@@ -43,6 +45,34 @@ function vectorsFromDb(): InMemoryVectorStore {
 async function seedWorld() {
   db = createFakeDb();
   (db._stores.workspaceMember as any[]).push({ id: "m1", workspaceId: WS_A, userId: AGENT.userId, status: "ACTIVE" });
+  // Production-faithful fixtures: a connected page + token so outbound sends
+  // honestly succeed (no channel → honest AI_FAILED, never fake RESPONDED).
+  const ch = (await db.channel.create({
+    data: { workspaceId: WS_A, type: "FACEBOOK", status: "CONNECTED", displayName: "Demo Page", externalId: "page-1" },
+  } as never)) as any;
+  await db.channelAccount.create({
+    data: {
+      channelId: ch.id, provider: "FACEBOOK", externalAccountId: "page-1", pageName: "Demo Page",
+      encryptedCredentials: encryptSecret("page-token-test"),
+    },
+  } as never);
+  setFacebookClientFactory(
+    () =>
+      new FacebookClient({
+        fetchImpl: (async (url: string, init?: { body?: string }) => {
+          const u = new URL(url as string);
+          if (u.pathname.endsWith("/me/messages")) {
+            let body: any = null;
+            try {
+              body = JSON.parse(String((init as any)?.body ?? ""));
+            } catch { /* ignore */ }
+            const recipientId = body?.recipient?.id ?? "psid";
+            return Response.json({ recipient_id: recipientId, message_id: `mid-${recipientId}` });
+          }
+          return Response.json({ id: "page-1", name: "Demo Page" });
+        }) as typeof fetch,
+      })
+  );
   await db.aISettings.create({ data: { workspaceId: WS_A, provider: "mock", temperature: 0.4, maxTokens: 500 } } as never);
   const product = await createProduct(db as Db, AGENT, {
     name: "ماء الكمأة", sku: "TW-500", price: 150000, currency: "SYP",

@@ -116,8 +116,20 @@ export function trustedDataPrompt(data: {
   memory?: { type: string; content: string }[];
   summary?: string | null;
   orderSummary?: string | null;
+  customer?: { name: string | null; page: string | null };
 }): string {
   const blocks: string[] = [];
+  if (data.customer && (data.customer.name || data.customer.page)) {
+    blocks.push(
+      [
+        "العميل الحالي (بيانات رسمية — خاطبه باسمه إن وُجد):",
+        data.customer.name ? `اسم العميل: ${data.customer.name}` : null,
+        data.customer.page ? `صفحة فيسبوك: ${data.customer.page}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
   if (data.product) {
     const p = data.product;
     blocks.push(

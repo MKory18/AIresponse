@@ -59,9 +59,19 @@ function installMockMeta() {
   failWithTransient = false;
   setFacebookClientFactory(() => {
     const client = new FacebookClient({
-      fetchImpl: (async (url: string) => {
+      fetchImpl: (async (url: string, init?: { body?: string }) => {
         const u = new URL(url as string);
         if (u.pathname.endsWith("/me/messages")) {
+          // Official transport is a JSON body; fall back to legacy query params.
+          const body = (() => {
+            try {
+              return JSON.parse(String((init as { body?: unknown })?.body ?? ""));
+            } catch {
+              return null;
+            }
+          })();
+          const recipientId = body?.recipient?.id ?? JSON.parse(u.searchParams.get("recipient")!).id;
+          const text = body?.message?.text ?? JSON.parse(u.searchParams.get("message")!).text;
           if (sendFailures > 0) {
             sendFailures -= 1;
             return Response.json(
@@ -70,11 +80,8 @@ function installMockMeta() {
                 : { error: { message: "invalid recipient", code: 100, is_transient: false } }
             );
           }
-          sentToMeta.push({
-            recipientId: JSON.parse(u.searchParams.get("recipient")!).id,
-            text: JSON.parse(u.searchParams.get("message")!).text,
-          });
-          return Response.json({ recipient_id: JSON.parse(u.searchParams.get("recipient")!).id, message_id: `mid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
+          sentToMeta.push({ recipientId, text });
+          return Response.json({ recipient_id: recipientId, message_id: `mid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
         }
         return Response.json({ id: PAGE_ID, name: "Demo Page" });
       }) as typeof fetch,
@@ -284,11 +291,25 @@ describe("Phase 6 — outbound sending", () => {
     const inbound = await startConversation();
     failWithTransient = true;
     sendFailures = 1;
+    // New contract: a failed send is never reported as success — the
+    // orchestrator returns AI_FAILED so the job queue retries (same
+    // idempotency key reuses the row, no duplicate send).
     let result = await processAIMessage(db as Db, { workspaceId: WS_A, conversationId: inbound.conversationId, messageId: inbound.messageId }, { vectorStore: emptyStore() });
-    expect(result.status).toBe("RESPONDED");
+    expect(result.status).toBe("AI_FAILED");
     let msg = (db._stores.message as any[]).find((m) => m.outboundIdempotencyKey?.includes(inbound.conversationId));
     expect(msg.deliveryStatus).toBe("QUEUED");
     expect(msg.metadata.retryable).toBe(true);
+
+    // Retry (same messageId → same idempotency key) reuses the row and sends.
+    failWithTransient = false;
+    sendFailures = 0;
+    result = await processAIMessage(db as Db, { workspaceId: WS_A, conversationId: inbound.conversationId, messageId: inbound.messageId }, { vectorStore: emptyStore() });
+    expect(result.status).toBe("RESPONDED");
+    msg = (db._stores.message as any[]).find((m) => m.outboundIdempotencyKey?.includes(inbound.conversationId));
+    expect(msg.deliveryStatus).toBe("SENT");
+    const rows = (db._stores.message as any[]).filter((m) => m.outboundIdempotencyKey?.includes(inbound.conversationId));
+    expect(rows).toHaveLength(1);
+    expect(sentToMeta).toHaveLength(1);
 
     // fresh conversation for the permanent failure case
     const inbound2 = await processIncomingMessage(db as Db, {
@@ -313,7 +334,7 @@ describe("Phase 6 — outbound sending", () => {
     expect(sentToMeta).toHaveLength(0);
     const msg = (db._stores.message as any[]).find((m) => m.outboundIdempotencyKey?.includes(inbound.conversationId));
     expect(msg.deliveryStatus).toBe("FAILED");
-    expect(msg.deliveryError).toBe("POLICY_CHANNEL_DISCONNECTED");
+    expect(msg.deliveryError).toContain("POLICY_CHANNEL_DISCONNECTED");
   });
 
   it("human takeover → next Facebook message gets NO AI response", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Bot, Check, ChevronDown, Paperclip, Search, Send, Smile, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, Facebook, Paperclip, Search, Send, Smile, Sparkles, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { label, t } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
@@ -15,6 +15,8 @@ import { CustomerPanel } from "./customer-panel";
 import { DateSeparator, MessageBubble } from "./message-bubble";
 import {
   CHANNEL_LABELS,
+  displayNameOf,
+  pageNameOf,
   type ConversationListItem,
   type CustomerDetail,
   type DraftInfo,
@@ -43,6 +45,8 @@ export default function Inbox() {
   const [draft, setDraft] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [orderDraftCard, setOrderDraftCard] = useState<DraftInfo | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const toast = useToast();
 
@@ -152,6 +156,9 @@ export default function Inbox() {
   async function send() {
     if (!selectedId || !draft.trim()) return;
     const text = draft.trim();
+    // Client-generated idempotency key: double-click/double-POST resends the
+    // SAME row instead of creating a duplicate outbound message.
+    const idempotencyKey = `human-ui:${selectedId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     setSending(true);
     const optimistic: MessageItem = {
       id: `optimistic-${Date.now()}`,
@@ -169,15 +176,62 @@ export default function Inbox() {
       const res = await fetch(`/api/conversations/${selectedId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, idempotencyKey }),
       });
-      if (!res.ok) throw new Error();
-      const saved = (await res.json()) as MessageItem;
-      setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? saved : m)));
+      const data = (await res.json().catch(() => ({}))) as MessageItem & { deliveryStatus?: string };
+      if (!res.ok) throw new Error((data as { message?: string }).message ?? "");
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === optimistic.id
+            ? { ...m, id: (data as MessageItem).id ?? m.id, deliveryStatus: data.deliveryStatus ?? "SENT" }
+            : m
+        )
+      );
+      if (data.deliveryStatus === "QUEUED") toast.show(t.delivery.sending, "info");
     } catch {
       setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? { ...m, deliveryStatus: "FAILED" } : m)));
+      toast.show(t.delivery.sendFailed, "error");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function retryMessage(m: MessageItem) {
+    if (!selectedId || m.deliveryStatus !== "FAILED") return;
+    // Optimistic retry under the SAME idempotency identity — the server reuses
+    // the row, so Meta never receives a duplicate.
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, deliveryStatus: "QUEUED" } : x)));
+    try {
+      const res = await fetch(`/api/conversations/${selectedId}/messages/${m.id}/retry`, { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as { deliveryStatus?: string };
+      if (!res.ok) throw new Error();
+      setMessages((prev) =>
+        prev.map((x) => (x.id === m.id ? { ...x, deliveryStatus: data.deliveryStatus ?? "SENT" } : x))
+      );
+    } catch {
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, deliveryStatus: "FAILED" } : x)));
+      toast.show(t.delivery.sendFailed, "error");
+    }
+  }
+
+  async function removeConversation() {
+    if (!selectedId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/conversations/${selectedId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      const gone = selectedId;
+      setConversations((prev) => prev.filter((c) => c.id !== gone));
+      setSelectedId(null);
+      setMessages([]);
+      setCustomer(null);
+      setOrderDraftCard(null);
+      setConfirmDelete(false);
+      toast.show(t.inbox.deleteConversationDone, "success");
+    } catch {
+      toast.show(t.inbox.deleteConversationFailed, "error");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -327,14 +381,22 @@ export default function Inbox() {
                 >
                   <ArrowRight size={17} />
                 </button>
-                <Avatar name={selected.customer.name ?? selected.customer.phone} size="sm" ring />
+                <Avatar name={displayNameOf(selected) ?? selected.customer.phone} size="sm" ring />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-ink">
-                    {selected.customer.name ?? selected.customer.phone ?? "عميل"}
+                    {displayNameOf(selected) ?? t.inbox.unknownCustomer}
                   </p>
-                  <p className="flex items-center gap-1 text-[11px] text-ink-muted">
-                    {CHANNEL_LABELS[selected.channel.type] ?? selected.channel.type} · {label(selected.customer.status)}
-                    {selected.assignedAgent && ` · ${selected.assignedAgent.name}`}
+                  <p className="flex min-w-0 items-center gap-1 text-[11px] text-ink-muted">
+                    {pageNameOf(selected) ? (
+                      <span className="flex min-w-0 items-center gap-1 font-semibold text-brand-600 dark:text-brand-300">
+                        <Facebook size={11} className="shrink-0" />
+                        <span className="truncate">{pageNameOf(selected)}</span>
+                      </span>
+                    ) : (
+                      <span>{CHANNEL_LABELS[selected.channel.type] ?? selected.channel.type}</span>
+                    )}
+                    <span className="shrink-0">· {label(selected.customer.status)}</span>
+                    {selected.assignedAgent && <span className="truncate">· {selected.assignedAgent.name}</span>}
                   </p>
                 </div>
               </div>
@@ -355,6 +417,14 @@ export default function Inbox() {
                 <Button size="sm" variant="success" onClick={resolve}>
                   <Check size={13} /> {t.inbox.resolve}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmDelete(true)}
+                  className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                >
+                  <Trash2 size={13} /> {t.inbox.deleteConversation}
+                </Button>
               </div>
             </header>
 
@@ -369,13 +439,13 @@ export default function Inbox() {
                   const newDay =
                     !prev || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
                   return (
-                    <div key={m.id}>
+                      <div key={m.id}>
                       {newDay && (
                         <DateSeparator
                           day={new Date(m.createdAt).toLocaleDateString("ar", { weekday: "long", day: "numeric", month: "long" })}
                         />
                       )}
-                      <MessageBubble message={m} />
+                      <MessageBubble message={m} onRetry={retryMessage} />
                     </div>
                   );
                 })
@@ -436,8 +506,36 @@ export default function Inbox() {
 
       {/* Customer panel — glass */}
       <aside className="glass hidden w-72 shrink-0 overflow-y-auto rounded-2xl xl:block">
-        <CustomerPanel customer={customer} orderDraft={orderDraftCard} />
+        <CustomerPanel
+          customer={customer}
+          orderDraft={orderDraftCard}
+          pageName={selected ? pageNameOf(selected) : null}
+        />
       </aside>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
+            <h2 className="text-base font-bold text-ink">{t.inbox.deleteConversationTitle}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.inbox.deleteConversationBody}</p>
+            <div className="mt-4 flex justify-start gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                {t.common.cancel}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => void removeConversation()}
+                loading={deleting}
+                disabled={deleting}
+              >
+                <Trash2 size={13} />
+                {deleting ? t.common.loading : t.inbox.deleteConversation}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

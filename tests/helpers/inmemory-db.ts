@@ -89,12 +89,13 @@ function applyUpdate(row: Row, data: Row): Row {
 
 function sortRows(rows: Row[], orderBy: Row[] | Row | undefined): Row[] {
   if (!orderBy) return rows;
+  const val = (v: unknown) => (v instanceof Date ? v.getTime() : v);
   const specs = Array.isArray(orderBy) ? orderBy : [orderBy];
   return [...rows].sort((a, b) => {
     for (const spec of specs) {
       for (const [field, dir] of Object.entries(spec)) {
-        const av = a[field];
-        const bv = b[field];
+        const av = val(a[field]);
+        const bv = val(b[field]);
         if (av === bv) continue;
         const cmp = av > bv ? 1 : -1;
         return dir === "desc" ? -cmp : cmp;
@@ -337,6 +338,41 @@ export function createFakeDb() {
       row.channel = ch;
     }
     return row;
+  };
+
+  // findMany: hydrate the same relations Prisma would (customer + nested
+  // identities, channel + account), since list endpoints select them.
+  const baseConvFindMany = conversationModel.findMany.bind(conversationModel);
+  conversationModel.findMany = async (args: any) => {
+    const rows = (await baseConvFindMany(args)) as any[];
+    const inc = args?.include ?? {};
+    for (const row of rows) {
+      if (inc.customer) {
+        const cust = customer.find((c) => c.id === row.customerId) ?? null;
+        if (cust) {
+          const fromStore = channelIdentity.filter((i) => i.customerId === cust.id);
+          const nested = Array.isArray((cust as Row).identities) ? (cust as Row).identities : [];
+          const seen = new Set<string>();
+          const merged: Row[] = [];
+          for (const i of [...fromStore, ...nested]) {
+            if (i?.id && !seen.has(i.id)) {
+              seen.add(i.id);
+              merged.push(i);
+            }
+          }
+          cust.identities = merged;
+        }
+        row.customer = cust;
+      }
+      if (inc.channel) {
+        const ch = channel.find((c) => c.id === row.channelId) ?? null;
+        if (ch) {
+          ch.account = channelAccountRows.find((a) => a.channelId === ch.id) ?? null;
+        }
+        row.channel = ch;
+      }
+    }
+    return rows;
   };
 
   // message idempotency unique constraints (mirrors real Postgres behavior)

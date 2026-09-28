@@ -111,6 +111,23 @@ export const t = {
     aiSummaryEmpty: "لم يُولَّد ملخص لهذا العميل بعد.",
     loadListFailed: "تعذّر تحميل المحادثات",
     actionFailed: "تعذّر تنفيذ الإجراء، حاول مجددًا",
+    unknownCustomer: "عميل",
+    pageBadge: "فيسبوك",
+    deleteConversation: "حذف المحادثة",
+    deleteConversationTitle: "حذف المحادثة؟",
+    deleteConversationBody:
+      "سيتم حذف هذه المحادثة من صندوق المحادثات. لن يتم حذف العميل أو الطلبات المرتبطة بها.",
+    deleteConversationDone: "تم حذف المحادثة",
+    deleteConversationFailed: "تعذّر حذف المحادثة",
+    lastMessage: "آخر رسالة",
+  },
+  delivery: {
+    preparing: "جارٍ التجهيز",
+    sending: "جارٍ الإرسال",
+    sent: "تم الإرسال",
+    failed: "فشل الإرسال",
+    retry: "إعادة المحاولة",
+    sendFailed: "تعذّر إرسال الرد",
   },
   customer: {
     panelTitle: "بيانات العميل",

@@ -57,12 +57,19 @@ beforeEach(async () => {
   setMockAIProvider(new MockAIProvider());
   setFacebookClientFactory(() =>
     new FacebookClient({
-      fetchImpl: (async (url: string) => {
+      fetchImpl: (async (url: string, init?: { body?: string }) => {
         const u = new URL(url as string);
         if (u.pathname.endsWith("/me/messages")) {
+          const body = (() => {
+            try {
+              return JSON.parse(String((init as { body?: unknown })?.body ?? ""));
+            } catch {
+              return null;
+            }
+          })();
           sentToMeta.push({
-            recipientId: JSON.parse(u.searchParams.get("recipient")!).id,
-            text: JSON.parse(u.searchParams.get("message")!).text,
+            recipientId: body?.recipient?.id ?? JSON.parse(u.searchParams.get("recipient")!).id,
+            text: body?.message?.text ?? JSON.parse(u.searchParams.get("message")!).text,
           });
           return Response.json({ recipient_id: "psid", message_id: `mid-${Math.random().toString(36).slice(2, 8)}` });
         }

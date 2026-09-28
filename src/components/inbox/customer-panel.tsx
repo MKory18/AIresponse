@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin, Package, Phone, Sparkles } from "lucide-react";
+import { Facebook, MapPin, Package, Phone, Sparkles } from "lucide-react";
 import { formatNumber, label, t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
@@ -11,9 +11,11 @@ import { CHANNEL_LABELS, type CustomerDetail, type DraftInfo } from "./types";
 export function CustomerPanel({
   customer,
   orderDraft,
+  pageName,
 }: {
   customer: CustomerDetail | null;
   orderDraft: DraftInfo | null;
+  pageName?: string | null;
 }) {
   if (!customer) {
     return <EmptyState title={t.customer.noSelection} className="h-full" />;
@@ -21,14 +23,25 @@ export function CustomerPanel({
 
   return (
     <div className="space-y-3 p-4">
-      {/* Identity */}
+      {/* Identity — same resolved name as list + header, never a divergent fallback */}
       <div className="glass-subtle flex flex-col items-center gap-2 rounded-2xl px-3 pb-4 pt-5 text-center">
         <Avatar name={customer.name ?? customer.phone} size="lg" ring />
         <div>
-          <p className="text-sm font-bold text-ink">{customer.name ?? "بدون اسم"}</p>
+          <p className="text-sm font-bold text-ink">
+            {customer.name ??
+              customer.identities.map((i) => i.displayName).find(Boolean) ??
+              customer.phone ??
+              t.inbox.unknownCustomer}
+          </p>
           {customer.phone && (
             <p className="num mt-0.5 text-xs text-ink-muted" dir="ltr">
               {customer.phone}
+            </p>
+          )}
+          {pageName && (
+            <p className="mt-1.5 flex items-center justify-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300">
+              <Facebook size={11} />
+              {pageName}
             </p>
           )}
           <div className="mt-2 flex justify-center gap-1.5">
@@ -50,8 +63,9 @@ export function CustomerPanel({
             <p className="mb-1.5 text-[11px] font-bold text-ink-muted">{t.customer.identities}</p>
             <div className="flex flex-wrap gap-1">
               {customer.identities.map((i) => (
-                <Badge key={i.id} tone="OPEN">
+                <Badge key={i.id} tone="OPEN" title={i.displayName ?? undefined}>
                   {CHANNEL_LABELS[i.channelType] ?? i.channelType}
+                  {i.displayName ? ` · ${i.displayName}` : ""}
                 </Badge>
               ))}
             </div>

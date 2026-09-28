@@ -11,6 +11,8 @@ import { createOrderFromDraft, transitionOrder, mergeCustomerData, getOwnedOrder
 import { handleOrderIntent } from "@/modules/orders/intelligence";
 import { processAIMessage } from "@/modules/ai/orchestrator";
 import { processIncomingMessage } from "@/modules/conversations/service";
+import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
+import { encryptSecret } from "@/core/crypto";
 import { createProduct } from "@/modules/products/service";
 import { AppError } from "@/core/errors";
 import { InMemoryVectorStore } from "@/modules/knowledge/vector-store";
@@ -35,6 +37,36 @@ async function seedWorld() {
     data: { workspaceId: WS_A, name: "محمد", phone: "0930000000", status: "INTERESTED" },
   } as never);
   customerId = customer.id;
+  // Production-faithful channel fixtures so outbound honestly succeeds.
+  const ch = (await db.channel.create({
+    data: { id: "ch-1", workspaceId: WS_A, type: "FACEBOOK", status: "CONNECTED", displayName: "Demo Page", externalId: "page-1" },
+  } as never)) as any;
+  await db.channelAccount.create({
+    data: {
+      channelId: ch.id, provider: "FACEBOOK", externalAccountId: "page-1", pageName: "Demo Page",
+      encryptedCredentials: encryptSecret("page-token-test"),
+    },
+  } as never);
+  await db.channelIdentity.create({
+    data: { workspaceId: WS_A, customerId, channelType: "FACEBOOK", channelExternalId: "fb-conv-1" },
+  } as never);
+  setFacebookClientFactory(
+    () =>
+      new FacebookClient({
+        fetchImpl: (async (url: string, init?: { body?: string }) => {
+          const u = new URL(url as string);
+          if (u.pathname.endsWith("/me/messages")) {
+            let body: any = null;
+            try {
+              body = JSON.parse(String((init as any)?.body ?? ""));
+            } catch { /* ignore */ }
+            const recipientId = body?.recipient?.id ?? "psid";
+            return Response.json({ recipient_id: recipientId, message_id: `mid-${recipientId}` });
+          }
+          return Response.json({ id: "page-1", name: "Demo" });
+        }) as typeof fetch,
+      })
+  );
   const conv = await db.conversation.create({
     data: { workspaceId: WS_A, customerId, channelId: "ch-1", channelConversationId: "fb-conv-1" },
   } as never);

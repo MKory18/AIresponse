@@ -294,6 +294,9 @@ model Conversation {
   summary               String?
   lastCustomerMessageAt DateTime?
   lastAgentMessageAt    DateTime?
+  // Soft-delete: hidden from inbox/polling, history + orders preserved.
+  deletedAt             DateTime?
+  deletedBy             String?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
@@ -307,6 +310,7 @@ model Conversation {
   @@unique([workspaceId, channelConversationId])
   @@index([workspaceId, status])
   @@index([workspaceId, lastCustomerMessageAt])
+  @@index([workspaceId, deletedAt])
 }
 
 enum SenderType {

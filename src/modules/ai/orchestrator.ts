@@ -68,6 +68,7 @@ export async function processAIMessage(
   },
   deps: OrchestratorDeps = {}
 ): Promise<AIExecutionResult> {
+  const pipelineStarted = Date.now();
   // 1. Load message — only inbound customer messages drive the AI.
   const message = await db.message.findUnique({ where: { id: params.messageId } });
   if (!message || message.workspaceId !== params.workspaceId || message.conversationId !== params.conversationId) {
@@ -79,27 +80,38 @@ export async function processAIMessage(
 
   // 2. Idempotency: one successful AI execution per message (failed runs are
   // retried by the job queue and must not be blocked).
-  const existing = await db.aIUsageLog.findFirst({
-    where: { messageId: message.id, purpose: "RESPONSE", status: "SUCCESS" },
-    select: { id: true },
-  });
+  // 3. Conversation state gating (+ soft-deleted threads never run AI).
+  // Independent reads run in parallel to cut latency without losing safety.
+  const [existing, conversation] = await Promise.all([
+    db.aIUsageLog.findFirst({
+      where: { messageId: message.id, purpose: "RESPONSE", status: "SUCCESS" },
+      select: { id: true },
+    }),
+    db.conversation.findUnique({ where: { id: params.conversationId } }),
+  ]);
   if (existing && !params.dryRun) return { status: "DUPLICATE", executionId: existing.id };
-
-  // 3. Conversation state gating.
-  const conversation = await db.conversation.findUnique({ where: { id: params.conversationId } });
   if (!conversation || conversation.workspaceId !== params.workspaceId) throw new NotFoundError("Conversation");
+  if ((conversation as { deletedAt?: Date | null }).deletedAt) return { status: "SKIPPED" };
   if (!conversation.aiEnabled || conversation.aiState !== "AI_ACTIVE") {
     if (!params.dryRun) return { status: "AI_DISABLED" };
   }
 
-  // 4. Config + persona.
-  const settings = (await loadAISettings(db, params.workspaceId)) as AISettingsLike | null;
+  // 4. Config + persona + customer + channel page: independent reads in parallel.
+  const [settingsRaw, personaRow, customer, channelRow] = await Promise.all([
+    loadAISettings(db, params.workspaceId),
+    db.persona.findFirst({
+      where: { workspaceId: params.workspaceId, isActive: true },
+      orderBy: { updatedAt: "desc" },
+    }),
+    db.customer.findUnique({ where: { id: conversation.customerId } }),
+    db.channel.findUnique({
+      where: { id: conversation.channelId },
+      select: { displayName: true, externalId: true },
+    }),
+  ]);
+  const settings = settingsRaw as AISettingsLike | null;
   if (settings && !settings.aiEnabled) return { status: "AI_DISABLED" };
   if (settings && settings.autoRespond === false && !params.dryRun) return { status: "AI_DISABLED" };
-  const personaRow = await db.persona.findFirst({
-    where: { workspaceId: params.workspaceId, isActive: true },
-    orderBy: { updatedAt: "desc" },
-  });
   const persona: PersonaConfig = {
     name: personaRow?.name ?? "المساعد",
     language: personaRow?.language ?? "ar",
@@ -113,8 +125,6 @@ export async function processAIMessage(
     prohibitedPhrases: personaRow?.prohibitedPhrases ?? [],
     customRules: personaRow?.customRules ?? [],
   };
-
-  const customer = await db.customer.findUnique({ where: { id: conversation.customerId } });
   if (!customer) throw new NotFoundError("Customer");
 
   // Fail-closed: a misconfigured real provider must never produce fake
@@ -378,6 +388,13 @@ export async function processAIMessage(
       text: extraction.intent === "COMPLAINT" || injection ? HANDOFF_ACK : LOW_CONFIDENCE_ACK,
       sourceMessageId: message.id,
       dryRun: params.dryRun,
+    }).then((r) => {
+      if (r && r.deliveryStatus !== "SENT" && r.deliveryStatus !== "SKIPPED_DUPLICATE") {
+        log.warn(
+          { conversationId: conversation.id, messageId: message.id, deliveryStatus: r.deliveryStatus },
+          "handoff_ack_not_delivered"
+        );
+      }
     });
     return {
       status: "HANDOFF",
@@ -414,6 +431,10 @@ export async function processAIMessage(
       memory: memories.map((m) => ({ type: m.type, content: m.value })),
       summary: conversation.summary,
       orderSummary: orderResult?.summaryText ?? null,
+      customer: {
+        name: (customer as { name?: string | null }).name ?? null,
+        page: channelRow?.displayName ?? null,
+      },
     }),
   ].join("\n\n");
 
@@ -426,6 +447,7 @@ export async function processAIMessage(
 
   let responseText = "";
   let violations: string[] = [];
+  let responseTokens = { promptTokens: 0, completionTokens: 0, latencyMs: 0 };
   try {
     const res = await withRetry(
       () =>
@@ -442,21 +464,14 @@ export async function processAIMessage(
     if (!responseText) {
       throw new AIProviderError("Model returned an empty response");
     }
-    await logUsage(db, {
-      workspaceId: params.workspaceId,
-      conversationId: conversation.id,
-      messageId: message.id,
-      purpose: "RESPONSE",
-      provider: provider.name,
-      model: responseModelCfg.model,
-      intent: extraction.intent,
-      confidence: extraction.confidence,
-      promptVersion: PROMPT_VERSIONS.RESPONSE,
+    responseTokens = {
       promptTokens: res.promptTokens,
       completionTokens: res.completionTokens,
       latencyMs: res.latencyMs,
-      success: true,
-    });
+    };
+    // NOTE: RESPONSE success is logged only AFTER the outbound send succeeds
+    // (below) — logging it here would poison DUPLICATE idempotency and turn
+    // every send-failure retry into a false DUPLICATE skip.
 
     // Guardrails
     const check = validateResponse({
@@ -535,12 +550,64 @@ export async function processAIMessage(
   }
 
   // 11. Persist: send as AI + citations + memory.
+  // A failed/queued send is NEVER reported as success: return AI_FAILED so
+  // the job queue retries (same idempotency key reuses the row — no duplicate).
+  const sendStarted = Date.now();
   const sent = await sendAI(db, {
     workspaceId: params.workspaceId,
     conversationId: conversation.id,
     text: responseText,
     sourceMessageId: message.id,
     dryRun: params.dryRun,
+  });
+  const sendMs = Date.now() - sendStarted;
+  if (sent && sent.deliveryStatus !== "SENT" && sent.deliveryStatus !== "SKIPPED_DUPLICATE") {
+    log.warn(
+      { conversationId: conversation.id, messageId: message.id, deliveryStatus: sent.deliveryStatus, sendMs },
+      "ai_send_failed"
+    );
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: provider.name,
+      model: responseModelCfg.model,
+      intent: extraction.intent,
+      confidence: extraction.confidence,
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: sendMs,
+      success: false,
+      status: "AI_FAILED",
+      error: `Outbound delivery ${sent.deliveryStatus}`,
+    });
+    return {
+      status: "AI_FAILED",
+      intent: extraction.intent as Intent,
+      confidence: extraction.confidence,
+      plan,
+      error: `Outbound delivery ${sent.deliveryStatus}`,
+    };
+  }
+
+  // The reply is on its way (or was already sent): now record success,
+  // citations, and memories.
+  await logUsage(db, {
+    workspaceId: params.workspaceId,
+    conversationId: conversation.id,
+    messageId: message.id,
+    purpose: "RESPONSE",
+    provider: provider.name,
+    model: responseModelCfg.model,
+    intent: extraction.intent,
+    confidence: extraction.confidence,
+    promptVersion: PROMPT_VERSIONS.RESPONSE,
+    promptTokens: responseTokens.promptTokens,
+    completionTokens: responseTokens.completionTokens,
+    latencyMs: responseTokens.latencyMs,
+    success: true,
   });
 
   if (!params.dryRun) {
@@ -579,6 +646,15 @@ export async function processAIMessage(
     });
   }
 
+  log.info(
+    {
+      conversationId: conversation.id,
+      messageId: message.id,
+      intent: extraction.intent,
+      pipelineMs: Date.now() - pipelineStarted,
+    },
+    "ai_pipeline_completed"
+  );
   return {
     status: plan.needsClarification ? "CLARIFIED" : "RESPONDED",
     intent: extraction.intent as Intent,

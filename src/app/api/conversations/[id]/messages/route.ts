@@ -37,12 +37,19 @@ export const POST = createHandler(
       text: body.text ?? `[${body.type ?? "ATTACHMENT"}] ${body.mediaUrl ?? ""}`.trim(),
       idempotencyKey: body.idempotencyKey,
     });
+    // Honest statuses: the UI must never show "sent" before Graph confirms it.
     if (result.deliveryStatus === "FAILED") {
       return Response.json(
-        { error: "DELIVERY_FAILED", message: result.error, messageId: result.messageId },
+        { error: "DELIVERY_FAILED", message: result.error, messageId: result.messageId, deliveryStatus: result.deliveryStatus },
         { status: 502 }
       );
     }
-    return ok(result, 201);
+    if (result.deliveryStatus === "QUEUED") {
+      return Response.json(
+        { ...result, message: "جارٍ الإرسال" },
+        { status: 202 }
+      );
+    }
+    return ok(result, result.deliveryStatus === "SKIPPED_DUPLICATE" ? 200 : 201);
   }
 );

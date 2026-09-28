@@ -12,8 +12,19 @@ export type ConversationListItem = {
   lastCustomerMessageAt: string | null;
   lastAgentMessageAt: string | null;
   assignedAgentId: string | null;
-  customer: { id: string; name: string | null; phone: string | null; status: string };
-  channel: { type: string };
+  customer: {
+    id: string;
+    name: string | null;
+    phone: string | null;
+    status: string;
+    identities?: { displayName: string | null; channelType: string }[];
+  };
+  channel: {
+    type: string;
+    displayName?: string | null;
+    externalId?: string | null;
+    account?: { pageName?: string | null } | null;
+  };
   assignedAgent: { id: string; name: string } | null;
 };
 
@@ -38,7 +49,8 @@ export type CustomerDetail = {
   status: string;
   notes: string | null;
   tags: string[];
-  identities: { id: string; channelType: string; channelExternalId: string }[];
+  identities: { id: string; channelType: string; channelExternalId: string; displayName?: string | null }[];
+  pageName?: string | null;
   orders: { id: string; orderNumber: string; status: string; total: string; currency: string; createdAt: string }[];
   conversations: { id: string; status: string; aiState: string; updatedAt: string }[];
   aiSummary: string | null;
@@ -70,3 +82,24 @@ export const CHANNEL_ICONS: Record<string, React.ComponentType<LucideProps>> = {
   TELEGRAM: Send,
   WEB: Globe,
 };
+
+/**
+ * Display-name priority: customer.name → channel-identity displayName →
+ * phone → null (UI renders the central "عميل" fallback only then).
+ */
+export function displayNameOf(c: {
+  customer: { name: string | null; phone: string | null; identities?: { displayName: string | null }[] };
+}): string | null {
+  if (c.customer.name) return c.customer.name;
+  const identityName = c.customer.identities?.map((i) => i.displayName).find(Boolean);
+  if (identityName) return identityName;
+  if (c.customer.phone) return c.customer.phone;
+  return null;
+}
+
+/** Page badge text from the conversation's own channel (never message text). */
+export function pageNameOf(c: {
+  channel: { displayName?: string | null; externalId?: string | null; account?: { pageName?: string | null } | null };
+}): string | null {
+  return c.channel.account?.pageName ?? c.channel.displayName ?? null;
+}

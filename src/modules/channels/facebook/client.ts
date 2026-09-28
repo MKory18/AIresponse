@@ -36,11 +36,19 @@ export class FacebookClient {
     this.graphUrl = opts.graphUrl ?? GRAPH_URL;
   }
 
-  private async call<T>(path: string, params: Record<string, string>): Promise<T> {
+  private async call<T>(
+    path: string,
+    params: Record<string, string>,
+    opts: { body?: Record<string, unknown> } = {}
+  ): Promise<T> {
+    const started = Date.now();
     let res: Response;
     try {
       res = await this.fetchImpl(`${this.graphUrl}/${path}?${new URLSearchParams(params)}`, {
         method: "POST",
+        ...(opts.body
+          ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.body) }
+          : {}),
       });
     } catch (err) {
       throw new FacebookApiError(
@@ -48,6 +56,7 @@ export class FacebookClient {
         "TRANSIENT"
       );
     }
+    const httpStatus = res.status;
     const json = (await res.json().catch(() => ({}))) as {
       error?: { message: string; code?: number; error_subcode?: number; is_transient?: boolean };
       recipient_id?: string;
@@ -66,14 +75,25 @@ export class FacebookClient {
         json.error.message ?? "Graph API error",
         permanent ? "PERMANENT" : "TRANSIENT",
         json.error.code,
-        json.error.error_subcode
+        json.error.error_subcode,
+        httpStatus
       );
     }
-    return json as unknown as T;
+    if (!res.ok) {
+      throw new FacebookApiError(
+        `Graph API HTTP ${httpStatus}`,
+        httpStatus >= 500 ? "TRANSIENT" : "PERMANENT",
+        undefined,
+        undefined,
+        httpStatus
+      );
+    }
+    return { ...json, __httpStatus: httpStatus, __durationMs: Date.now() - started } as unknown as T;
   }
 
-  /** Send API — messages endpoint. */
-  async sendMessage(pageAccessToken: string, recipientId: string, payload: SendPayload): Promise<SendMessageResult> {
+  /** Send API — messages endpoint (official JSON body, not query params). */
+  async sendMessage(pageAccessToken: string, recipientId: string, payload: SendPayload): Promise<SendMessageResult & { graphCode?: string }> {
+    const started = Date.now();
     const body: Record<string, unknown> = {
       recipient: { id: recipientId },
       messaging_type: "RESPONSE",
@@ -81,12 +101,90 @@ export class FacebookClient {
         ? { text: payload.text }
         : { attachment: payload.attachment },
     };
-    const res = await this.call<{ recipient_id: string; message_id: string }>(
-      "me/messages",
-      { access_token: pageAccessToken, messaging_type: "RESPONSE", recipient: JSON.stringify(body.recipient), message: JSON.stringify(body.message) }
-    );
-    if (!res?.message_id) throw new FacebookApiError("Graph API returned no message_id", "TRANSIENT");
-    return { recipientId: res.recipient_id ?? recipientId, messageId: res.message_id };
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.graphUrl}/me/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token: pageAccessToken,
+          ...body,
+        }),
+      });
+    } catch (err) {
+      throw new FacebookApiError(
+        `Network failure calling Graph API: ${err instanceof Error ? err.message : "unknown"}`,
+        "TRANSIENT"
+      );
+    }
+    const httpStatus = res.status;
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: { message: string; code?: number; error_subcode?: number; is_transient?: boolean };
+      recipient_id?: string;
+      message_id?: string;
+    };
+    if (json.error) {
+      const permanent =
+        (json.error.code !== undefined && PERMANENT_CODES.has(json.error.code)) ||
+        json.error.is_transient === false;
+      throw new FacebookApiError(
+        json.error.message ?? "Graph API error",
+        permanent ? "PERMANENT" : "TRANSIENT",
+        json.error.code,
+        json.error.error_subcode,
+        httpStatus
+      );
+    }
+    if (!res.ok || !json?.message_id) {
+      throw new FacebookApiError(
+        !json?.message_id ? "Graph API returned no message_id" : `Graph API HTTP ${httpStatus}`,
+        !res.ok && httpStatus < 500 ? "PERMANENT" : "TRANSIENT",
+        undefined,
+        undefined,
+        httpStatus
+      );
+    }
+    void started;
+    return {
+      recipientId: json.recipient_id ?? recipientId,
+      messageId: json.message_id,
+      graphCode: `${httpStatus}`,
+    };
+  }
+
+  /**
+   * Page-scoped sender profile (best-effort display name for inbox identity).
+   * Returns null on any failure — callers must never break ingestion on this.
+   */
+  async getSenderProfile(
+    pageAccessToken: string,
+    psid: string
+  ): Promise<{ name: string | null } | null> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      try {
+        const res = await this.fetchImpl(
+          `${this.graphUrl}/${encodeURIComponent(psid)}?fields=first_name,last_name,name&access_token=${encodeURIComponent(pageAccessToken)}`,
+          { signal: controller.signal } as never
+        );
+        const json = (await res.json().catch(() => null)) as {
+          first_name?: string;
+          last_name?: string;
+          name?: string;
+          error?: { message: string };
+        } | null;
+        if (!json || json.error) return null;
+        const full =
+          json.name ??
+          [json.first_name, json.last_name].filter(Boolean).join(" ").trim();
+        return { name: full || null };
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      return null;
+    }
   }
 
   async getPage(pageAccessToken: string, pageId: string): Promise<{ id: string; name: string }> {
