@@ -307,3 +307,81 @@ async function markFailed(db: Db, messageId: string, reason: string, arabicMessa
     },
   });
 }
+
+/**
+ * Recovers messages stuck in PENDING or QUEUED for too long.
+ * This handles cases where the worker crashed mid-send or the network hung.
+ * Uses the existing idempotency key to safely retry without duplicates.
+ */
+export async function recoverStuckOutboundMessages(
+  db: Db,
+  params: { workspaceId?: string; maxAgeMinutes?: number; limit?: number } = {}
+): Promise<{ recovered: number; failed: number }> {
+  const maxAgeMinutes = params.maxAgeMinutes ?? 10;
+  const limit = params.limit ?? 50;
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60_000);
+
+  const whereClause: Record<string, unknown> = {
+    direction: "OUTBOUND",
+    deliveryStatus: { in: ["PENDING", "QUEUED"] },
+    createdAt: { lt: cutoff },
+  };
+  if (params.workspaceId) {
+    whereClause.workspaceId = params.workspaceId;
+  }
+
+  const stuckMessages = await db.message.findMany({
+    where: whereClause,
+    take: limit,
+    select: {
+      id: true,
+      conversationId: true,
+      workspaceId: true,
+      text: true,
+      senderType: true,
+      senderId: true,
+      outboundIdempotencyKey: true,
+      deliveryStatus: true,
+    },
+  });
+
+  let recovered = 0;
+  let failed = 0;
+
+  for (const msg of stuckMessages) {
+    if (!msg.outboundIdempotencyKey) {
+      // No idempotency key — mark as failed permanently
+      await markFailed(db, msg.id, "STUCK_NO_IDEMPOTENCY", "تعذر استعادة الرسالة — مفتاح التكرار مفقود");
+      failed++;
+      continue;
+    }
+
+    try {
+      const sourceMessageId = msg.outboundIdempotencyKey.slice(`${msg.conversationId}:`.length) || msg.id;
+      const result = await dispatchOutbound(db, {
+        workspaceId: msg.workspaceId,
+        conversationId: msg.conversationId,
+        sourceMessageId,
+        text: msg.text ?? "",
+        senderType: msg.senderType === "HUMAN" ? "HUMAN" : "AI",
+        senderId: msg.senderId ?? undefined,
+      });
+      if (result.deliveryStatus === "SENT" || result.deliveryStatus === "SKIPPED_DUPLICATE") {
+        recovered++;
+      } else if (result.deliveryStatus === "QUEUED") {
+        // Still queued — will be retried later
+        recovered++;
+      } else {
+        failed++;
+      }
+    } catch (err) {
+      log.error({ messageId: msg.id, err }, "stuck_message_recovery_failed");
+      failed++;
+    }
+  }
+
+  if (recovered > 0 || failed > 0) {
+    log.info({ workspaceId: params.workspaceId, recovered, failed }, "stuck_outbound_messages_recovered");
+  }
+  return { recovered, failed };
+}

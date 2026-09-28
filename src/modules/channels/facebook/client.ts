@@ -3,6 +3,7 @@ import { FacebookApiError } from "./types";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION ?? "v21.0";
 const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const SEND_TIMEOUT_MS = parseInt(process.env.FACEBOOK_SEND_TIMEOUT_MS ?? "30000", 10);
 
 /** Non-retryable Graph error codes (token/permission/recipient/policy). */
 const PERMANENT_CODES = new Set([10, 190, 200, 2500, 551, 100, 613]);
@@ -107,6 +108,9 @@ export class FacebookClient {
         ? { text: payload.text }
         : { attachment: payload.attachment },
     };
+    const controller = new AbortController();
+    const timeoutMs = SEND_TIMEOUT_MS;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let res: Response;
     try {
       res = await this.fetchImpl(
@@ -115,14 +119,23 @@ export class FacebookClient {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          signal: controller.signal,
         }
       );
     } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new FacebookApiError(
+          `Graph API request timed out after ${timeoutMs}ms`,
+          "TRANSIENT"
+        );
+      }
       throw new FacebookApiError(
         `Network failure calling Graph API: ${err instanceof Error ? err.message : "unknown"}`,
         "TRANSIENT"
       );
     }
+    clearTimeout(timeout);
     const httpStatus = res.status;
     const json = (await res.json().catch(() => ({}))) as {
       error?: { message: string; code?: number; error_subcode?: number; is_transient?: boolean };

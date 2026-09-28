@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { childLogger } from "@/core/logger";
+import { recoverStuckOutboundMessages } from "@/modules/channels/outbound";
 
 const log = childLogger("jobs");
 
@@ -72,6 +73,8 @@ export async function processPendingJobs(
   opts: { limit?: number; workerId?: string } = {}
 ): Promise<{ processed: number; failed: number }> {
   await recoverStaleJobs(db);
+  // Recover stuck outbound messages across all workspaces before processing new jobs
+  await recoverStuckOutboundMessages(db, { maxAgeMinutes: 10, limit: 20 });
   const jobs = await db.backgroundJob.findMany({
     where: { status: "PENDING", runAfter: { lte: new Date() } },
     orderBy: { createdAt: "asc" },
