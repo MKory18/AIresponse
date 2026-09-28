@@ -14,6 +14,7 @@ export interface IncomingMessageInput {
   channelId?: string;
   externalUserId: string;
   externalUserName?: string | null;
+  externalAvatarUrl?: string | null;
   externalConversationId: string;
   externalMessageId: string;
   externalEventId: string;
@@ -50,6 +51,7 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     channelType: input.channelType,
     externalUserId: input.externalUserId,
     displayName: input.externalUserName,
+    avatarUrl: input.externalAvatarUrl,
     metadata: input.metadata,
   });
 
@@ -272,7 +274,7 @@ async function ensureChannelId(db: Db, workspaceId: string, channelType: Channel
 export async function getOwnedConversation(db: Db, workspaceId: string, conversationId: string) {
   const conversation = await db.conversation.findUnique({
     where: { id: conversationId },
-    include: { customer: { select: { id: true, name: true, phone: true } } },
+    include: { customer: { select: { id: true, name: true, phone: true, avatarUrl: true } } },
   });
   if (!conversation || conversation.workspaceId !== workspaceId) {
     throw new NotFoundError("Conversation");
@@ -285,6 +287,39 @@ export async function getOwnedConversation(db: Db, workspaceId: string, conversa
 
 // â”€â”€ Listing / pagination / search (server-side) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+export interface ConversationListRow {
+  id: string;
+  status: ConversationStatus;
+  aiState: "AI_ACTIVE" | "AI_PAUSED" | "HUMAN_ACTIVE";
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  tags: string[];
+  unreadCount: number;
+  summary: string | null;
+  lastCustomerMessageAt: Date | null;
+  lastAgentMessageAt: Date | null;
+  assignedAgentId: string | null;
+  customer: {
+    id: string;
+    name: string | null;
+    phone: string | null;
+    status: string;
+    avatarUrl: string | null;
+    identities: { displayName: string | null; avatarUrl: string | null; channelType: string }[];
+  };
+  channel: {
+    type: string;
+    displayName: string | null;
+    externalId: string | null;
+    account: { pageName: string | null } | null;
+  };
+  assignedAgent: { id: string; name: string } | null;
+  lastMessage?: { text: string | null; createdAt: string } | null;
+  /** Independent review flag: OPEN HumanHandoff exists (ownership unchanged). */
+  hasOpenHandoff: boolean;
+  /** Page-resolved persona (channel assignment → workspace default). */
+  aiPersona: { id: string; name: string; source: "channel" | "workspace" } | null;
+}
+
 export async function listConversations(
   db: Db,
   params: {
@@ -296,32 +331,7 @@ export async function listConversations(
     cursor?: string;
     limit?: number;
   }
-): Promise<
-  Paginated<
-    Prisma.ConversationGetPayload<{
-      include: {
-        customer: {
-          select: {
-            id: true;
-            name: true;
-            phone: true;
-            status: true;
-            identities: { select: { displayName: true; channelType: true } };
-          };
-        };
-        channel: {
-          select: {
-            type: true;
-            displayName: true;
-            externalId: true;
-            account: { select: { pageName: true } };
-          };
-        };
-        assignedAgent: { select: { id: true; name: true } };
-      };
-    }>
-  >
-> {
+): Promise<Paginated<ConversationListRow>> {
   const limit = Math.min(params.limit ?? 30, 100);
   const where: Prisma.ConversationWhereInput = {
     workspaceId: params.workspaceId,
@@ -338,13 +348,26 @@ export async function listConversations(
         OR: [
           { name: { contains: params.q, mode: "insensitive" } },
           { phone: { contains: params.q } },
+          { identities: { some: { channelExternalId: { contains: params.q } } } },
         ],
       },
       select: { id: true },
       take: 200,
     });
+    const matchingChannels = await db.channel.findMany({
+      where: {
+        workspaceId: params.workspaceId,
+        OR: [
+          { displayName: { contains: params.q, mode: "insensitive" } },
+          { externalId: { contains: params.q } },
+        ],
+      },
+      select: { id: true },
+      take: 50,
+    });
     where.OR = [
       { customerId: { in: matchingCustomers.map((c) => c.id) } },
+      { channelId: { in: matchingChannels.map((c) => c.id) } },
       { messages: { some: { text: { contains: params.q, mode: "insensitive" } } } },
     ];
   }
@@ -358,7 +381,8 @@ export async function listConversations(
           name: true,
           phone: true,
           status: true,
-          identities: { select: { displayName: true, channelType: true } },
+          avatarUrl: true,
+          identities: { select: { displayName: true, avatarUrl: true, channelType: true } },
         },
       },
       channel: {
@@ -366,6 +390,7 @@ export async function listConversations(
           type: true,
           displayName: true,
           externalId: true,
+          aiPersonaId: true,
           account: { select: { pageName: true } },
         },
       },
@@ -378,7 +403,76 @@ export async function listConversations(
 
   const hasMore = conversations.length > limit;
   const items = hasMore ? conversations.slice(0, limit) : conversations;
-  return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+
+  // Two extra queries total (no N+1): review flags + resolved page personas.
+  const openHandoffs = await (db as unknown as {
+    humanHandoff: { findMany: (args: unknown) => Promise<{ conversationId: string }[]> };
+  }).humanHandoff.findMany({
+    where: {
+      workspaceId: params.workspaceId,
+      status: "OPEN",
+      conversationId: { in: items.map((c) => c.id) },
+    },
+    select: { conversationId: true },
+  }).catch(() => []);
+  const needsReview = new Set(openHandoffs.map((h) => h.conversationId));
+  const defaultPersona = await (db as unknown as {
+    persona: { findFirst: (args: unknown) => Promise<{ id: string; name: string } | null> };
+  }).persona.findFirst({
+    where: { workspaceId: params.workspaceId, isActive: true },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, name: true },
+  }).catch(() => null);
+  const assignedIds = [
+    ...new Set(
+      items.map((c) => (c.channel as { aiPersonaId?: string | null }).aiPersonaId).filter(Boolean)
+    ),
+  ] as string[];
+  const personaNames = new Map<string, string>();
+  if (assignedIds.length > 0) {
+    const assigned = await (db as unknown as {
+      persona: { findMany: (args: unknown) => Promise<{ id: string; name: string }[]> };
+    }).persona.findMany({
+      where: { workspaceId: params.workspaceId, id: { in: assignedIds } },
+      select: { id: true, name: true },
+    }).catch(() => []);
+    for (const p of assigned) personaNames.set(p.id, p.name);
+  }
+  const enriched = items.map((c) => {
+    const channelPersonaId = (c.channel as { aiPersonaId?: string | null }).aiPersonaId ?? null;
+    return {
+      ...c,
+      hasOpenHandoff: needsReview.has(c.id),
+      aiPersona:
+        channelPersonaId && personaNames.has(channelPersonaId)
+          ? { id: channelPersonaId, name: personaNames.get(channelPersonaId) as string, source: "channel" as const }
+          : defaultPersona
+            ? { id: defaultPersona.id, name: defaultPersona.name, source: "workspace" as const }
+            : null,
+    };
+  });
+  // Latest message preview per listed conversation — one bounded query.
+  const previews = await (db as unknown as {
+    message: {
+      findMany: (args: unknown) => Promise<{ conversationId: string; text: string | null; createdAt: Date }[]>;
+    };
+  }).message.findMany({
+    where: { conversationId: { in: enriched.map((c) => c.id) }, deletedAt: null },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: enriched.length * 3,
+    select: { conversationId: true, text: true, createdAt: true },
+  }).catch(() => []);
+  const previewByConv = new Map<string, { text: string | null; createdAt: string }>();
+  for (const p of previews) {
+    if (!previewByConv.has(p.conversationId)) {
+      previewByConv.set(p.conversationId, {
+        text: p.text,
+        createdAt: p.createdAt instanceof Date ? p.createdAt.toISOString() : String(p.createdAt),
+      });
+    }
+  }
+  const withPreview = enriched.map((c) => ({ ...c, lastMessage: previewByConv.get(c.id) ?? null }));
+  return { items: withPreview as unknown as ConversationListRow[], nextCursor: hasMore ? items[items.length - 1].id : null };
 }
 
 export async function getConversationDetail(db: Db, ctx: ActorContext, conversationId: string) {
@@ -390,12 +484,18 @@ export async function getConversationDetail(db: Db, ctx: ActorContext, conversat
       type: true,
       displayName: true,
       externalId: true,
+      aiPersonaId: true,
       account: { select: { pageName: true } },
     },
   });
   const identities = await db.channelIdentity.findMany({
     where: { workspaceId: ctx.workspaceId, customerId: conversation.customerId },
-    select: { displayName: true, channelType: true },
+    select: { displayName: true, avatarUrl: true, channelType: true },
+  });
+  const { resolveChannelPersona } = await import("@/modules/ai/channel-persona");
+  const persona = await resolveChannelPersona(db, {
+    workspaceId: ctx.workspaceId,
+    channelId: conversation.channelId,
   });
   const orders = await db.order.findMany({
     where: { workspaceId: ctx.workspaceId, customerId: conversation.customerId },
@@ -407,6 +507,7 @@ export async function getConversationDetail(db: Db, ctx: ActorContext, conversat
     ...conversation,
     channel: channel ?? { type: "FACEBOOK", displayName: null, externalId: null, account: null },
     customer: { ...conversation.customer, identities },
+    aiPersona: persona.id ? { id: persona.id, name: persona.name, source: persona.source } : null,
     orders,
     aiSummary: conversation.summary ?? null,
   };

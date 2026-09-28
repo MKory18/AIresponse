@@ -25,7 +25,7 @@ export function CustomerPanel({
     <div className="space-y-3 p-4">
       {/* Identity — same resolved name as list + header, never a divergent fallback */}
       <div className="glass-subtle flex flex-col items-center gap-2 rounded-2xl px-3 pb-4 pt-5 text-center">
-        <Avatar name={customer.name ?? customer.phone} size="lg" ring />
+        <Avatar name={customer.name ?? customer.phone} src={customer.avatarUrl ?? customer.identities.map((i) => i.avatarUrl).find(Boolean) ?? null} size="lg" ring />
         <div>
           <p className="text-sm font-bold text-ink">
             {customer.name ??

@@ -15,6 +15,7 @@ import { CustomerPanel } from "./customer-panel";
 import { DateSeparator, MessageBubble } from "./message-bubble";
 import {
   CHANNEL_LABELS,
+  avatarOf,
   displayNameOf,
   pageNameOf,
   type ConversationListItem,
@@ -28,6 +29,7 @@ const FILTERS = [
   { key: "unread", label: t.inbox.filterUnread },
   { key: "ai", label: t.inbox.filterAi },
   { key: "human", label: t.inbox.filterHuman },
+  { key: "review", label: t.inbox.filterNeedsReview },
 ] as const;
 
 type FilterKey = (typeof FILTERS)[number]["key"];
@@ -47,6 +49,8 @@ export default function Inbox() {
   const [orderDraftCard, setOrderDraftCard] = useState<DraftInfo | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmTakeover, setConfirmTakeover] = useState(false);
+  const [actingTakeover, setActingTakeover] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const toast = useToast();
 
@@ -78,6 +82,7 @@ export default function Inbox() {
       let items = data.items;
       if (filter === "ai") items = items.filter((c) => c.aiState !== "HUMAN_ACTIVE");
       if (filter === "human") items = items.filter((c) => c.aiState === "HUMAN_ACTIVE");
+      if (filter === "review") items = items.filter((c) => c.hasOpenHandoff);
       setConversations((prev) => {
         const merged = opts?.append ? [...prev, ...items] : items;
         const seen = new Set<string>();
@@ -381,7 +386,7 @@ export default function Inbox() {
                 >
                   <ArrowRight size={17} />
                 </button>
-                <Avatar name={displayNameOf(selected) ?? selected.customer.phone} size="sm" ring />
+                <Avatar name={displayNameOf(selected) ?? selected.customer.phone} src={avatarOf(selected)} size="sm" ring />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-ink">
                     {displayNameOf(selected) ?? t.inbox.unknownCustomer}
@@ -398,6 +403,11 @@ export default function Inbox() {
                     <span className="shrink-0">· {label(selected.customer.status)}</span>
                     {selected.assignedAgent && <span className="truncate">· {selected.assignedAgent.name}</span>}
                   </p>
+                  {selected.aiPersona && (
+                    <p className="mt-0.5 truncate text-[11px] text-ink-subtle">
+                      {t.inbox.aiPersonaLabel}: <span className="font-semibold text-ink-muted">{selected.aiPersona.name}</span>
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -406,7 +416,7 @@ export default function Inbox() {
                   {aiMode ? t.inbox.replyWithAi : t.inbox.replyManually}
                 </Badge>
                 {aiMode ? (
-                  <Button size="sm" variant="secondary" onClick={() => action("takeover")}>
+                  <Button size="sm" variant="secondary" onClick={() => setConfirmTakeover(true)}>
                     <Sparkles size={13} /> {t.inbox.takeOver}
                   </Button>
                 ) : (
@@ -513,6 +523,34 @@ export default function Inbox() {
         />
       </aside>
 
+      {confirmTakeover && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
+            <h2 className="text-base font-bold text-ink">{t.inbox.takeOverConfirmTitle}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.inbox.takeOverConfirmBody}</p>
+            <div className="mt-4 flex justify-start gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setConfirmTakeover(false)} disabled={actingTakeover}>
+                {t.common.cancel}
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                loading={actingTakeover}
+                disabled={actingTakeover}
+                onClick={() => {
+                  setActingTakeover(true);
+                  action("takeover").finally(() => {
+                    setActingTakeover(false);
+                    setConfirmTakeover(false);
+                  });
+                }}
+              >
+                {t.inbox.takeOverTitle}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">

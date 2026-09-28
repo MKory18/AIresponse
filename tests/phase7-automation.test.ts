@@ -291,14 +291,17 @@ describe("Phase 7 — follow-ups", () => {
 });
 
 describe("Phase 7 — human handoffs", () => {
-  it("creates handoff → conversation HUMAN_ACTIVE (AI pause invariant)", async () => {
+  it("creates handoff → review alert WITHOUT changing AI ownership", async () => {
     const handoff = await createHandoff(db as Db, {
       workspaceId: WS_A, conversationId, customerId, reason: "CUSTOMER_REQUEST",
     });
     const conv = await db.conversation.findUniqueOrThrow({ where: { id: conversationId } });
-    expect(conv.aiState).toBe("HUMAN_ACTIVE");
-    expect(conv.aiEnabled).toBe(false);
+    // State machine: handoff is an alert; the thread stays AI_ACTIVE until
+    // an explicit manual takeover.
+    expect(conv.aiState).toBe("AI_ACTIVE");
+    expect(conv.aiEnabled).toBe(true);
     expect(handoff.priority).toBe("NORMAL"); // server policy: customer request → NORMAL
+    expect(handoff.status).toBe("OPEN");
   });
 
   it("priority floor: payment issue forced to HIGH regardless of AI suggestion", async () => {
@@ -345,7 +348,7 @@ describe("Phase 7 — human handoffs", () => {
     expect(routed.assignedTo).toBeTruthy();
   });
 
-  it("after handoff, AI does not respond to next message", async () => {
+  it("after handoff alert, AI still responds (ownership unchanged)", async () => {
     await createHandoff(db as Db, { workspaceId: WS_A, conversationId, customerId, reason: "CUSTOMER_REQUEST" });
     const inbound = await processIncomingMessage(db as Db, {
       workspaceId: WS_A, channelType: "FACEBOOK", externalUserId: "psid-1",
@@ -355,7 +358,11 @@ describe("Phase 7 — human handoffs", () => {
     const result = await processAIMessage(db as Db, {
       workspaceId: WS_A, conversationId: inbound.conversationId, messageId: inbound.messageId,
     }, { vectorStore: emptyStore() });
-    expect(result.status).toBe("AI_DISABLED");
+    expect(["RESPONDED", "CLARIFIED", "HANDOFF"]).toContain(result.status);
+    // The OPEN handoff remains for human review.
+    expect(
+      (db._stores.humanHandoff as any[]).some((h) => h.conversationId === conversationId && h.status === "OPEN")
+    ).toBe(true);
   });
 });
 

@@ -17,7 +17,8 @@ export type ConversationListItem = {
     name: string | null;
     phone: string | null;
     status: string;
-    identities?: { displayName: string | null; channelType: string }[];
+    avatarUrl?: string | null;
+    identities?: { displayName: string | null; avatarUrl?: string | null; channelType: string }[];
   };
   channel: {
     type: string;
@@ -26,6 +27,9 @@ export type ConversationListItem = {
     account?: { pageName?: string | null } | null;
   };
   assignedAgent: { id: string; name: string } | null;
+  lastMessage?: { text: string | null; createdAt: string } | null;
+  hasOpenHandoff?: boolean;
+  aiPersona?: { id: string; name: string; source: "channel" | "workspace" } | null;
 };
 
 export type MessageItem = {
@@ -47,9 +51,10 @@ export type CustomerDetail = {
   address: string | null;
   province: string | null;
   status: string;
+  avatarUrl?: string | null;
   notes: string | null;
   tags: string[];
-  identities: { id: string; channelType: string; channelExternalId: string; displayName?: string | null }[];
+  identities: { id: string; channelType: string; channelExternalId: string; displayName?: string | null; avatarUrl?: string | null }[];
   pageName?: string | null;
   orders: { id: string; orderNumber: string; status: string; total: string; currency: string; createdAt: string }[];
   conversations: { id: string; status: string; aiState: string; updatedAt: string }[];
@@ -95,6 +100,17 @@ export function displayNameOf(c: {
   if (identityName) return identityName;
   if (c.customer.phone) return c.customer.phone;
   return null;
+}
+
+/**
+ * Avatar photo priority: customer.avatarUrl → channel-identity avatarUrl →
+ * null (UI renders initials). Never a random image.
+ */
+export function avatarOf(c: {
+  customer: { avatarUrl?: string | null; identities?: { avatarUrl?: string | null }[] };
+}): string | null {
+  if (c.customer.avatarUrl) return c.customer.avatarUrl;
+  return c.customer.identities?.map((i) => i.avatarUrl).find(Boolean) ?? null;
 }
 
 /** Page badge text from the conversation's own channel (never message text). */

@@ -218,6 +218,15 @@ async function executeAction(
     }
     case "CHANGE_AI_STATE": {
       if (!conversation?.id) throw new Error("CHANGE_AI_STATE requires a conversation");
+      // State machine: automation may set AI_ACTIVE/AI_PAUSED, but NEVER
+      // HUMAN_ACTIVE — ownership transfers exclusively via manual takeover.
+      if (action.aiState === "HUMAN_ACTIVE") {
+        log.warn(
+          { automationId, conversationId: conversation.id },
+          "automation_human_takeover_blocked"
+        );
+        break;
+      }
       await db.conversation.update({
         where: { id: conversation.id },
         data: {

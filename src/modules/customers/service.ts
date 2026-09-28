@@ -20,6 +20,7 @@ export async function resolveCustomerByChannelIdentity(
     channelType: ChannelType;
     externalUserId: string;
     displayName?: string | null;
+    avatarUrl?: string | null;
     metadata?: Record<string, unknown>;
   }
 ): Promise<{ customerId: string; created: boolean }> {
@@ -38,26 +39,34 @@ export async function resolveCustomerByChannelIdentity(
     if (identity.workspaceId !== input.workspaceId) {
       throw new AppError("Channel identity belongs to another workspace", 409, "IDENTITY_CONFLICT");
     }
-    // Backfill names on every inbound (not just create): the Facebook webhook
-    // carries no profile name, but later enrichment (profile API, AI-extracted
-    // name, manual edit) must stick. Never overwrite a real name with null.
+    // Backfill names/avatars on every inbound (not just create): the Facebook
+    // webhook carries no profile data, but later enrichment (profile API,
+    // AI-extracted name, manual edit) must stick. Never overwrite real values
+    // with null.
     const updates: Record<string, string> = {};
     if (input.displayName && !(identity as { displayName?: string | null }).displayName) {
       updates.displayName = input.displayName;
     }
+    if (input.avatarUrl && !(identity as { avatarUrl?: string | null }).avatarUrl) {
+      updates.avatarUrl = input.avatarUrl;
+    }
     if (Object.keys(updates).length > 0) {
       await db.channelIdentity.update({ where: { id: identity.id }, data: updates });
     }
-    if (input.displayName) {
+    if (input.displayName || input.avatarUrl) {
       const customer = await db.customer.findUnique({
         where: { id: identity.customerId },
-        select: { id: true, name: true },
+        select: { id: true, name: true, avatarUrl: true },
       });
-      if (customer && !customer.name) {
-        await db.customer.update({
-          where: { id: customer.id },
-          data: { name: input.displayName },
-        });
+      if (customer) {
+        const customerUpdates: Record<string, string> = {};
+        if (input.displayName && !customer.name) customerUpdates.name = input.displayName;
+        if (input.avatarUrl && !(customer as { avatarUrl?: string | null }).avatarUrl) {
+          customerUpdates.avatarUrl = input.avatarUrl;
+        }
+        if (Object.keys(customerUpdates).length > 0) {
+          await db.customer.update({ where: { id: customer.id }, data: customerUpdates });
+        }
       }
     }
     return { customerId: identity.customerId, created: false };
@@ -67,6 +76,7 @@ export async function resolveCustomerByChannelIdentity(
     data: {
       workspaceId: input.workspaceId,
       name: input.displayName ?? null,
+      avatarUrl: input.avatarUrl ?? null,
       status: "NEW_LEAD",
       lastContactAt: new Date(),
       identities: {
@@ -75,6 +85,7 @@ export async function resolveCustomerByChannelIdentity(
           channelType: input.channelType,
           channelExternalId: input.externalUserId,
           displayName: input.displayName ?? null,
+          avatarUrl: input.avatarUrl ?? null,
           metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
         },
       },

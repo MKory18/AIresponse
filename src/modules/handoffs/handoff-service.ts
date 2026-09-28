@@ -61,11 +61,10 @@ export async function createHandoff(
     },
   });
 
-  // Invariant: a handoff pauses the AI. HUMAN_ACTIVE until explicit release.
-  await db.conversation.update({
-    where: { id: params.conversationId },
-    data: { aiState: "HUMAN_ACTIVE", aiEnabled: false },
-  });
+  // State-machine rule: a handoff is an ALERT / review request only.
+  // It NEVER changes conversation ownership: the thread stays AI_ACTIVE
+  // until an explicit manual takeover. Only takeover/claim/route (human
+  // actions) may set HUMAN_ACTIVE.
 
   await recordAudit(db, {
     workspaceId: params.workspaceId,

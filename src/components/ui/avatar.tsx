@@ -12,11 +12,14 @@ const PALETTES = [
 
 export function Avatar({
   name,
+  src,
   size = "md",
   ring,
   className,
 }: {
   name: string | null | undefined;
+  /** Real photo URL (Facebook profile picture). Falls back to initials. */
+  src?: string | null;
   size?: "xs" | "sm" | "md" | "lg";
   ring?: boolean;
   className?: string;
@@ -30,16 +33,20 @@ export function Avatar({
     md: "h-10 w-10 text-sm",
     lg: "h-12 w-12 text-base",
   };
+  const shape = cn(
+    "inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full font-bold text-white shadow-xs",
+    sizes[size],
+    ring && "ring-2 ring-white/70 dark:ring-white/10",
+    className
+  );
+  if (src) {
+    // Real photo — never a random/placeholder image.
+    return <img src={src} alt={display} className={cn(shape, "bg-surface-3 object-cover")} />;
+  }
   return (
     <span
       aria-hidden
-      className={cn(
-        "inline-flex shrink-0 select-none items-center justify-center rounded-full bg-gradient-to-br font-bold text-white shadow-xs",
-        PALETTES[idx],
-        sizes[size],
-        ring && "ring-2 ring-white/70 dark:ring-white/10",
-        className
-      )}
+      className={cn(shape, "bg-gradient-to-br", PALETTES[idx])}
     >
       {initial}
     </span>

@@ -10,6 +10,8 @@ const NEGATIVE_CACHE_MS = 24 * 3600_000;
 export interface SenderNameResult {
   /** Real profile name to persist, or null when unavailable. */
   name: string | null;
+  /** Real profile picture URL to persist, or null when unavailable. */
+  avatarUrl: string | null;
   /** True when the answer came from cache/throttle (no Graph call). */
   cached: boolean;
 }
@@ -33,27 +35,28 @@ export async function resolveSenderName(
   opts: { workspaceId: string; psid: string; pageToken: string | null; client: FacebookClient }
 ): Promise<SenderNameResult> {
   const { workspaceId, psid, pageToken, client } = opts;
-  if (!psid || !pageToken) return { name: null, cached: true };
+  if (!psid || !pageToken) return { name: null, avatarUrl: null, cached: true };
 
   let identity: {
     id: string;
     displayName?: string | null;
+    avatarUrl?: string | null;
     metadata?: unknown;
   } | null = null;
   try {
     identity = await (db as any).channelIdentity.findFirst({
       where: { workspaceId, channelType: "FACEBOOK", channelExternalId: psid },
-      select: { id: true, displayName: true, metadata: true },
+      select: { id: true, displayName: true, avatarUrl: true, metadata: true },
     });
   } catch {
     identity = null;
   }
-  if (identity?.displayName) return { name: null, cached: true };
+  if (identity?.displayName && identity?.avatarUrl) return { name: null, avatarUrl: null, cached: true };
 
   const checkedAtRaw = (identity?.metadata as { profileCheckedAt?: string } | null)?.profileCheckedAt;
   const checkedAt = checkedAtRaw ? new Date(checkedAtRaw).getTime() : 0;
   if (checkedAt && Date.now() - checkedAt < NEGATIVE_CACHE_MS) {
-    return { name: null, cached: true };
+    return { name: null, avatarUrl: null, cached: true };
   }
 
   let profile: Awaited<ReturnType<FacebookClient["getSenderProfile"]>>;
@@ -75,18 +78,18 @@ export async function resolveSenderName(
 
   if (!profile) {
     log.warn({ workspaceId, httpStatus: "network" }, "sender_profile_failed");
-    return { name: null, cached: false };
+    return { name: null, avatarUrl: null, cached: false };
   }
-  if (!profile.name) {
-    // Graph answered but gave no name (or an explicit error) — log WHY with
-    // safe fields only. Typical causes: token lacks scope, app in dev mode
-    // for non-test users, or restricted profile.
+  if (!profile.name && !profile.avatarUrl) {
+    // Graph answered but gave no usable fields (or an explicit error) — log
+    // WHY with safe fields only. Typical causes: token lacks scope, app in
+    // dev mode for non-test users, or restricted profile.
     log.warn(
       { workspaceId, httpStatus: profile.httpStatus, graphCode: profile.errorCode, graphMessage: profile.errorMessage },
       "sender_profile_empty"
     );
-    return { name: null, cached: false };
+    return { name: null, avatarUrl: null, cached: false };
   }
-  log.info({ workspaceId, httpStatus: profile.httpStatus, nameObtained: true }, "sender_profile_ok");
-  return { name: profile.name, cached: false };
+  log.info({ workspaceId, httpStatus: profile.httpStatus, nameObtained: Boolean(profile.name), avatarObtained: Boolean(profile.avatarUrl) }, "sender_profile_ok");
+  return { name: profile.name, avatarUrl: profile.avatarUrl, cached: false };
 }

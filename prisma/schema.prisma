@@ -132,12 +132,15 @@ model Channel {
   displayName String
   // Public, non-secret identifiers (page id, ig account id, phone number id…)
   externalId  String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  // Page-level AI persona assignment (null → workspace default persona).
+  aiPersonaId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   account       ChannelAccount?
   conversations Conversation[]
+  aiPersona     Persona?        @relation(fields: [aiPersonaId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, type, externalId])
   @@index([workspaceId])
@@ -187,6 +190,7 @@ model Customer {
   address           String?
   province          String?
   channelCustomerId String?
+  avatarUrl         String?
   language          String?
   status            CustomerStatus @default(NEW_LEAD)
   leadScore         Int            @default(0)
@@ -245,6 +249,7 @@ model ChannelIdentity {
   channelType       ChannelType
   channelExternalId String
   displayName       String?
+  avatarUrl         String?
   metadata          Json        @default("{}")
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
@@ -688,10 +693,10 @@ model Persona {
   updatedAt          DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channels  Channel[]
 
   @@index([workspaceId])
 }
-
 model AISettings {
   id                    String   @id @default(cuid())
   workspaceId           String   @unique

@@ -12,6 +12,7 @@ import {
 import { extractionResultSchema, validateStructured, type ExtractionResult, type ResponsePlan } from "./structured";
 import { heuristicIntent, looksLikeInjection } from "./intent";
 import { saveMemories, loadMemory } from "./memory";
+import { resolveChannelPersona } from "./channel-persona";
 import { buildAIContext } from "./context-builder";
 import type { VectorStore } from "@/modules/knowledge/vector-store";
 import { validateResponse } from "./guardrails";
@@ -36,6 +37,8 @@ export interface AIExecutionResult {
   violations?: string[];
   executionId?: string;
   error?: string;
+  /** Page-resolved AI persona driving this execution (channel → workspace). */
+  persona?: { id: string | null; name: string; source: string };
 }
 
 export interface OrchestratorDeps {
@@ -96,13 +99,11 @@ export async function processAIMessage(
     if (!params.dryRun) return { status: "AI_DISABLED" };
   }
 
-  // 4. Config + persona + customer + channel page: independent reads in parallel.
-  const [settingsRaw, personaRow, customer, channelRow] = await Promise.all([
+  // 4. Config + persona (page-assigned → workspace default) + customer +
+  // channel page: independent reads in parallel.
+  const [settingsRaw, resolvedPersona, customer, channelRow] = await Promise.all([
     loadAISettings(db, params.workspaceId),
-    db.persona.findFirst({
-      where: { workspaceId: params.workspaceId, isActive: true },
-      orderBy: { updatedAt: "desc" },
-    }),
+    resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
     db.channel.findUnique({
       where: { id: conversation.channelId },
@@ -113,18 +114,19 @@ export async function processAIMessage(
   if (settings && !settings.aiEnabled) return { status: "AI_DISABLED" };
   if (settings && settings.autoRespond === false && !params.dryRun) return { status: "AI_DISABLED" };
   const persona: PersonaConfig = {
-    name: personaRow?.name ?? "المساعد",
-    language: personaRow?.language ?? "ar",
-    dialect: personaRow?.dialect ?? null,
-    tone: personaRow?.tone ?? "friendly",
-    formality: personaRow?.formality ?? "informal",
-    responseLength: personaRow?.responseLength ?? "short",
-    emojiLevel: personaRow?.emojiLevel ?? 1,
-    salesStyle: personaRow?.salesStyle ?? "helpful",
-    systemInstructions: personaRow?.systemInstructions ?? null,
-    prohibitedPhrases: personaRow?.prohibitedPhrases ?? [],
-    customRules: personaRow?.customRules ?? [],
+    name: resolvedPersona.name,
+    language: resolvedPersona.language,
+    dialect: resolvedPersona.dialect,
+    tone: resolvedPersona.tone,
+    formality: resolvedPersona.formality,
+    responseLength: resolvedPersona.responseLength,
+    emojiLevel: resolvedPersona.emojiLevel,
+    salesStyle: resolvedPersona.salesStyle,
+    systemInstructions: resolvedPersona.systemInstructions,
+    prohibitedPhrases: resolvedPersona.prohibitedPhrases,
+    customRules: resolvedPersona.customRules,
   };
+  const activePersona = { id: resolvedPersona.id, name: resolvedPersona.name, source: resolvedPersona.source };
   if (!customer) throw new NotFoundError("Customer");
 
   // Fail-closed: a misconfigured real provider must never produce fake
@@ -161,13 +163,9 @@ export async function processAIMessage(
         metadata: { messageId: message.id, error: message_text },
         actorUserId: "ai-agent",
       });
-      await db.conversation.update({
-        where: { id: conversation.id },
-        data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "AI_FAILED" },
-      });
       await recordAudit(db, {
         workspaceId: params.workspaceId,
-        action: "conversation.ai_paused",
+        action: "conversation.ai_failed",
         entityType: "Conversation",
         entityId: conversation.id,
         metadata: { reason: "AI_NOT_CONFIGURED" },
@@ -320,24 +318,23 @@ export async function processAIMessage(
         metadata: { messageId: message.id, confidence: extraction.confidence },
         actorUserId: "ai-agent",
       });
+      // State machine: review alert only — the thread stays AI_ACTIVE.
+      // Ownership changes exclusively via manual takeover.
+      await recordAudit(db, {
+        workspaceId: params.workspaceId,
+        action: "conversation.review_requested",
+        entityType: "Conversation",
+        entityId: conversation.id,
+        metadata: { reason: "ORDER_REQUIRES_HUMAN" },
+      });
     }
-    await db.conversation.update({
-      where: { id: conversation.id },
-      data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "ORDER_REQUIRES_HUMAN" },
-    });
-    await recordAudit(db, {
-      workspaceId: params.workspaceId,
-      action: "conversation.ai_paused",
-      entityType: "Conversation",
-      entityId: conversation.id,
-      metadata: { reason: "ORDER_REQUIRES_HUMAN" },
-    });
     return {
       status: "HANDOFF",
       intent: extraction.intent as Intent,
       confidence: extraction.confidence,
       plan,
       response: HANDOFF_ACK,
+      persona: activePersona,
     };
   }
 
@@ -377,7 +374,7 @@ export async function processAIMessage(
     });
     await recordAudit(db, {
       workspaceId: params.workspaceId,
-      action: "conversation.ai_paused",
+      action: "conversation.review_requested",
       entityType: "Conversation",
       entityId: conversation.id,
       metadata: { reason: handoffReason(extraction, injection), intent: extraction.intent, confidence: extraction.confidence },
@@ -402,6 +399,7 @@ export async function processAIMessage(
       confidence: extraction.confidence,
       plan,
       response: HANDOFF_ACK,
+      persona: activePersona,
     };
   }
 
@@ -528,13 +526,12 @@ export async function processAIMessage(
         metadata: { messageId: message.id, error: err instanceof Error ? err.message : String(err) },
         actorUserId: "ai-agent",
       });
-      await db.conversation.update({
-        where: { id: conversation.id },
-        data: { aiState: "AI_PAUSED", aiEnabled: false, handoffReason: "AI_FAILED" },
-      });
+      // State machine: alert only — the thread stays AI_ACTIVE so the next
+      // inbound (or job retry) is processed by AI again. Ownership changes
+      // exclusively via manual takeover.
       await recordAudit(db, {
         workspaceId: params.workspaceId,
-        action: "conversation.ai_paused",
+        action: "conversation.ai_failed",
         entityType: "Conversation",
         entityId: conversation.id,
         metadata: { reason: "AI_FAILED" },
@@ -664,6 +661,7 @@ export async function processAIMessage(
     citations: context.citations,
     violations: violations.length ? violations : undefined,
     executionId: sent?.id,
+    persona: activePersona,
   };
 }
 

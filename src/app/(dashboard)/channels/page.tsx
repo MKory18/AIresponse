@@ -14,14 +14,20 @@ type Connection = {
   pageId: string | null;
   pageName: string | null;
   status: string;
+  aiPersonaId: string | null;
   connectedAt: string | null;
   lastWebhookAt: string | null;
   lastSendAt: string | null;
   tokenStatus: string;
 };
 
+type PersonaOption = { id: string; name: string };
+
 export default function ChannelsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [personas, setPersonas] = useState<PersonaOption[]>([]);
+  const [personaDrafts, setPersonaDrafts] = useState<Record<string, string>>({});
+  const [savingPersona, setSavingPersona] = useState<string | null>(null);
   const [oauthConfigured, setOauthConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -32,11 +38,19 @@ export default function ChannelsPage() {
   const [disconnecting, setDisconnecting] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/channels/facebook");
-    if (res.ok) {
-      const data = await res.json();
+    const [connRes, personaRes] = await Promise.all([
+      fetch("/api/channels/facebook"),
+      fetch("/api/personas"),
+    ]);
+    if (connRes.ok) {
+      const data = await connRes.json();
       setConnections(data.connections);
       setOauthConfigured(data.oauthConfigured);
+    }
+    if (personaRes.ok) {
+      const data = await personaRes.json();
+      const list = (data.items ?? data.personas ?? []) as PersonaOption[];
+      setPersonas(list.map((p) => ({ id: p.id, name: p.name })));
     }
     setLoading(false);
   }, []);
@@ -98,6 +112,19 @@ export default function ChannelsPage() {
       setConfirmPageId(null);
       load();
     }
+  }
+
+  async function savePersona(pageId: string) {
+    const aiPersonaId = personaDrafts[pageId] ?? "";
+    setSavingPersona(pageId);
+    const res = await fetch("/api/channels/facebook", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pageId, aiPersonaId: aiPersonaId || null }),
+    });
+    setSavingPersona(null);
+    setMessage(res.ok ? "تم حفظ شخصية الذكاء الاصطناعي للصفحة." : "تعذّر حفظ الشخصية — تحقق من الصلاحيات وحاول مجددًا.");
+    if (res.ok) load();
   }
 
   async function testConnection(pageId: string) {
@@ -178,6 +205,31 @@ export default function ChannelsPage() {
             <p>آخر إرسال: {c.lastSendAt ? new Date(c.lastSendAt).toLocaleString("ar") : "—"}</p>
             <p>حالة التوكن: {c.tokenStatus}</p>
             <p>رُبطت: {c.connectedAt ? new Date(c.connectedAt).toLocaleDateString("ar") : "—"}</p>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-surface-2/60 p-2.5 dark:bg-white/[0.02]">
+            <label className="text-xs font-bold text-ink">{t.inbox.aiPersonaLabel}</label>
+            <select
+              value={personaDrafts[c.pageId!] ?? c.aiPersonaId ?? ""}
+              onChange={(e) => setPersonaDrafts((prev) => ({ ...prev, [c.pageId!]: e.target.value }))}
+              className="h-9 min-w-40 flex-1 rounded-xl border border-line bg-surface px-2.5 text-xs font-medium text-ink outline-none focus:border-brand-400"
+              aria-label={t.inbox.aiPersonaLabel}
+            >
+              <option value="">الافتراضية للمساحة</option>
+              {personas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => savePersona(c.pageId!)}
+              loading={savingPersona === c.pageId}
+              disabled={savingPersona === c.pageId}
+            >
+              {t.common.save}
+            </Button>
           </div>
           <div className="mt-3 flex gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => testConnection(c.pageId!)} loading={testing === c.pageId} disabled={testing === c.pageId}>

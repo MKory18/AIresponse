@@ -145,13 +145,14 @@ describe("fail-closed orchestrator: no fake replies, visible failure", () => {
       (m) => m.direction === "OUTBOUND" && m.senderType === "AI"
     );
     expect(outboundAI).toHaveLength(0);
-    // Failure is visible: handoff + paused conversation + failed usage log.
+    // Failure is visible: OPEN handoff + failed usage log. The thread stays
+    // AI_ACTIVE (alert only — takeover is manual).
     const handoffs = (db._stores.humanHandoff as any[]).filter(
       (h) => h.conversationId === conversationId && h.status === "OPEN"
     );
     expect(handoffs.length).toBeGreaterThanOrEqual(1);
     const conv = (db._stores.conversation as any[]).find((c) => c.id === conversationId);
-    expect(conv.aiState).toBe("AI_PAUSED");
+    expect(conv.aiState).toBe("AI_ACTIVE");
     const usage = (db._stores.aIUsageLog as any[]).filter(
       (u) => u.messageId === messageId && u.success === false
     );

@@ -7,7 +7,7 @@ import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
 import { EmptyState } from "../ui/empty-state";
 import { Skeleton } from "../ui/skeleton";
-import { CHANNEL_ICONS, displayNameOf, pageNameOf, type ConversationListItem } from "./types";
+import { CHANNEL_ICONS, avatarOf, displayNameOf, pageNameOf, type ConversationListItem } from "./types";
 
 export function ConversationItem({
   conversation,
@@ -42,7 +42,7 @@ export function ConversationItem({
       />
       <div className="flex items-center gap-2.5">
         <div className="relative shrink-0">
-          <Avatar name={name} size="sm" ring={selected} />
+          <Avatar name={name} src={avatarOf(c)} size="sm" ring={selected} />
           {ChIcon && (
             <span className="glass-subtle absolute -bottom-1 -end-1 flex h-4 w-4 items-center justify-center rounded-full text-ink-muted">
               <ChIcon size={9} />
@@ -62,7 +62,9 @@ export function ConversationItem({
               <span className="truncate">{pageName}</span>
             </p>
           )}
-          {c.customer.phone ? (
+          {c.lastMessage?.text ? (
+            <p className={cn("mt-0.5 truncate text-[11px]", c.unreadCount > 0 ? "font-semibold text-ink" : "text-ink-subtle")}>{c.lastMessage.text}</p>
+          ) : c.customer.phone ? (
             <p className={cn("num mt-0.5 text-[11px]", c.unreadCount > 0 ? "font-semibold text-ink" : "text-ink-subtle")}>{c.customer.phone}</p>
           ) : null}
           <div className="mt-1.5 flex items-center justify-between gap-1.5">
@@ -77,6 +79,7 @@ export function ConversationItem({
                   <Sparkles size={10} /> {t.roles.ai}
                 </Badge>
               )}
+              {c.hasOpenHandoff && <Badge tone="URGENT" dot>{t.inbox.needsReview}</Badge>}
               {(c.priority === "HIGH" || c.priority === "URGENT") && <Badge tone={c.priority} dot>{c.priority === "URGENT" ? "عاجلة" : "عالية"}</Badge>}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">

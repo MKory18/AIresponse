@@ -249,15 +249,18 @@ async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, 
   let failed = 0;
   for (const m of messages) {
     const psid = String(m.externalCustomerId ?? "");
-    // Best-effort sender profile name (throttled, cached): fills
-    // Customer.name so the inbox shows the real name instead of "عميل".
-    // Never blocks ingestion on failure — falls through to null.
+    // Best-effort sender profile (throttled, cached): fills Customer.name /
+    // avatarUrl so the inbox shows real identity instead of fallbacks.
+    // Never blocks ingestion on failure — falls through to nulls.
     let senderName: string | null = null;
+    let senderAvatar: string | null = null;
     try {
       const resolved = await resolveSenderName(db, { workspaceId, psid, pageToken, client: fbClient });
       senderName = resolved.name;
+      senderAvatar = resolved.avatarUrl;
     } catch {
       senderName = null;
+      senderAvatar = null;
     }
     try {
       await processIncomingMessage(db, {
@@ -266,6 +269,7 @@ async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, 
         channelId,
         externalUserId: psid,
         externalUserName: (m.externalUserName as string | undefined) ?? senderName ?? undefined,
+        externalAvatarUrl: (m.externalAvatarUrl as string | undefined) ?? senderAvatar ?? undefined,
         externalConversationId: String(m.externalConversationId ?? ""),
         externalMessageId: String(m.externalMessageId ?? ""),
         externalEventId: String(m.externalEventId ?? ""),

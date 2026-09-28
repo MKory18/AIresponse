@@ -196,7 +196,7 @@ describe("Phase 4 — orchestrator pipeline", () => {
     expect(result.status).toBe("NOT_INBOUND");
   });
 
-  it("handoffs on human request and pauses AI", async () => {
+  it("handoffs on human request create a review alert, AI stays active", async () => {
     const inbound = await processIncomingMessage(db as Db, {
       workspaceId: WS_A, channelType: "FACEBOOK", externalUserId: "fb-user-1",
       externalConversationId: "fb-conv-1", externalMessageId: "fb-msg-h", externalEventId: "fb-evt-h",
@@ -207,8 +207,9 @@ describe("Phase 4 — orchestrator pipeline", () => {
     }, { vectorStore: vectorsFromDb() });
     expect(result.status).toBe("HANDOFF");
     const conv = db._stores.conversation[0];
-    expect(conv.aiState).toBe("HUMAN_ACTIVE");
-    expect(conv.aiEnabled).toBe(false);
+    // State machine: alert only — ownership stays AI_ACTIVE until manual takeover.
+    expect(conv.aiState).toBe("AI_ACTIVE");
+    expect(conv.aiEnabled).toBe(true);
     // handoff record + audit logged
     expect((db._stores.humanHandoff as any[]).some((h) => h.reason === "CUSTOMER_REQUEST")).toBe(true);
     expect((db._stores.auditLog as any[]).some((a) => a.action === "human.handoff_created")).toBe(true);
@@ -222,7 +223,7 @@ describe("Phase 4 — orchestrator pipeline", () => {
     expect(result.status).toBe("AI_DISABLED");
   });
 
-  it("AI failure never fabricates a reply and pauses AI", async () => {
+  it("AI failure never fabricates a reply and never auto-takeovers", async () => {
     const failing = new MockAIProvider();
     (failing as any).generateText = async () => {
       throw new AIProviderError("provider down");
@@ -234,7 +235,11 @@ describe("Phase 4 — orchestrator pipeline", () => {
     expect(result.status).toBe("AI_FAILED");
     const aiMsgs = (db._stores.message as any[]).filter((m) => m.senderType === "AI");
     expect(aiMsgs).toHaveLength(0);
-    expect(db._stores.conversation[0].aiState).toBe("AI_PAUSED");
+    // Alert only: stays AI_ACTIVE with an OPEN handoff for review.
+    expect(db._stores.conversation[0].aiState).toBe("AI_ACTIVE");
+    expect(
+      (db._stores.humanHandoff as any[]).some((h) => h.reason === "AI_FAILURE" && h.status === "OPEN")
+    ).toBe(true);
   });
 
   it("provider retries before failing", async () => {

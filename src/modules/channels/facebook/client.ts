@@ -167,24 +167,26 @@ export class FacebookClient {
   async getSenderProfile(
     pageAccessToken: string,
     psid: string
-  ): Promise<{ name: string | null; httpStatus: number; errorCode?: number; errorMessage?: string } | null> {
+  ): Promise<{ name: string | null; avatarUrl: string | null; httpStatus: number; errorCode?: number; errorMessage?: string } | null> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
       try {
         const res = await this.fetchImpl(
-          `${this.graphUrl}/${encodeURIComponent(psid)}?fields=first_name,last_name,name&access_token=${encodeURIComponent(pageAccessToken)}`,
+          `${this.graphUrl}/${encodeURIComponent(psid)}?fields=first_name,last_name,name,profile_pic&access_token=${encodeURIComponent(pageAccessToken)}`,
           { signal: controller.signal } as never
         );
         const json = (await res.json().catch(() => null)) as {
           first_name?: string;
           last_name?: string;
           name?: string;
+          profile_pic?: string | { url?: string; data?: { url?: string } };
           error?: { message: string; code?: number };
         } | null;
         if (!json || json.error) {
           return {
             name: null,
+            avatarUrl: null,
             httpStatus: res.status,
             errorCode: json?.error?.code,
             errorMessage: json?.error?.message,
@@ -193,7 +195,10 @@ export class FacebookClient {
         const full =
           json.name ??
           [json.first_name, json.last_name].filter(Boolean).join(" ").trim();
-        return { name: full || null, httpStatus: res.status };
+        const pic = json.profile_pic;
+        const avatarUrl =
+          typeof pic === "string" ? pic : pic?.url ?? pic?.data?.url ?? null;
+        return { name: full || null, avatarUrl, httpStatus: res.status };
       } finally {
         clearTimeout(timer);
       }
