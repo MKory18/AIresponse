@@ -24,9 +24,6 @@ import { handleOrderIntent } from "@/modules/orders/intelligence";
 
 const log = childLogger("orchestrator");
 
-const HANDOFF_ACK = "تمام، رح أحوّلك على موظف من الفريق يتواصل معك حالًا 🌹";
-const LOW_CONFIDENCE_ACK = "ما فهمت قصدك بالضبط 🌹 ممكن توضحلي أكثر؟";
-
 export interface AIExecutionResult {
   status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND";
   intent?: Intent;
@@ -333,7 +330,7 @@ export async function processAIMessage(
       intent: extraction.intent as Intent,
       confidence: extraction.confidence,
       plan,
-      response: HANDOFF_ACK,
+      response: undefined,
       persona: activePersona,
     };
   }
@@ -379,26 +376,14 @@ export async function processAIMessage(
       entityId: conversation.id,
       metadata: { reason: handoffReason(extraction, injection), intent: extraction.intent, confidence: extraction.confidence },
     });
-    await sendAI(db, {
-      workspaceId: params.workspaceId,
-      conversationId: conversation.id,
-      text: extraction.intent === "COMPLAINT" || injection ? HANDOFF_ACK : LOW_CONFIDENCE_ACK,
-      sourceMessageId: message.id,
-      dryRun: params.dryRun,
-    }).then((r) => {
-      if (r && r.deliveryStatus !== "SENT" && r.deliveryStatus !== "SKIPPED_DUPLICATE") {
-        log.warn(
-          { conversationId: conversation.id, messageId: message.id, deliveryStatus: r.deliveryStatus },
-          "handoff_ack_not_delivered"
-        );
-      }
-    });
+    // Handoff is an alert/review request only — NO auto-reply to customer.
+    // Human agent will respond manually.
     return {
       status: "HANDOFF",
       intent: extraction.intent as Intent,
       confidence: extraction.confidence,
       plan,
-      response: HANDOFF_ACK,
+      response: undefined,
       persona: activePersona,
     };
   }
@@ -482,7 +467,7 @@ export async function processAIMessage(
     if (!check.valid) {
       violations = check.violations;
       log.warn({ violations }, "guardrail_violation_regen");
-      // One corrective regeneration, then deterministic fallback.
+      // One corrective regeneration.
       const retry = await provider.generateText({
         system: `${system}\n\nردك السابق رُفض للأسباب التالية: ${violations.join(", ")}. أعد كتابة الرد ملتزماً تماماً بالقواعد.`,
         user: userPrompt,
@@ -496,7 +481,10 @@ export async function processAIMessage(
         prohibitedPhrases: persona.prohibitedPhrases,
         allowFeedbackQuote: plan.useFeedback,
       });
-      responseText = retryCheck.valid ? retry.text.trim() : check.fallback!;
+      if (!retryCheck.valid) {
+        throw new AIProviderError(`Guardrail violations persist after retry: ${retryCheck.violations.join(", ")}`);
+      }
+      responseText = retry.text.trim();
     }
   } catch (err) {
     // AI failure: never fabricate. Keep the message; surface AI_FAILED.

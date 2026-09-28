@@ -9,7 +9,7 @@ const RULES: [Intent, RegExp][] = [
   ["HUMAN_REQUEST", /(موظف|بشري|إنسان|انساني|human|agent|بدي أحكي مع)/],
   ["COMPLAINT", /(شكوى|شكوي|سيء|سيئ|مكسور|متأخر|مشكلة|متضايق|complaint|bad)/],
   ["ORDER_CANCEL", /(الغي|الغاء|ألغي|بدي ألغي|cancel)/],
-  ["ORDER_UPDATE", /(أعدل|تعديل|أغير|بدي أعدل|update order)/],
+  ["ORDER_UPDATE", /(أعدل|تعديل|أغير|بدي أعدل|update order|أكد|تأكيد|موافق|أوكي|أكيد)/],
   ["TRACK_ORDER", /(وين طلبي|متى يوصل طلبي|تتبع|track|طلبي وين)/],
   ["ORDER_CREATE", /(بدي أطلب|بدي اطلب|سجل طلبي|أعطيني|بدي \d+|بدي ١|order now|طللب|بدي)/],
   ["RETURN_REQUEST", /(إرجاع|ارجاع|أرجع المنتج|return)/],

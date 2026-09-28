@@ -278,8 +278,7 @@ describe("Phase 4 — orchestrator pipeline", () => {
       workspaceId: WS_A, conversationId: inbound.conversationId, messageId: inbound.messageId,
     }, { vectorStore: vectorsFromDb() });
     expect(result.status).toBe("HANDOFF");
-    expect(result.response).not.toContain("core");
-    expect(result.response).not.toContain("system");
+    expect(result.response).toBeUndefined();
   });
 
   it("low confidence triggers clarification handoff policy", async () => {

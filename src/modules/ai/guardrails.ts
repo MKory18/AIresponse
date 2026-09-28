@@ -37,7 +37,6 @@ export function validateResponse(params: {
     return {
       valid: false,
       violations: ["EMPTY_RESPONSE"],
-      fallback: "شكرًا لتواصلك 🌹 لحظة وأحولك على زميلي يتأكدلك من هالمعلومة.",
     };
   }
 
@@ -105,9 +104,7 @@ export function validateResponse(params: {
   return {
     valid,
     violations,
-    fallback: valid
-      ? undefined
-      : "شكرًا لتواصلك 🌹 لحظة وأحولك على زميلي يتأكدلك من هالمعلومة.",
+    fallback: undefined,
   };
 }
 
