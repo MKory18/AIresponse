@@ -243,28 +243,21 @@ async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, 
   }
 
   const { getFacebookClient } = await import("@/modules/channels/facebook/client");
+  const { resolveSenderName } = await import("@/modules/channels/facebook/profile");
   const fbClient = getFacebookClient();
   let processed = 0;
   let failed = 0;
   for (const m of messages) {
     const psid = String(m.externalCustomerId ?? "");
-    // Best-effort sender profile name (cached per batch): fills Customer.name
-    // so the inbox shows the real name instead of the "عميل" fallback.
-    // Never breaks ingestion — failures fall through to null.
+    // Best-effort sender profile name (throttled, cached): fills
+    // Customer.name so the inbox shows the real name instead of "عميل".
+    // Never blocks ingestion on failure — falls through to null.
     let senderName: string | null = null;
-    if (pageToken && psid) {
-      try {
-        const existing = await (db as any).channelIdentity.findFirst({
-          where: { workspaceId, channelType: "FACEBOOK", channelExternalId: psid },
-          select: { displayName: true },
-        });
-        if (!existing?.displayName) {
-          const profile = await fbClient.getSenderProfile(pageToken, psid);
-          senderName = profile?.name ?? null;
-        }
-      } catch {
-        senderName = null;
-      }
+    try {
+      const resolved = await resolveSenderName(db, { workspaceId, psid, pageToken, client: fbClient });
+      senderName = resolved.name;
+    } catch {
+      senderName = null;
     }
     try {
       await processIncomingMessage(db, {

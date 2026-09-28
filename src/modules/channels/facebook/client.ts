@@ -91,9 +91,15 @@ export class FacebookClient {
     return { ...json, __httpStatus: httpStatus, __durationMs: Date.now() - started } as unknown as T;
   }
 
-  /** Send API — messages endpoint (official JSON body, not query params). */
+  /**
+   * Send API — official transport:
+   *   POST /me/messages?access_token=<PAGE_TOKEN>
+   *   Content-Type: application/json
+   *   { recipient: { id }, messaging_type: "RESPONSE", message: { text } }
+   * The page token MUST be a query parameter — Meta ignores it in the body
+   * (body token → every send fails with an OAuth error).
+   */
   async sendMessage(pageAccessToken: string, recipientId: string, payload: SendPayload): Promise<SendMessageResult & { graphCode?: string }> {
-    const started = Date.now();
     const body: Record<string, unknown> = {
       recipient: { id: recipientId },
       messaging_type: "RESPONSE",
@@ -103,14 +109,14 @@ export class FacebookClient {
     };
     let res: Response;
     try {
-      res = await this.fetchImpl(`${this.graphUrl}/me/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          access_token: pageAccessToken,
-          ...body,
-        }),
-      });
+      res = await this.fetchImpl(
+        `${this.graphUrl}/me/messages?${new URLSearchParams({ access_token: pageAccessToken })}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
     } catch (err) {
       throw new FacebookApiError(
         `Network failure calling Graph API: ${err instanceof Error ? err.message : "unknown"}`,
@@ -144,7 +150,6 @@ export class FacebookClient {
         httpStatus
       );
     }
-    void started;
     return {
       recipientId: json.recipient_id ?? recipientId,
       messageId: json.message_id,
@@ -154,12 +159,15 @@ export class FacebookClient {
 
   /**
    * Page-scoped sender profile (best-effort display name for inbox identity).
-   * Returns null on any failure — callers must never break ingestion on this.
+   * GET /{PSID}?fields=first_name,last_name,name with the PAGE token.
+   * Returns { name, httpStatus } on success, null on any failure — callers
+   * must never break ingestion on this. Diagnostic fields (httpStatus, code)
+   * are returned so callers can log WHY lookup fails without touching tokens.
    */
   async getSenderProfile(
     pageAccessToken: string,
     psid: string
-  ): Promise<{ name: string | null } | null> {
+  ): Promise<{ name: string | null; httpStatus: number; errorCode?: number; errorMessage?: string } | null> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
@@ -172,13 +180,20 @@ export class FacebookClient {
           first_name?: string;
           last_name?: string;
           name?: string;
-          error?: { message: string };
+          error?: { message: string; code?: number };
         } | null;
-        if (!json || json.error) return null;
+        if (!json || json.error) {
+          return {
+            name: null,
+            httpStatus: res.status,
+            errorCode: json?.error?.code,
+            errorMessage: json?.error?.message,
+          };
+        }
         const full =
           json.name ??
           [json.first_name, json.last_name].filter(Boolean).join(" ").trim();
-        return { name: full || null };
+        return { name: full || null, httpStatus: res.status };
       } finally {
         clearTimeout(timer);
       }

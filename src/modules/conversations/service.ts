@@ -78,6 +78,30 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
       entityId: conversation.id,
     });
   }
+  // Heal stale page mapping: conversations created before per-page routing
+  // (or via the generic fallback) are re-attached to the exact channel the
+  // webhook resolved — so replies use the right page token and the UI badge
+  // shows the right page. Audited, workspace-scoped.
+  if (conversation && input.channelId && conversation.channelId !== input.channelId) {
+    const target = await db.channel.findFirst({
+      where: { id: input.channelId, workspaceId: input.workspaceId },
+      select: { id: true },
+    });
+    if (target) {
+      conversation = await db.conversation.update({
+        where: { id: conversation.id },
+        data: { channelId: target.id },
+      });
+      await recordAudit(db, {
+        workspaceId: input.workspaceId,
+        userId: null,
+        action: "conversation.channel_healed",
+        entityType: "Conversation",
+        entityId: conversation.id,
+        metadata: { channelId: target.id },
+      });
+    }
+  }
   if (!conversation) {
     conversation = await db.conversation.create({
       data: {
