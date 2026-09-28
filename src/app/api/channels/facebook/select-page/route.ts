@@ -66,6 +66,11 @@ export const POST = createHandler(
     });
 
     const encrypted = encryptSecret(page.accessToken);
+    // Page Access Tokens from /me/accounts are effectively non-expiring until
+    // revoked. Never persist a stale expiry: a previous disconnect sets
+    // tokenExpiresAt=now(), and leaving it would block a fresh valid token
+    // with POLICY_TOKEN_EXPIRED. Only a verified real page-token expiration
+    // may set this field — none is provided here, so always clear it.
     const account = await prisma.channelAccount.upsert({
       where: { channelId: channel.id },
       create: {
@@ -75,11 +80,13 @@ export const POST = createHandler(
         pageName: page.name,
         encryptedCredentials: encrypted,
         connectedAt: new Date(),
+        tokenExpiresAt: null,
       },
       update: {
         encryptedCredentials: encrypted,
         pageName: page.name,
         connectedAt: new Date(),
+        tokenExpiresAt: null,
       },
     });
     await prisma.channel.update({ where: { id: channel.id }, data: { status: "CONNECTED" } });

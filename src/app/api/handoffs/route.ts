@@ -14,12 +14,30 @@ export const GET = createHandler(
     const where: Record<string, unknown> = { workspaceId: auth!.workspaceId };
     if (query.status) where.status = query.status;
     if (query.reason) where.reason = query.reason;
+    // HumanHandoff has no Prisma relation to Conversation (scalar
+    // conversationId only) — an `include: { conversation }` throws
+    // "Unknown field `conversation`". Fetch plain rows, then hydrate the
+    // conversation status in a second workspace-scoped query so the response
+    // shape ({ ..., conversation: { id, status } | null }) stays compatible.
     const handoffs = await prisma.humanHandoff.findMany({
       where: where as never,
       orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
       take: query.limit ?? 50,
-      include: { conversation: { select: { id: true, status: true } } },
-    } as never);
-    return ok({ items: handoffs });
+    } as never) as unknown as Array<Record<string, unknown> & { conversationId: string }>;
+    const conversationIds = [...new Set(handoffs.map((h) => h.conversationId).filter(Boolean))];
+    const conversations = conversationIds.length
+      ? await prisma.conversation.findMany({
+          where: { workspaceId: auth!.workspaceId, id: { in: conversationIds } },
+          select: { id: true, status: true },
+        })
+      : [];
+    const statusById = new Map(conversations.map((c) => [c.id, c.status]));
+    const items = handoffs.map((h) => ({
+      ...h,
+      conversation: statusById.has(h.conversationId)
+        ? { id: h.conversationId, status: statusById.get(h.conversationId) }
+        : null,
+    }));
+    return ok({ items });
   }
 );

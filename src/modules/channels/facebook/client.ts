@@ -303,6 +303,11 @@ export class FacebookClient {
     if (!extJson.access_token) {
       throw new FacebookApiError("Long-lived token exchange failed", "PERMANENT");
     }
+    // NOTE: extJson.expires_in describes the USER token, not the Page Access
+    // Tokens later read from /me/accounts (effectively non-expiring until
+    // revoked). It is intentionally NOT returned/stored as
+    // ChannelAccount.tokenExpiresAt — persisting it there would wrongly expire
+    // valid page tokens. Page accounts keep tokenExpiresAt=null.
     return extJson.access_token;
   }
 
