@@ -4,6 +4,7 @@ import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
 import { getStorage, generateStorageKey, validateUpload } from "./storage";
+export { validateUpload } from "./storage";
 import { signPayload } from "@/core/crypto";
 import { getEnv } from "@/core/env";
 

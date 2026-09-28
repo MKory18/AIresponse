@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHandler, ok } from "@/core/api/handler";
 import { AppError } from "@/core/errors";
 import { prisma } from "@/core/db/prisma";
-import { uploadMedia } from "@/modules/media/service";
+import { uploadMedia, validateUpload } from "@/modules/media/service";
 
 export const runtime = "nodejs";
 
@@ -41,9 +41,38 @@ export const POST = createHandler({ permission: "media.write" }, async ({ auth, 
     throw new AppError("File size mismatch", 422, "VALIDATION_ERROR");
   }
 
+  // Detect MIME type from extension if browser didn't provide a valid one
+  let mimeType = file.type;
+  if (!mimeType || mimeType === "application/octet-stream") {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    const mimeFromExt: Record<string, string> = {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp",
+      gif: "image/gif",
+      mp4: "video/mp4",
+      webm: "video/webm",
+      mp3: "audio/mpeg",
+      wav: "audio/wav",
+      ogg: "audio/ogg",
+      pdf: "application/pdf",
+      txt: "text/plain",
+      md: "text/markdown",
+      json: "application/json",
+      csv: "text/csv",
+    };
+    if (ext && mimeFromExt[ext]) {
+      mimeType = mimeFromExt[ext];
+    }
+  }
+
+  // Pre-validate upload to catch issues early with a clear error
+  validateUpload({ mimeType: mimeType || "application/octet-stream", filename: file.name, size: data.length });
+
   const asset = await uploadMedia(prisma, auth!, {
     filename: file.name,
-    mimeType: file.type || "application/octet-stream",
+    mimeType: mimeType || "application/octet-stream",
     size: data.length,
     data,
     category: (categoryRaw as (typeof MEDIA_CATEGORIES)[number] | undefined) as never,
