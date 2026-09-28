@@ -6,7 +6,8 @@ import { uploadMedia } from "@/modules/media/service";
 
 export const runtime = "nodejs";
 
-const MEDIA_CATEGORIES = ["PRODUCT", "KNOWLEDGE", "FEEDBACK", "AVATAR", "BANNER", "OTHER"] as const;
+// Must match the Prisma MediaCategory enum — any other value fails at the DB layer.
+const MEDIA_CATEGORIES = ["PRODUCT", "FEEDBACK", "TESTIMONIAL", "BRAND", "EDUCATIONAL", "OTHER"] as const;
 
 /**
  * Multipart upload. Validation (mime/extension/size) happens inside

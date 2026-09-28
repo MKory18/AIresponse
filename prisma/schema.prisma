@@ -980,6 +980,42 @@ model HumanHandoff {
   @@index([conversationId])
 }
 
+// ─────────────────────────── AI Playground (internal, isolated) ───────────────────────────
+// Playground sessions are INTERNAL test chats. They never touch production
+// Conversation/Customer/Message/Order/HumanHandoff/CustomerMemory tables and
+// never trigger the Facebook outbound sender.
+
+model PlaygroundSession {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  userId       String?
+  personaId    String?
+  channelId    String?
+  productId    String?
+  useKnowledge Boolean  @default(true)
+  model        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  messages PlaygroundMessage[]
+
+  @@index([workspaceId, updatedAt])
+}
+
+model PlaygroundMessage {
+  id          String   @id @default(cuid())
+  sessionId   String
+  workspaceId String
+  role        String
+  text        String
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  session PlaygroundSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
 // ─────────────────────────── Observability ───────────────────────────
 
 model AuditLog {

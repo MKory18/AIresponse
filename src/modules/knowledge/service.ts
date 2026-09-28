@@ -46,7 +46,14 @@ export async function getOwnedDocument(db: Db, workspaceId: string, documentId: 
     include: { chunks: { where: { isActive: true }, orderBy: { chunkIndex: "asc" } } },
   });
   if (!doc || doc.workspaceId !== workspaceId) throw new NotFoundError("Knowledge document");
-  return doc;
+  // Never ship raw embedding vectors to API clients — strip them in JS so
+  // the guarantee holds on every backend (Prisma select or in-memory stub).
+  const chunks = ((doc as { chunks?: Array<Record<string, unknown>> }).chunks ?? []).map((c) => {
+    const { embedding: _embedding, ...rest } = c;
+    void _embedding;
+    return rest;
+  });
+  return { ...doc, chunks };
 }
 
 export async function listDocuments(
@@ -155,6 +162,109 @@ export async function archiveDocument(db: Db, ctx: ActorContext, documentId: str
     entityId: documentId,
   });
   return updated;
+}
+
+/** Hard delete: removes the document and all its chunks (workspace-scoped). */
+export async function deleteKnowledgeDocument(db: Db, ctx: ActorContext, documentId: string) {
+  await getOwnedDocument(db, ctx.workspaceId, documentId);
+  await db.knowledgeChunk.deleteMany({ where: { documentId } });
+  await db.knowledgeDocument.delete({ where: { id: documentId } });
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "knowledge_document.deleted",
+    entityType: "KnowledgeDocument",
+    entityId: documentId,
+  });
+  return { ok: true };
+}
+
+/** Explicit reindex: reset to PROCESSING and re-enqueue ingestion (idempotent). */
+export async function reindexDocument(db: Db, ctx: ActorContext, documentId: string) {
+  const doc = await getOwnedDocument(db, ctx.workspaceId, documentId);
+  if ((doc as { status?: string }).status === "ARCHIVED") {
+    const { AppError } = await import("@/core/errors");
+    throw new AppError("Cannot reindex an archived document", 422, "VALIDATION_ERROR");
+  }
+  await db.knowledgeChunk.updateMany({ where: { documentId }, data: { isActive: false } });
+  const updated = await db.knowledgeDocument.update({
+    where: { id: documentId },
+    data: { status: "PROCESSING", error: null, isActive: true },
+  });
+  await enqueueJob(db, {
+    workspaceId: ctx.workspaceId,
+    type: "process_knowledge_document",
+    payload: { documentId },
+  });
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "knowledge_document.reindexed",
+    entityType: "KnowledgeDocument",
+    entityId: documentId,
+  });
+  await eventBus.publish(makeEvent("KnowledgeDocumentUpdated", ctx.workspaceId, { documentId }));
+  return updated;
+}
+
+// ── Semantic search (powers the in-UI "اختبر البحث" debugger) ───────────────
+
+export interface KnowledgeSearchHit {
+  chunkId: string;
+  documentId: string;
+  documentTitle: string | null;
+  documentCategory: string | null;
+  score: number;
+  preview: string;
+  content: string;
+}
+
+/**
+ * Real vector search over active chunks (workspace-scoped inside the store).
+ * The store/embedder are injectable so tests run offline (Hash + InMemory)
+ * while production uses OpenAI embeddings + pgvector.
+ */
+export async function searchKnowledge(
+  db: Db,
+  params: { workspaceId: string; query: string; limit?: number; category?: KnowledgeCategory },
+  deps?: {
+    vectorStore?: import("./vector-store").VectorStore;
+    embedder?: { embed: (text: string) => Promise<number[]> };
+  }
+): Promise<KnowledgeSearchHit[]> {
+  const { getEmbeddingProvider } = await import("./embeddings");
+  const { PgVectorStore } = await import("./vector-store");
+  const raw = db as unknown as {
+    $queryRawUnsafe: (sql: string, ...params: Array<unknown>) => Promise<Array<Record<string, unknown>>>;
+  };
+  const store =
+    deps?.vectorStore ?? new PgVectorStore((sql, sqlParams) => raw.$queryRawUnsafe(sql, ...sqlParams));
+  const embedder = deps?.embedder ?? getEmbeddingProvider();
+  const embedding = await embedder.embed(params.query);
+  const matches = await store.search({
+    embedding,
+    workspaceId: params.workspaceId,
+    limit: Math.min(params.limit ?? 5, 20),
+    metadataFilters: params.category ? { category: params.category } : undefined,
+  });
+  const docIds = [...new Set(matches.map((m) => m.documentId))];
+  const docs =
+    docIds.length > 0
+      ? await db.knowledgeDocument.findMany({
+          where: { workspaceId: params.workspaceId, id: { in: docIds } },
+          select: { id: true, title: true, category: true },
+        })
+      : [];
+  const byId = new Map(docs.map((d) => [d.id, d]));
+  return matches.map((m) => ({
+    chunkId: m.chunkId,
+    documentId: m.documentId,
+    documentTitle: (byId.get(m.documentId)?.title as string) ?? null,
+    documentCategory: (byId.get(m.documentId)?.category as string) ?? null,
+    score: m.score,
+    preview: m.content.slice(0, 300),
+    content: m.content,
+  }));
 }
 
 // ── FAQs ────────────────────────────────────────────────────────────────────

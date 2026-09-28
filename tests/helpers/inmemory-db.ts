@@ -190,6 +190,16 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
       }
       return { count: rows.length };
     },
+    async deleteMany(args: any = {}) {
+      let count = 0;
+      for (let i = store.length - 1; i >= 0; i--) {
+        if (matchesWhere(store[i], args.where)) {
+          store.splice(i, 1);
+          count += 1;
+        }
+      }
+      return { count };
+    },
     async delete(args: any) {
       const idx = store.findIndex((r) => r.id === args.where.id);
       if (idx < 0) throw new Error(`${name}: record not found`);
@@ -277,6 +287,8 @@ export function createFakeDb() {
   const followUpRows: Row[] = [];
   const workspaceUsageRows: Row[] = [];
   const dailyAnalyticsRows: Row[] = [];
+  const playgroundSessionRows: Row[] = [];
+  const playgroundMessageRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -286,6 +298,7 @@ export function createFakeDb() {
       channelAccount: channelAccountRows, webhookEvent: webhookEventRows, humanHandoff: humanHandoffRows, automation: automationRows, automationExecution: automationExecutionRows, user: userRows, followUp: followUpRows, workspaceUsage: workspaceUsageRows, dailyWorkspaceAnalytics: dailyAnalyticsRows,
       knowledgeDocument, knowledgeChunk, faq, backgroundJob,
       aISettings, persona, customerMemory, knowledgeCitation, aIUsageLog,
+      playgroundSession: playgroundSessionRows, playgroundMessage: playgroundMessageRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0 }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -317,6 +330,8 @@ export function createFakeDb() {
     workspaceUsage: makeModel("workspaceUsage", workspaceUsageRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     dailyWorkspaceAnalytics: makeModel("dailyWorkspaceAnalytics", dailyAnalyticsRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     webhookEvent: makeModel("webhookEvent", webhookEventRows, { source: "meta", channelType: "FACEBOOK", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    playgroundSession: makeModel("playgroundSession", playgroundSessionRows, { useKnowledge: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    playgroundMessage: makeModel("playgroundMessage", playgroundMessageRows, { metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     aIUsageLog: makeModel("aIUsageLog", aIUsageLog, { promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, success: true, status: "SUCCESS", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     order: makeModel("order", orderRows, { status: "NEW", confirmationStatus: "PENDING", paymentStatus: "UNPAID", fulfillmentStatus: "UNFULFILLED", subtotal: 0, discount: 0, deliveryFee: 0, total: 0, currency: "USD", source: "AI", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     orderItem: makeModel("orderItem", orderItemRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),

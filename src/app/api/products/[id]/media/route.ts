@@ -4,6 +4,7 @@ import { productMediaActionSchema } from "@/modules/products/schemas";
 import {
   attachProductMedia,
   detachProductMedia,
+  reorderProductMedia,
   setPrimaryProductMedia,
   updateProduct,
 } from "@/modules/products/service";
@@ -41,6 +42,19 @@ export const DELETE = createHandler(
   async ({ auth, body, params }) => {
     const { id } = params as Params;
     await detachProductMedia(prisma, auth!, id, body.mediaAssetId);
+    return ok({ ok: true });
+  }
+);
+
+/** PUT /api/products/[id]/media — persist display order (sortOrder = index). */
+export const PUT = createHandler(
+  {
+    body: z.object({ orderedMediaIds: z.array(z.string().cuid()).min(1).max(100) }),
+    permission: "products.write",
+  },
+  async ({ auth, body, params }) => {
+    const { id } = params as Params;
+    await reorderProductMedia(prisma, auth!, id, body.orderedMediaIds);
     return ok({ ok: true });
   }
 );

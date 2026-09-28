@@ -425,6 +425,7 @@ export async function processAIMessage(
           }
         : undefined,
       knowledge: { faqs: context.knowledge.faqs, documents: context.knowledge.documents },
+      media: context.media.map((m) => ({ title: m.title, url: m.url })),
       feedback: plan.useFeedback ? context.feedback : [],
       memory: memories.map((m) => ({ type: m.type, content: m.value })),
       summary: conversation.summary,

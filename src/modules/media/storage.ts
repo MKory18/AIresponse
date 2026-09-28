@@ -103,8 +103,9 @@ export class LocalStorageProvider implements StorageProvider {
 
   async get(key: string) {
     const filePath = path.join(this.root, key);
-    // Path traversal guard: resolved path must stay inside the storage root.
-    if (!path.resolve(filePath).startsWith(path.resolve(this.root))) return null;
+    // Path traversal guard: resolved path must stay inside the storage root
+    // (separator included so a sibling like `<root>-evil` cannot pass).
+    if (!path.resolve(filePath).startsWith(path.resolve(this.root) + path.sep)) return null;
     if (!existsSync(filePath)) return null;
     const stat = statSync(filePath);
     return { stream: createReadStream(filePath), size: stat.size };
@@ -112,7 +113,7 @@ export class LocalStorageProvider implements StorageProvider {
 
   async delete(key: string) {
     const filePath = path.join(this.root, key);
-    if (path.resolve(filePath).startsWith(path.resolve(this.root)) && existsSync(filePath)) {
+    if (path.resolve(filePath).startsWith(path.resolve(this.root) + path.sep) && existsSync(filePath)) {
       await unlink(filePath);
     }
   }

@@ -135,6 +135,19 @@ export async function updateMedia(
       ...(data.productId !== undefined ? { productId: data.productId } : {}),
     },
   });
+  // Keep the canonical ProductMedia join table in sync with the legacy FK:
+  // re-pointing (or clearing) productId here must move (or drop) the join
+  // row, otherwise product pages and AI context diverge from the library.
+  if (data.productId !== undefined && data.productId !== asset.productId) {
+    await db.productMedia.deleteMany({ where: { mediaAssetId: asset.id } });
+    if (data.productId) {
+      await db.productMedia.upsert({
+        where: { productId_mediaAssetId: { productId: data.productId, mediaAssetId: asset.id } },
+        create: { productId: data.productId, mediaAssetId: asset.id, workspaceId: ctx.workspaceId },
+        update: {},
+      });
+    }
+  }
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,

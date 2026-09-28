@@ -221,6 +221,13 @@ export async function detachProductMedia(db: Db, ctx: ActorContext, productId: s
     where: { productId_mediaAssetId: { productId, mediaAssetId } },
   });
   if (link) await db.productMedia.delete({ where: { id: link.id } });
+  // Clear the legacy direct FK too: findProductMedia reads both sources, so a
+  // stale productId would keep surfacing the image for this product (and its AI).
+  // The asset itself is preserved — only the association is removed.
+  const asset = await db.mediaAsset.findUnique({ where: { id: mediaAssetId } });
+  if (asset && asset.workspaceId === ctx.workspaceId && asset.productId === productId) {
+    await db.mediaAsset.update({ where: { id: mediaAssetId }, data: { productId: null } });
+  }
 }
 
 export async function reorderProductMedia(

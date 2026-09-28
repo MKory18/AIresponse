@@ -23,7 +23,23 @@ export const GET = createHandler(
       cursor: query.cursor,
       limit: query.limit,
     });
-    return ok(result);
+    // Active chunk counts per document (one grouped query, no N+1).
+    const ids = result.items.map((d) => d.id);
+    const counts =
+      ids.length > 0
+        ? await prisma.knowledgeChunk.groupBy({
+            by: ["documentId"],
+            where: { documentId: { in: ids }, isActive: true },
+            _count: { documentId: true },
+          })
+        : [];
+    const countById = new Map(
+      counts.map((c) => [c.documentId, (c._count as { documentId?: number })?.documentId ?? 0])
+    );
+    return ok({
+      ...result,
+      items: result.items.map((d) => ({ ...d, chunkCount: countById.get(d.id) ?? 0 })),
+    });
   }
 );
 

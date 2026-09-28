@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowRight, BadgeDollarSign, FileText, Images, Package, Star } from "lucide-react";
-import { label } from "@/lib/i18n";
+import { ArrowDown, ArrowRight, ArrowUp, BadgeDollarSign, FileText, Images, Package, Star, Upload } from "lucide-react";
+import { label, t } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -58,6 +58,9 @@ export default function ProductDetailPage() {
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [newFaq, setNewFaq] = useState({ question: "", answer: "" });
   const [tab, setTab] = useState("overview");
+  const [mediaSearch, setMediaSearch] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const productFileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/products/${params.id}`);
@@ -128,6 +131,40 @@ export default function ProductDetailPage() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mediaAssetId }),
+    });
+    load();
+  }
+
+  async function uploadProductImage(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("category", "PRODUCT");
+    form.append("productId", params.id);
+    setUploadingImage(true);
+    try {
+      const res = await fetch("/api/media/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.message ?? t.media.uploadFailed);
+      } else {
+        load();
+      }
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
+  async function moveMedia(mediaAssetId: string, dir: -1 | 1) {
+    if (!product) return;
+    const ids = product.mediaLinks.map((l) => l.mediaAsset.id);
+    const idx = ids.indexOf(mediaAssetId);
+    const next = idx + dir;
+    if (idx < 0 || next < 0 || next >= ids.length) return;
+    [ids[idx], ids[next]] = [ids[next], ids[idx]];
+    await fetch(`/api/products/${params.id}/media`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderedMediaIds: ids }),
     });
     load();
   }
@@ -338,7 +375,7 @@ export default function ProductDetailPage() {
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">
                 <Images size={15} />
               </span>
-              وسائط المنتج
+              {t.media.productImages}
             </h2>
             <div className="grid grid-cols-3 gap-2">
               {product.mediaLinks.map((link) => (
@@ -352,32 +389,65 @@ export default function ProductDetailPage() {
                   {link.isPrimary && (
                     <Badge tone="NEW" className="mx-auto">
                       <Star size={9} fill="currentColor" />
-                      رئيسية
+                      {t.media.primary}
                     </Badge>
                   )}
-                  <div className="flex justify-center gap-1">
+                  <div className="flex flex-wrap justify-center gap-1">
                     {!link.isPrimary && (
-                      <Button size="sm" variant="secondary" onClick={() => setPrimary(link.mediaAsset.id)}>رئيسية</Button>
+                      <Button size="sm" variant="secondary" onClick={() => setPrimary(link.mediaAsset.id)}>{t.media.setPrimary}</Button>
                     )}
-                    <Button size="sm" variant="ghost" onClick={() => detachMedia(link.mediaAsset.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">إزالة</Button>
+                    <Button size="sm" variant="ghost" onClick={() => moveMedia(link.mediaAsset.id, -1)} aria-label="تقديم">
+                      <ArrowUp size={12} />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => moveMedia(link.mediaAsset.id, 1)} aria-label="تأخير">
+                      <ArrowDown size={12} />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => detachMedia(link.mediaAsset.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">{t.media.removeFromProduct}</Button>
                   </div>
                 </div>
               ))}
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" loading={uploadingImage} disabled={uploadingImage} onClick={() => productFileRef.current?.click()}>
+                <Upload size={13} />
+                {t.media.uploadNew}
+              </Button>
+              <input
+                ref={productFileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadProductImage(f);
+                  e.target.value = "";
+                }}
+              />
+            </div>
             <details className="glass-subtle rounded-xl p-3">
-              <summary className="cursor-pointer text-xs font-bold text-ink-muted">ربط وسائط موجودة من المكتبة</summary>
+              <summary className="cursor-pointer text-xs font-bold text-ink-muted">{t.media.addImage}</summary>
+              <Input
+                value={mediaSearch}
+                onChange={(e) => setMediaSearch(e.target.value)}
+                placeholder={`${t.common.search}…`}
+                aria-label={t.common.search}
+                className="mt-2"
+              />
               <div className="mt-2 grid max-h-52 grid-cols-3 gap-2 overflow-y-auto">
-                {mediaAssets.filter((m) => !attachedIds.has(m.id)).map((m) => (
-                  <button key={m.id} onClick={() => attachMedia(m.id)} className="rounded-xl border border-line p-1 text-[10px] text-ink-muted transition hover:border-brand-400 hover:text-ink">
-                    {m.type === "IMAGE" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.url} alt="" className="h-16 w-full rounded-lg object-cover" loading="lazy" />
-                    ) : (
-                      <span>{m.type}</span>
-                    )}
-                    <span className="mt-1 block truncate">{m.title ?? m.id}</span>
-                  </button>
-                ))}
+                {mediaAssets
+                  .filter((m) => !attachedIds.has(m.id))
+                  .filter((m) => !mediaSearch || (m.title ?? "").includes(mediaSearch))
+                  .map((m) => (
+                    <button key={m.id} onClick={() => attachMedia(m.id)} className="rounded-xl border border-line p-1 text-[10px] text-ink-muted transition hover:border-brand-400 hover:text-ink">
+                      {m.type === "IMAGE" ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={m.url} alt="" className="h-16 w-full rounded-lg object-cover" loading="lazy" />
+                      ) : (
+                        <span>{m.type}</span>
+                      )}
+                      <span className="mt-1 block truncate">{m.title ?? m.id}</span>
+                    </button>
+                  ))}
               </div>
             </details>
           </GlassCard>

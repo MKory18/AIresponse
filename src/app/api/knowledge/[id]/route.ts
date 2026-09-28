@@ -1,7 +1,7 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { knowledgeUpdateSchema } from "@/modules/products/schemas";
-import { archiveDocument, getOwnedDocument, updateDocument } from "@/modules/knowledge/service";
+import { archiveDocument, deleteKnowledgeDocument, getOwnedDocument, updateDocument } from "@/modules/knowledge/service";
 
 type Params = { id: string };
 
@@ -26,3 +26,9 @@ export const PATCH = createHandler(
     return ok(updated);
   }
 );
+
+export const DELETE = createHandler({ permission: "knowledge.write" }, async ({ auth, params }) => {
+  const { id } = params as Params;
+  const result = await deleteKnowledgeDocument(prisma, auth!, id);
+  return ok(result);
+});

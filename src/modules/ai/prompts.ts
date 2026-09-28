@@ -112,6 +112,7 @@ export function trustedDataPrompt(data: {
     faqs: { question: string; answer: string }[];
   };
   knowledge?: { faqs: { question: string; answer: string }[]; documents: { content: string }[] };
+  media?: { title: string | null; url: string }[];
   feedback?: { content: string; source: string | null }[];
   memory?: { type: string; content: string }[];
   summary?: string | null;
@@ -158,6 +159,14 @@ export function trustedDataPrompt(data: {
   if (data.knowledge?.documents.length) {
     blocks.push(
       ["مقتطفات من قاعدة المعرفة:", ...data.knowledge.documents.map((d) => `- ${d.content}`)].join("\n")
+    );
+  }
+  if (data.media?.length) {
+    blocks.push(
+      [
+        "صور المنتج المرتبطة (مرجع بصري — صفها للعميل عند السؤال عن الشكل، ولا تخترع روابط جديدة):",
+        ...data.media.map((m) => `- ${m.title ?? "صورة منتج"}: ${m.url}`),
+      ].join("\n")
     );
   }
   if (data.feedback?.length) {

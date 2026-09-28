@@ -1,0 +1,456 @@
+import { AppError, NotFoundError } from "@/core/errors";
+import type { ActorContext, Db } from "@/modules/customers/service";
+import { getAIProvider } from "./provider";
+import { loadAISettings, resolveModel } from "./router";
+import { resolveChannelPersona, type ResolvedPersona } from "./channel-persona";
+import {
+  buildKnowledgeContext,
+  buildProductContext,
+  type Citation,
+} from "./context-builder";
+import {
+  coreSystemRules,
+  personaPrompt,
+  trustedDataPrompt,
+  wrapUntrustedCustomerContent,
+  responseInstruction,
+  extractionInstruction,
+  PROMPT_VERSIONS,
+} from "./prompts";
+import { validateResponse } from "./guardrails";
+import { extractionResultSchema, validateStructured } from "./structured";
+import type { VectorStore } from "@/modules/knowledge/vector-store";
+
+/**
+ * Internal AI Playground — fully isolated from production.
+ *
+ * HARD GUARANTEES (enforced by construction, not convention):
+ * - Never calls processIncomingMessage / dispatchOutbound / the Facebook sender.
+ * - Never creates Customer, ChannelIdentity, Conversation, Message, Order,
+ *   OrderDraft, HumanHandoff, CustomerMemory, or AIUsageLog rows.
+ * - Never runs handleOrderIntent (order writes). The optional order proposal
+ *   is a pure LLM extraction validated by Zod — dry-run display only.
+ * - All persistence goes to PlaygroundSession/PlaygroundMessage only.
+ * - Mock provider is refused in production (getAIProvider already
+ *   fail-closes; double-checked here explicitly).
+ */
+
+export interface PlaygroundSource {
+  kind: "document" | "faq" | "product" | "media";
+  id: string;
+  title: string;
+  score?: number;
+  preview?: string;
+}
+
+export interface PlaygroundDebug {
+  provider: string;
+  model: string;
+  persona: { name: string; source: ResolvedPersona["source"] };
+  page: { id: string; name: string } | null;
+  knowledgeUsed: boolean;
+  productUsed: boolean;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  violations: string[];
+}
+
+export interface PlaygroundReply {
+  messageId: string;
+  response: string;
+  sources: PlaygroundSource[];
+  debug: PlaygroundDebug;
+  orderProposal?: {
+    intent: string;
+    confidence: number;
+    entities: Record<string, unknown>;
+    missingFields: string[];
+    requestedAction: string;
+  } | null;
+}
+
+type Store = {
+  playgroundSession: {
+    create: (a: unknown) => Promise<never>;
+    findMany: (a: unknown) => Promise<never[]>;
+    findUnique: (a: unknown) => Promise<never | null>;
+    update: (a: unknown) => Promise<never>;
+    delete: (a: unknown) => Promise<never>;
+  };
+  playgroundMessage: {
+    create: (a: unknown) => Promise<never>;
+    findMany: (a: unknown) => Promise<never[]>;
+    deleteMany: (a: unknown) => Promise<{ count: number }>;
+  };
+  channel: { findUnique: (a: unknown) => Promise<{ id: string; displayName?: string | null } | null> };
+  persona: { findFirst: (a: unknown) => Promise<{ id: string } | null> };
+  product: { findUnique: (a: unknown) => Promise<{ id: string; workspaceId: string } | null> };
+};
+
+function storeOf(db: Db): Store {
+  return db as unknown as Store;
+}
+
+async function assertWorkspaceOwned(
+  db: Db,
+  workspaceId: string,
+  model: "persona" | "channel" | "product",
+  id: string,
+  label: string
+): Promise<void> {
+  const s = storeOf(db);
+  if (model === "persona") {
+    const row = await s.persona.findFirst({ where: { id, workspaceId } });
+    if (!row) throw new NotFoundError(label);
+    return;
+  }
+  if (model === "channel") {
+    const row = await s.channel.findUnique({ where: { id } });
+    if (!row) throw new NotFoundError(label);
+    return;
+  }
+  const row = await s.product.findUnique({ where: { id } });
+  if (!row || (row as { workspaceId?: string }).workspaceId !== workspaceId) {
+    throw new NotFoundError(label);
+  }
+}
+
+async function getOwnedSession(db: Db, workspaceId: string, sessionId: string) {
+  const session = (await storeOf(db).playgroundSession.findUnique({
+    where: { id: sessionId },
+  })) as unknown as Record<string, unknown> | null;
+  if (!session || session.workspaceId !== workspaceId) throw new NotFoundError("Playground session");
+  return session as unknown as {
+    id: string;
+    workspaceId: string;
+    personaId: string | null;
+    channelId: string | null;
+    productId: string | null;
+    useKnowledge: boolean;
+    model: string | null;
+  };
+}
+
+export async function createPlaygroundSession(
+  db: Db,
+  ctx: ActorContext,
+  input: { personaId?: string | null; channelId?: string | null; productId?: string | null; useKnowledge?: boolean; model?: string | null }
+) {
+  if (input.personaId) await assertWorkspaceOwned(db, ctx.workspaceId, "persona", input.personaId, "Persona");
+  if (input.channelId) await assertWorkspaceOwned(db, ctx.workspaceId, "channel", input.channelId, "Channel");
+  if (input.productId) await assertWorkspaceOwned(db, ctx.workspaceId, "product", input.productId, "Product");
+  return (await storeOf(db).playgroundSession.create({
+    data: {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      personaId: input.personaId ?? null,
+      channelId: input.channelId ?? null,
+      productId: input.productId ?? null,
+      useKnowledge: input.useKnowledge ?? true,
+      model: input.model?.slice(0, 120) ?? null,
+    },
+  })) as unknown;
+}
+
+export async function listPlaygroundSessions(db: Db, ctx: ActorContext, limit = 20) {
+  return (await storeOf(db).playgroundSession.findMany({
+    where: { workspaceId: ctx.workspaceId },
+    orderBy: [{ updatedAt: "desc" }],
+    take: Math.min(limit, 50),
+  })) as unknown;
+}
+
+export async function getPlaygroundSession(db: Db, ctx: ActorContext, sessionId: string) {
+  const session = await getOwnedSession(db, ctx.workspaceId, sessionId);
+  const messages = (await storeOf(db).playgroundMessage.findMany({
+    where: { sessionId, workspaceId: ctx.workspaceId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: 200,
+  })) as unknown;
+  return { session, messages };
+}
+
+export async function deletePlaygroundSession(db: Db, ctx: ActorContext, sessionId: string) {
+  await getOwnedSession(db, ctx.workspaceId, sessionId);
+  await storeOf(db).playgroundMessage.deleteMany({ where: { sessionId } });
+  await storeOf(db).playgroundSession.delete({ where: { id: sessionId } });
+  return { ok: true };
+}
+
+const HISTORY_LIMIT = 20;
+
+/** Resolve the exact provider or fail with a safe, user-facing error. */
+function requireRealProvider() {
+  let provider;
+  try {
+    provider = getAIProvider();
+  } catch (err) {
+    throw new AppError("الذكاء الاصطناعي غير مهيأ", 503, "AI_NOT_CONFIGURED");
+  }
+  if (provider.name === "mock" && process.env.NODE_ENV === "production" && !process.env.ALLOW_MOCK_AI) {
+    throw new AppError("الذكاء الاصطناعي غير مهيأ", 503, "AI_NOT_CONFIGURED");
+  }
+  return provider;
+}
+
+export async function sendPlaygroundMessage(
+  db: Db,
+  ctx: ActorContext,
+  sessionId: string,
+  text: string,
+  opts?: {
+    withOrderProposal?: boolean;
+    /** Optional display-only test name (prompt context only — never a Customer row). */
+    customerName?: string;
+    vectorStore?: VectorStore;
+    embedder?: { embed: (text: string) => Promise<number[]> };
+  }
+): Promise<PlaygroundReply> {
+  const started = Date.now();
+  const session = await getOwnedSession(db, ctx.workspaceId, sessionId);
+  const s = storeOf(db);
+
+  // 1. Persist the user turn (playground tables only).
+  await s.playgroundMessage.create({
+    data: { sessionId, workspaceId: ctx.workspaceId, role: "user", text, metadata: {} },
+  });
+
+  // 2. Same persona logic as production: explicit override → page → workspace → builtin.
+  let persona: ResolvedPersona;
+  if (session.personaId) {
+    await assertWorkspaceOwned(db, ctx.workspaceId, "persona", session.personaId, "Persona");
+    const row = (await (db as unknown as { persona: { findFirst: (a: unknown) => Promise<Record<string, unknown> | null> } }).persona.findFirst({
+      where: { id: session.personaId, workspaceId: ctx.workspaceId },
+    })) as Record<string, unknown>;
+    persona = {
+      id: session.personaId,
+      name: (row?.name as string) ?? "المساعد",
+      language: (row?.language as string) ?? "ar",
+      dialect: (row?.dialect as string | null) ?? null,
+      tone: (row?.tone as string) ?? "friendly",
+      formality: (row?.formality as string) ?? "informal",
+      responseLength: (row?.responseLength as string) ?? "short",
+      emojiLevel: (row?.emojiLevel as number) ?? 1,
+      salesStyle: (row?.salesStyle as string) ?? "helpful",
+      systemInstructions: (row?.systemInstructions as string | null) ?? null,
+      prohibitedPhrases: (row?.prohibitedPhrases as string[]) ?? [],
+      customRules: (row?.customRules as string[]) ?? [],
+      source: "workspace",
+    };
+  } else {
+    persona = await resolveChannelPersona(db, { workspaceId: ctx.workspaceId, channelId: session.channelId });
+  }
+
+  // 3. Trusted context: selected product + knowledge (when enabled). Workspace-scoped.
+  const [productCtx, knowledgeCtx] = await Promise.all([
+    session.productId
+      ? buildProductContext(db, ctx.workspaceId, session.productId)
+      : Promise.resolve({ product: undefined, citations: [] as Citation[] }),
+    session.useKnowledge
+      ? buildKnowledgeContext(db, opts?.vectorStore ?? (await defaultVectorStore(db)), {
+          workspaceId: ctx.workspaceId,
+          query: text,
+          productId: session.productId ?? undefined,
+          limit: 4,
+        })
+      : Promise.resolve({
+          knowledge: { faqs: [], documents: [] },
+          citations: [] as Citation[],
+        }),
+  ]);
+
+  // 4. Multi-turn history (playground-only memory).
+  const history = (await s.playgroundMessage.findMany({
+    where: { sessionId, workspaceId: ctx.workspaceId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: 500,
+  })) as unknown as Array<{ role: string; text: string }>;
+  const transcript = history.slice(-HISTORY_LIMIT, -1).map((m) => ({
+    sender: m.role === "user" ? "CUSTOMER" : "AI",
+    text: m.text,
+  }));
+
+  // 5. Real provider (fail-closed) + model routing (AISettings → ENV → defaults).
+  const provider = requireRealProvider();
+  const settings = await loadAISettings(db, ctx.workspaceId).catch(() => null);
+  const modelCfg = resolveModel(settings as never, "RESPONSE");
+  const model = session.model ?? modelCfg.model;
+
+  const system = [
+    coreSystemRules(),
+    personaPrompt(persona),
+    trustedDataPrompt({
+      product: productCtx.product
+        ? {
+            name: productCtx.product.name,
+            price: `${productCtx.product.price} ${productCtx.product.currency ?? ""}`.trim(),
+            currency: productCtx.product.currency ?? "",
+            stockStatus: productCtx.product.stockStatus,
+            shortDescription: productCtx.product.shortDescription,
+            benefits: productCtx.product.benefits,
+            usage: productCtx.product.usage,
+            warnings: productCtx.product.warnings,
+            objections: productCtx.product.objections,
+            salesNotes: productCtx.product.salesNotes,
+            faqs: productCtx.product.faqs,
+          }
+        : undefined,
+      knowledge: { faqs: knowledgeCtx.knowledge.faqs, documents: knowledgeCtx.knowledge.documents },
+      customer: opts?.customerName?.trim()
+        ? { name: opts.customerName.trim().slice(0, 100), page: null }
+        : undefined,
+    }),
+  ].join("\n\n");
+  const userPrompt = [
+    wrapUntrustedCustomerContent(text, transcript),
+    responseInstruction(persona),
+  ].join("\n\n");
+
+  let res;
+  try {
+    res = await provider.generateText({ system, user: userPrompt, model, temperature: modelCfg.temperature, maxTokens: modelCfg.maxTokens });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/AI_NOT_CONFIGURED/.test(msg)) throw new AppError("الذكاء الاصطناعي غير مهيأ", 503, "AI_NOT_CONFIGURED");
+    throw new AppError("تعذر تشغيل الذكاء الاصطناعي", 502, "AI_FAILED");
+  }
+  let responseText = (res.text ?? "").trim();
+  const guard = validateResponse({
+    response: responseText,
+    context: productCtx.product ? ({ product: productCtx.product } as never) : null,
+    prohibitedPhrases: persona.prohibitedPhrases,
+  });
+  if (!guard.valid) {
+    responseText = guard.fallback ?? "شكرًا لتواصلك 🌹 لحظة وأحولك على زميلي يتأكدلك من هالمعلومة.";
+  }
+
+  // 6. Optional dry-run order proposal: pure LLM extraction, zero DB writes.
+  let orderProposal: PlaygroundReply["orderProposal"] = null;
+  if (opts?.withOrderProposal) {
+    try {
+      const raw = await provider.generateStructured({
+        system: `${coreSystemRules()}\n\n${extractionInstruction()}`,
+        user: wrapUntrustedCustomerContent(text, transcript),
+        model,
+        temperature: 0.2,
+        maxTokens: 400,
+        validate: (v) => validateStructured(extractionResultSchema, v),
+      });
+      const v = raw.value as { intent: string; confidence: number; entities: Record<string, unknown>; missingFields: string[]; requestedAction: string };
+      orderProposal = {
+        intent: v.intent,
+        confidence: v.confidence,
+        entities: v.entities ?? {},
+        missingFields: v.missingFields ?? [],
+        requestedAction: v.requestedAction,
+      };
+    } catch {
+      orderProposal = null;
+    }
+  }
+
+  // 7. Sources for the "المصادر المستخدمة" panel (titles resolved workspace-scoped).
+  const sources: PlaygroundSource[] = [];
+  if (productCtx.product) {
+    sources.push({ kind: "product", id: productCtx.product.id, title: productCtx.product.name });
+  }
+  for (const f of knowledgeCtx.knowledge.faqs) {
+    sources.push({ kind: "faq", id: f.id, title: f.question });
+  }
+  for (const d of knowledgeCtx.knowledge.documents) {
+    sources.push({
+      kind: "document",
+      id: d.id,
+      title: d.id,
+      score: d.score,
+      preview: d.content.slice(0, 200),
+    });
+  }
+  if (sources.length > 0) {
+    // Resolve real document titles for chunk sources (workspace-scoped).
+    const chunkIds = knowledgeCtx.knowledge.documents.map((d) => d.id);
+    const chunks = chunkIds.length
+      ? await (db as unknown as { knowledgeChunk: { findMany: (a: unknown) => Promise<Array<{ id: string; documentId: string }>> } }).knowledgeChunk.findMany({
+          where: { id: { in: chunkIds }, workspaceId: ctx.workspaceId },
+          select: { id: true, documentId: true },
+        }).catch(() => [])
+      : [];
+    const docIds = [...new Set(chunks.map((c) => c.documentId))];
+    const docs = docIds.length
+      ? await (db as unknown as { knowledgeDocument: { findMany: (a: unknown) => Promise<Array<{ id: string; title: string }>> } }).knowledgeDocument.findMany({
+          where: { id: { in: docIds }, workspaceId: ctx.workspaceId },
+          select: { id: true, title: true },
+        }).catch(() => [])
+      : [];
+    const docById = new Map(docs.map((d) => [d.id, d.title]));
+    const chunkDocById = new Map(chunks.map((c) => [c.id, c.documentId]));
+    for (const src of sources) {
+      if (src.kind !== "document") continue;
+      const docId = chunkDocById.get(src.id);
+      if (docId && docById.has(docId)) src.title = docById.get(docId) as string;
+    }
+  }
+
+  // 8. Page info for the debug panel (read-only, workspace-scoped).
+  let page: PlaygroundDebug["page"] = null;
+  if (session.channelId) {
+    const ch = (await s.channel
+      .findUnique({ where: { id: session.channelId } })
+      .catch(() => null)) as unknown as { id: string; workspaceId?: string; displayName?: string | null } | null;
+    if (ch && (!ch.workspaceId || ch.workspaceId === ctx.workspaceId)) {
+      page = { id: ch.id, name: ch.displayName ?? ch.id };
+    }
+  }
+
+  const debug: PlaygroundDebug = {
+    provider: provider.name,
+    model,
+    persona: { name: persona.name, source: persona.source },
+    page,
+    knowledgeUsed: session.useKnowledge,
+    productUsed: Boolean(session.productId),
+    latencyMs: Date.now() - started,
+    promptTokens: res.promptTokens ?? 0,
+    completionTokens: res.completionTokens ?? 0,
+    violations: guard.violations,
+  };
+
+  const assistant = (await s.playgroundMessage.create({
+    data: {
+      sessionId,
+      workspaceId: ctx.workspaceId,
+      role: "assistant",
+      text: responseText,
+      metadata: {
+        provider: debug.provider,
+        model: debug.model,
+        persona: debug.persona,
+        promptVersion: PROMPT_VERSIONS.RESPONSE,
+        latencyMs: debug.latencyMs,
+        promptTokens: debug.promptTokens,
+        completionTokens: debug.completionTokens,
+        sources,
+        violations: debug.violations,
+        orderProposal,
+      },
+    },
+  })) as unknown as { id: string };
+
+  await (storeOf(db).playgroundSession as unknown as { update: (a: unknown) => Promise<unknown> }).update({
+    where: { id: sessionId },
+    data: { updatedAt: new Date() },
+  }).catch(() => {});
+
+  return { messageId: assistant.id, response: responseText, sources, debug, orderProposal };
+}
+
+type RawSqlDb = {
+  $queryRawUnsafe: (sql: string, ...params: Array<unknown>) => Promise<Array<Record<string, unknown>>>;
+};
+
+async function defaultVectorStore(db: Db): Promise<VectorStore> {
+  const { PgVectorStore } = await import("@/modules/knowledge/vector-store");
+  const raw = db as unknown as RawSqlDb;
+  return new PgVectorStore((sql, params) => raw.$queryRawUnsafe(sql, ...params));
+}
