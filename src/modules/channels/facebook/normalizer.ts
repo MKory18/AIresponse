@@ -84,7 +84,14 @@ export function normalizeFacebookWebhook(
         externalCustomerId: event.sender.id,
         externalConversationId: event.sender.id, // Messenger: conversation == PSID per Page
         externalMessageId: msg.mid,
-        externalEventId: rawEventId,
+        // Per-MESSAGE delivery identity: Meta batches multiple messages from
+        // the same customer in one POST, so the POST-scoped rawEventId MUST
+        // NOT be reused here — processIncomingMessage dedupes on
+        // (conversationId, externalEventId), and a shared key silently drops
+        // every message after the first. Scoping by mid keeps redeliveries
+        // (same mid → same key) deduplicated while distinct messages stay
+        // distinct. rawEventId is preserved below for POST-level tracing.
+        externalEventId: `${rawEventId}:${msg.mid}`,
         text: msg.text ?? null,
         attachments,
         timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
