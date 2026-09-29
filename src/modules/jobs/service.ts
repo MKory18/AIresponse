@@ -24,22 +24,41 @@ export interface EnqueuedJob {
   id: string;
   type: string;
   payload: Record<string, unknown>;
+  /** True when an ACTIVE job with the same idempotency key already existed. */
+  deduplicated?: boolean;
 }
 
 export async function enqueueJob(
   db: Db,
-  params: { workspaceId: string; type: JobType; payload: Record<string, unknown>; runAfter?: Date }
+  params: { workspaceId: string; type: JobType; payload: Record<string, unknown>; runAfter?: Date; idempotencyKey?: string }
 ): Promise<EnqueuedJob> {
-  const job = await db.backgroundJob.create({
-    data: {
-      type: params.type,
-      workspaceId: params.workspaceId,
-      payload: params.payload as Prisma.InputJsonValue,
-      ...(params.runAfter ? { runAfter: params.runAfter } : {}),
-    },
-  });
-  log.info({ jobId: job.id, type: params.type }, "job_enqueued");
-  return { id: job.id, type: params.type, payload: params.payload };
+  try {
+    const job = await db.backgroundJob.create({
+      data: {
+        type: params.type,
+        workspaceId: params.workspaceId,
+        payload: params.payload as Prisma.InputJsonValue,
+        ...(params.runAfter ? { runAfter: params.runAfter } : {}),
+        ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+      },
+    });
+    log.info({ jobId: job.id, type: params.type }, "job_enqueued");
+    return { id: job.id, type: params.type, payload: params.payload };
+  } catch (err) {
+    // Partial unique index (migration 20260929000000): at most one ACTIVE
+    // (PENDING/PROCESSING) job per idempotencyKey. Losing the insert race is
+    // success — the winner's job will process the work idempotently.
+    if ((err as { code?: string }).code === "P2002" && params.idempotencyKey) {
+      const existing = await (db as any).backgroundJob.findUnique({
+        where: { idempotencyKey: params.idempotencyKey },
+      });
+      if (existing) {
+        log.info({ jobId: existing.id, type: params.type }, "job_enqueue_deduplicated");
+        return { id: existing.id, type: params.type, payload: params.payload, deduplicated: true };
+      }
+    }
+    throw err;
+  }
 }
 
 export interface JobResult {
@@ -79,14 +98,25 @@ export async function recoverStaleJobs(db: Db, leaseMinutes = 10): Promise<numbe
  * - AI job exhausted all attempts before the AI could answer (pre-send
  *   failures leave no outbound row for the stuck-message recovery).
  * - Worker was down when the message arrived; job row never created.
+ * - Message recorded as AI_DISABLED and the conversation is AI-active again.
  *
  * Never re-enqueues:
- * - messages with a terminal RESPONSE decision (SUCCESS/HANDOFF/AI_DISABLED —
- *   replying again would violate handoff/duplicate guarantees);
- * - messages with a live (PENDING/PROCESSING) AI job;
- * - messages in non-AI conversations (disabled/takeover — human track);
+ * - messages with a TERMINAL RESPONSE decision (SUCCESS = answered,
+ *   HANDOFF = intentional human path — replying again would violate
+ *   handoff/duplicate guarantees). AI_DISABLED is deliberately NOT terminal:
+ *   a message recorded while AI was temporarily off is reprocessed as soon as
+ *   the conversation returns to AI_ACTIVE;
+ * - messages in currently-disabled/human-controlled conversations (skip now,
+ *   naturally re-eligible if the state flips back);
+ * - messages with a live (PENDING/PROCESSING) AI job (DB partial unique index
+ *   also makes concurrent re-enqueue impossible);
  * - messages older than maxAgeHours (no zombie replies to stale threads);
  * - recent AI_FAILED attempts still inside exponential backoff.
+ *
+ * STARVATION-SAFE: candidates are paginated from the DB (cursor on id) and
+ * terminal/failure state is fetched per page scoped to that page's message
+ * ids — huge workspaces with thousands of answered messages can never hide a
+ * real orphan behind a small in-memory window.
  *
  * Retry safety comes from the existing idempotency: a re-run that finds the
  * reply already sent returns SKIPPED_DUPLICATE — never a second customer
@@ -97,6 +127,7 @@ export async function recoverStaleJobs(db: Db, leaseMinutes = 10): Promise<numbe
 const ORPHAN_MAX_AGE_HOURS = 24;
 const ORPHAN_RETRY_BASE_MS = 30_000;
 const ORPHAN_RETRY_MAX_MS = 2 * 3600_000;
+const ORPHAN_PAGE_SIZE = 100;
 
 export async function recoverOrphanedInboundMessages(
   db: Db,
@@ -107,85 +138,108 @@ export async function recoverOrphanedInboundMessages(
   const now = Date.now();
   const cutoff = new Date(now - maxAgeHours * 3600_000);
 
-  const candidates = await (db as any).message.findMany({
-    where: {
-      direction: "INBOUND",
-      senderType: "CUSTOMER",
-      deletedAt: null,
-      createdAt: { gte: cutoff },
-    },
-    orderBy: { createdAt: "asc" },
-    take: limit * 3,
-    select: { id: true, conversationId: true, workspaceId: true, createdAt: true },
-  });
-  if (candidates.length === 0) return { recovered: 0, skipped: 0 };
-
-  const convIds = [...new Set(candidates.map((m: { conversationId: string }) => m.conversationId))];
-  const conversations = await (db as any).conversation.findMany({
-    where: { id: { in: convIds } },
-    select: { id: true, workspaceId: true, aiState: true, aiEnabled: true },
-  });
-  const convById = new Map(conversations.map((c: { id: string }) => [c.id, c]));
-
-  const messageIds = candidates.map((m: { id: string }) => m.id);
-  const logs = await (db as any).aIUsageLog.findMany({
-    where: { messageId: { in: messageIds }, purpose: "RESPONSE" },
-    select: { messageId: true, status: true, createdAt: true },
-  });
-  const logsByMessage = new Map<string, { decided: boolean; failCount: number; lastFailureAt: number }>();
-  for (const l of logs) {
-    const entry = logsByMessage.get(l.messageId) ?? { decided: false, failCount: 0, lastFailureAt: 0 };
-    if (l.status === "SUCCESS" || l.status === "HANDOFF" || l.status === "AI_DISABLED") {
-      entry.decided = true;
-    } else if (l.status === "AI_FAILED") {
-      entry.failCount += 1;
-      entry.lastFailureAt = Math.max(entry.lastFailureAt, new Date(l.createdAt).getTime() || 0);
-    }
-    logsByMessage.set(l.messageId, entry);
-  }
-
-  // Live AI jobs (a redelivery race reuses the same idempotency — but don't
-  // stack duplicate jobs when one is already queued/running).
-  const liveJobs = await (db as any).backgroundJob.findMany({
-    where: { type: "process_ai_message", status: { in: ["PENDING", "PROCESSING"] } },
-    take: 200,
-    select: { payload: true },
-  });
+  // Live (PENDING/PROCESSING) AI jobs — paginated so deep queues can't hide
+  // an active job and trick the sweeper into stacking a duplicate.
   const liveMessageIds = new Set<string>();
-  for (const j of liveJobs) {
-    const mid = (j.payload as { messageId?: unknown } | null)?.messageId;
-    if (typeof mid === "string") liveMessageIds.add(mid);
+  {
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const jobs = await (db as any).backgroundJob.findMany({
+        where: { type: "process_ai_message", status: { in: ["PENDING", "PROCESSING"] } },
+        orderBy: { id: "asc" },
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        take: 500,
+        select: { id: true, payload: true },
+      });
+      for (const j of jobs) {
+        const mid = (j.payload as { messageId?: unknown } | null)?.messageId;
+        if (typeof mid === "string") liveMessageIds.add(mid);
+      }
+      if (jobs.length < 500) break;
+      cursor = jobs[jobs.length - 1].id;
+    }
   }
 
   let recovered = 0;
   let skipped = 0;
-  for (const m of candidates) {
-    if (recovered >= limit) break;
-    const conv = convById.get(m.conversationId) as
-      | { workspaceId: string; aiState: string; aiEnabled: boolean }
-      | undefined;
-    if (!conv || conv.workspaceId !== m.workspaceId || !conv.aiEnabled || conv.aiState !== "AI_ACTIVE") {
-      skipped += 1;
-      continue;
+  let cursor: string | undefined;
+
+  // Paginate candidates oldest-first. Decided messages are excluded per page
+  // via DB-scoped state lookups — pages full of answered messages cost a few
+  // cheap queries and never block later pages from being examined.
+  for (let page = 0; page < 200 && recovered < limit; page++) {
+    const candidates = await (db as any).message.findMany({
+      where: {
+        direction: "INBOUND",
+        senderType: "CUSTOMER",
+        deletedAt: null,
+        createdAt: { gte: cutoff },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: ORPHAN_PAGE_SIZE,
+      select: { id: true, conversationId: true, workspaceId: true, createdAt: true },
+    });
+    if (candidates.length === 0) break;
+    cursor = candidates[candidates.length - 1].id;
+
+    const convIds = [...new Set(candidates.map((m: { conversationId: string }) => m.conversationId))];
+    const conversations = await (db as any).conversation.findMany({
+      where: { id: { in: convIds } },
+      select: { id: true, workspaceId: true, aiState: true, aiEnabled: true },
+    });
+    const convById = new Map(conversations.map((c: { id: string }) => [c.id, c]));
+
+    const messageIds = candidates.map((m: { id: string }) => m.id);
+    const logs = await (db as any).aIUsageLog.findMany({
+      where: { messageId: { in: messageIds }, purpose: "RESPONSE" },
+      select: { messageId: true, status: true, createdAt: true },
+    });
+    // SUCCESS/HANDOFF = decided. AI_FAILED = backoff accounting.
+    // AI_DISABLED = visible but non-terminal (reprocessable on re-enable).
+    const stateByMessage = new Map<string, { decided: boolean; failCount: number; lastFailureAt: number }>();
+    for (const l of logs) {
+      const entry = stateByMessage.get(l.messageId) ?? { decided: false, failCount: 0, lastFailureAt: 0 };
+      if (l.status === "SUCCESS" || l.status === "HANDOFF") {
+        entry.decided = true;
+      } else if (l.status === "AI_FAILED") {
+        entry.failCount += 1;
+        entry.lastFailureAt = Math.max(entry.lastFailureAt, new Date(l.createdAt).getTime() || 0);
+      }
+      stateByMessage.set(l.messageId, entry);
     }
-    const state = logsByMessage.get(m.id);
-    if (state?.decided || liveMessageIds.has(m.id)) {
-      skipped += 1;
-      continue;
-    }
-    if (state && state.failCount > 0) {
-      const backoffMs = Math.min(ORPHAN_RETRY_BASE_MS * 2 ** Math.min(state.failCount, 10), ORPHAN_RETRY_MAX_MS);
-      if (now - state.lastFailureAt < backoffMs) {
+
+    for (const m of candidates) {
+      if (recovered >= limit) break;
+      const conv = convById.get(m.conversationId) as
+        | { workspaceId: string; aiState: string; aiEnabled: boolean }
+        | undefined;
+      if (!conv || conv.workspaceId !== m.workspaceId || !conv.aiEnabled || conv.aiState !== "AI_ACTIVE") {
         skipped += 1;
         continue;
       }
+      const state = stateByMessage.get(m.id);
+      if (state?.decided || liveMessageIds.has(m.id)) {
+        skipped += 1;
+        continue;
+      }
+      if (state && state.failCount > 0) {
+        const backoffMs = Math.min(ORPHAN_RETRY_BASE_MS * 2 ** Math.min(state.failCount, 10), ORPHAN_RETRY_MAX_MS);
+        if (now - state.lastFailureAt < backoffMs) {
+          skipped += 1;
+          continue;
+        }
+      }
+      const enqueued = await enqueueJob(db, {
+        workspaceId: m.workspaceId,
+        type: "process_ai_message",
+        payload: { conversationId: m.conversationId, messageId: m.id, recovered: "orphan-sweep" },
+        idempotencyKey: `ai:${m.id}`,
+      }).catch(() => null);
+      // Only a NEWLY created job counts as recovered; losing the insert race
+      // to another recovery path means the work is already covered.
+      if (enqueued && !enqueued.deduplicated) recovered += 1; else skipped += 1;
     }
-    await enqueueJob(db, {
-      workspaceId: m.workspaceId,
-      type: "process_ai_message",
-      payload: { conversationId: m.conversationId, messageId: m.id, recovered: "orphan-sweep" },
-    });
-    recovered += 1;
   }
 
   if (recovered > 0) {

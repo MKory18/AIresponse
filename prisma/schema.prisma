@@ -613,10 +613,17 @@ model BackgroundJob {
   finishedAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  // Deterministic job idempotency. The DB enforces a PARTIAL unique index
+  // (only while status is PENDING/PROCESSING — see migration
+  // 20260929000000_ai_job_active_idempotency) so a FAILED/DONE job never
+  // blocks a legitimate re-enqueue, while two recovery processes can never
+  // create two active jobs for the same unit of work.
+  idempotencyKey String?
 
   @@index([status, runAfter])
   @@index([lockedAt])
   @@index([workspaceId, type])
+  @@index([idempotencyKey])
 }
 
 model Faq {

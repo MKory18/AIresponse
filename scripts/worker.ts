@@ -34,23 +34,47 @@ let lastProcessed = 0;
 let lastFailed = 0;
 
 async function cycle(): Promise<void> {
-  const result = await runJobs(prisma, { limit: 10, workerId: WORKER_ID });
-  lastProcessed = result.processed;
-  lastFailed = result.failed;
-  await processDueFollowUps(prisma, 10);
-  cycles += 1;
-  if (cycles % HEARTBEAT_EVERY_CYCLES === 0) {
-    log.info(
-      {
-        workerId: WORKER_ID,
-        uptimeMs: Date.now() - startedAt,
-        cycles,
-        lastProcessed,
-        lastFailed,
-        pollIntervalMs: POLL_INTERVAL_MS,
-      },
-      "worker_heartbeat"
-    );
+  // Finally-safe liveness: the heartbeat counts EVERY cycle attempt, even when
+  // a sub-step (jobs or follow-ups) keeps failing — a half-dead worker must
+  // never look alive-or-dead ambiguously to operators.
+  let jobOutcome: "ok" | "failed" = "ok";
+  let followUpOutcome: "ok" | "failed" = "ok";
+  try {
+    try {
+      const result = await runJobs(prisma, { limit: 10, workerId: WORKER_ID });
+      lastProcessed = result.processed;
+      lastFailed = result.failed;
+    } catch (err) {
+      jobOutcome = "failed";
+      throw err;
+    } finally {
+      try {
+        await processDueFollowUps(prisma, 10);
+      } catch (err) {
+        followUpOutcome = "failed";
+        log.error({ err }, "worker_followups_failed");
+      }
+      cycles += 1;
+      if (cycles % HEARTBEAT_EVERY_CYCLES === 0) {
+        log.info(
+          {
+            workerId: WORKER_ID,
+            uptimeMs: Date.now() - startedAt,
+            cycles,
+            lastProcessed,
+            lastFailed,
+            jobOutcome,
+            followUpOutcome,
+            pollIntervalMs: POLL_INTERVAL_MS,
+          },
+          jobOutcome === "ok" ? "worker_heartbeat" : "worker_cycle_failed"
+        );
+      }
+    }
+  } finally {
+    if (jobOutcome === "ok" && followUpOutcome === "ok") {
+      log.info({ workerId: WORKER_ID, cycles, processed: lastProcessed, failed: lastFailed }, "worker_cycle_completed");
+    }
   }
 }
 

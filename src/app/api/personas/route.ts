@@ -2,9 +2,10 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
+import { PERSONA_LIMITS } from "@/modules/ai/persona-limits";
 
 const personaSchema = z.object({
-  name: z.string().trim().min(2).max(100),
+  name: z.string().trim().min(2).max(PERSONA_LIMITS.name),
   language: z.string().trim().max(20).default("ar"),
   dialect: z.string().trim().max(50).nullable().optional(),
   tone: z.string().trim().max(50).default("friendly"),
@@ -12,9 +13,13 @@ const personaSchema = z.object({
   responseLength: z.string().trim().max(30).default("short"),
   emojiLevel: z.number().int().min(0).max(5).default(1),
   salesStyle: z.string().trim().max(50).default("helpful"),
-  systemInstructions: z.string().max(2000).nullable().optional(),
-  prohibitedPhrases: z.array(z.string().trim().max(100)).max(30).optional(),
-  customRules: z.array(z.string().trim().max(300)).max(30).optional(),
+  systemInstructions: z
+    .string()
+    .max(PERSONA_LIMITS.systemInstructions, `تعليمات الشخصية يجب ألا تتجاوز ${PERSONA_LIMITS.systemInstructions} حرفاً`)
+    .nullable()
+    .optional(),
+  prohibitedPhrases: z.array(z.string().trim().max(PERSONA_LIMITS.prohibitedPhrase)).max(PERSONA_LIMITS.prohibitedPhrases).optional(),
+  customRules: z.array(z.string().trim().max(PERSONA_LIMITS.customRule)).max(PERSONA_LIMITS.customRules).optional(),
   isActive: z.boolean().optional(),
 });
 

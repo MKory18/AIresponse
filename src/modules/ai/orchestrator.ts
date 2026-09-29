@@ -98,11 +98,14 @@ export async function processAIMessage(
   // retried by the job queue and must not be blocked).
   // 3. Conversation state gating (+ soft-deleted threads never run AI).
   // Independent reads run in parallel to cut latency without losing safety.
-  // The guard covers every terminal RESPONSE decision (answered, handed off,
-  // or disabled) so a redelivered job can never double-send or double-decide.
+  // The guard covers TERMINAL RESPONSE decisions only: SUCCESS (answered) and
+  // HANDOFF (intentional human path). AI_DISABLED is deliberately NOT here —
+  // it is a reprocessable condition: a message recorded while AI was
+  // temporarily off must be eligible again once the conversation returns to
+  // AI_ACTIVE (sweeper + redelivered jobs), instead of being silenced forever.
   const [existing, conversation] = await timed("gating", () => Promise.all([
     db.aIUsageLog.findFirst({
-      where: { messageId: message.id, purpose: "RESPONSE", status: { in: ["SUCCESS", "HANDOFF", "AI_DISABLED"] } },
+      where: { messageId: message.id, purpose: "RESPONSE", status: { in: ["SUCCESS", "HANDOFF"] } },
       select: { id: true },
     }),
     db.conversation.findUnique({ where: { id: params.conversationId } }),
@@ -112,8 +115,9 @@ export async function processAIMessage(
   if ((conversation as { deletedAt?: Date | null }).deletedAt) return { status: "SKIPPED" };
   if (!conversation.aiEnabled || conversation.aiState !== "AI_ACTIVE") {
     if (!params.dryRun) {
-      // Terminal + visible: without this log the message would sit with no
-      // reply, no alert, and no record — indistinguishable from lost.
+      // Visible but NOT terminal: without this log the message would sit with
+      // no reply, no alert, and no record — indistinguishable from lost. The
+      // orphan sweeper re-enqueues it automatically if AI is re-enabled.
       await logUsage(db, {
         workspaceId: params.workspaceId,
         conversationId: conversation.id,
@@ -130,6 +134,7 @@ export async function processAIMessage(
       });
       return { status: "AI_DISABLED" };
     }
+    return { status: "AI_DISABLED" };
   }
   log.info(
     { conversationId: conversation.id, messageId: message.id, workspaceId: params.workspaceId },
@@ -148,25 +153,26 @@ export async function processAIMessage(
     }),
   ]));
   const settings = settingsRaw as AISettingsLike | null;
-  if (settings && (!settings.aiEnabled || settings.autoRespond === false) && !params.dryRun) {
-    await logUsage(db, {
-      workspaceId: params.workspaceId,
-      conversationId: conversation.id,
-      messageId: message.id,
-      purpose: "RESPONSE",
-      provider: "none",
-      model: "none",
-      promptVersion: PROMPT_VERSIONS.RESPONSE,
-      promptTokens: 0,
-      completionTokens: 0,
-      latencyMs: Date.now() - pipelineStarted,
-      success: true,
-      status: "AI_DISABLED",
-    });
+  if (settings && (!settings.aiEnabled || settings.autoRespond === false)) {
+    if (!params.dryRun) {
+      // Visible but NOT terminal (reprocessable once settings re-enable AI).
+      await logUsage(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        purpose: "RESPONSE",
+        provider: "none",
+        model: "none",
+        promptVersion: PROMPT_VERSIONS.RESPONSE,
+        promptTokens: 0,
+        completionTokens: 0,
+        latencyMs: Date.now() - pipelineStarted,
+        success: true,
+        status: "AI_DISABLED",
+      });
+    }
     return { status: "AI_DISABLED" };
   }
-  if (settings && !settings.aiEnabled) return { status: "AI_DISABLED" };
-  if (settings && settings.autoRespond === false && !params.dryRun) return { status: "AI_DISABLED" };
   const persona: PersonaConfig = {
     name: resolvedPersona.name,
     language: resolvedPersona.language,
@@ -226,7 +232,7 @@ export async function processAIMessage(
         metadata: { reason: "AI_NOT_CONFIGURED" },
       });
     }
-    return { status: "AI_FAILED", error: message_text };
+    return { status: "AI_FAILED", error: `PERMANENT: ${message_text}` };
   }
   const customerText = message.text ?? "[رسالة وسائط]";
   const recentMessages = await timed("history", () => db.message.findMany({
@@ -724,7 +730,7 @@ export async function processAIMessage(
       latencyMs: sendMs,
       success: false,
       status: "AI_FAILED",
-      error: `Outbound delivery ${sent.deliveryStatus}`,
+      error: `${sent.deliveryStatus === "QUEUED" ? "TRANSIENT" : "PERMANENT"}: Outbound delivery ${sent.deliveryStatus}`,
     });
     logTimings("AI_FAILED", { reason: `Outbound delivery ${sent.deliveryStatus}` });
     return {
@@ -732,7 +738,7 @@ export async function processAIMessage(
       intent: extraction.intent as Intent,
       confidence: extraction.confidence,
       plan,
-      error: `Outbound delivery ${sent.deliveryStatus}`,
+      error: `${sent.deliveryStatus === "QUEUED" ? "TRANSIENT" : "PERMANENT"}: Outbound delivery ${sent.deliveryStatus}`,
     };
   }
 

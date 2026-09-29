@@ -256,7 +256,7 @@ async function handleGenerateSummary(db: HandlerDb, payload: Record<string, unkn
 }
 
 /** process_webhook_event: normalized Facebook events → Conversation Engine. */
-async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+export async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, unknown>, _jobId?: string): Promise<{ success: boolean; error?: string }> {
   const started = Date.now();
   const { processIncomingMessage } = await import("@/modules/conversations/service");
   const workspaceId = String(payload.workspaceId ?? "");

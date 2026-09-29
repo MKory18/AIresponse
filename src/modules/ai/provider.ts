@@ -85,12 +85,13 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
     clearTimeout(timer);
     if (!res.ok) {
-      // Classify BEFORE reading the body: 429/5xx are transient (durable
-      // retry with backoff); 401/403/404/400 are permanent configuration or
-      // request errors (fail fast, stay operator-visible, never hammer).
+      // Classify BEFORE reading the body: timeouts/rate-limits/5xx are
+      // transient (durable retry with backoff); 401/403/404/400 are permanent
+      // configuration or request errors (fail fast, stay operator-visible,
+      // never hammer).
       const status = res.status;
       const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
-      if (status === 429 || status >= 500) {
+      if (status === 429 || status === 408 || status === 425 || status >= 500) {
         throw new AIProviderError(`${this.name} request failed with status ${status}`, {
           retryable: true,
           httpStatus: status,

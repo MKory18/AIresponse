@@ -417,11 +417,19 @@ describe("retry idempotency, burst, ordering", () => {
       inboundIds.push(r.messageId);
     }
     expect(aiJobs()).toHaveLength(10);
-    // Single-worker drain, oldest first.
-    const pending = [...aiJobs()].sort((a, b) =>
-      String(a.id) < String(b.id) ? -1 : 1
-    );
-    for (const job of pending) {
+    // Drain oldest-first with REAL createdAt ordering: stagger each job's
+    // createdAt according to its inbound message's creation order (NOT
+    // lexicographic ids), then assert replies follow the inbound sequence.
+    const jobs = aiJobs();
+    for (const job of jobs) {
+      const idx = inboundIds.indexOf((job.payload as any).messageId);
+      await db.backgroundJob.update({
+        where: { id: job.id },
+        data: { createdAt: new Date(Date.parse("2026-01-01T00:00:00Z") + idx * 1000) },
+      } as never);
+    }
+    const ordered = [...aiJobs()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    for (const job of ordered) {
       const p = job.payload as any;
       const res = await processAIMessage(
         db as Db, { conversationId: p.conversationId, messageId: p.messageId, workspaceId: WS_A }, { vectorStore: stubVector }
@@ -430,6 +438,16 @@ describe("retry idempotency, burst, ordering", () => {
     }
     const sent = outboundRows().filter((m) => m.deliveryStatus === "SENT");
     expect(sent).toHaveLength(10);
+    // Reply numbering must follow inbound order (mock numbers by drain order).
+    const inbounds = (db._stores.message as any[])
+      .filter((m) => m.conversationId === conv.conversationId && m.direction === "INBOUND")
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const replyNumbers = inbounds.map((inb) => {
+      const key = `${inb.conversationId}:${inb.id}`;
+      const reply = sent.find((o) => o.outboundIdempotencyKey === key);
+      return Number((reply?.text ?? "").match(/رد رقم (\d+)/)?.[1] ?? 0);
+    });
+    expect(replyNumbers).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
   it("13. QUEUED outbound eventually reaches SENT via recovery (no silent stall)", async () => {

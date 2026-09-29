@@ -424,6 +424,33 @@ export function createFakeDb() {
     return baseWebhookCreate(args);
   };
 
+  // backgroundJob PARTIAL unique index (migration 20260929000000): at most one
+  // ACTIVE (PENDING/PROCESSING) job per idempotencyKey — mirrors the real DB.
+  const baseJobCreate = (db.backgroundJob as any).create.bind(db.backgroundJob);
+  (db.backgroundJob as any).create = async (args: any) => {
+    const key = args.data?.idempotencyKey;
+    if (key) {
+      const dup = backgroundJob.find(
+        (j) => j.idempotencyKey === key && (j.status === "PENDING" || j.status === "PROCESSING")
+      );
+      if (dup) {
+        const err = new Error("Unique constraint failed: BackgroundJob_idempotencyKey_active_key") as Error & { code?: string };
+        err.code = "P2002";
+        throw err;
+      }
+    }
+    return baseJobCreate(args);
+  };
+  const baseJobFindUnique = (db.backgroundJob as any).findUnique.bind(db.backgroundJob);
+  (db.backgroundJob as any).findUnique = async (args: any) => {
+    const key = args?.where?.idempotencyKey;
+    if (key) {
+      const row = backgroundJob.find((j) => j.idempotencyKey === key);
+      return row ?? null;
+    }
+    return baseJobFindUnique(args);
+  };
+
   // automationExecution unique [automationId, triggerEventId] → throw on duplicate
   const baseExecCreate = (db.automationExecution as any).create.bind(db.automationExecution);
   (db.automationExecution as any).create = async (args: any) => {

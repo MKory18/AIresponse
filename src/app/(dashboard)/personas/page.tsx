@@ -38,6 +38,7 @@ export default function PersonasPage() {
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
   const [showForm, setShowForm] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -91,8 +92,13 @@ export default function PersonasPage() {
       body: JSON.stringify(editing ? { id: editing, ...payload } : payload),
     });
     if (res.ok) {
+      setSaveError(null);
       setShowForm(false);
       load();
+    } else {
+      // Surface validation/config errors — never fail a persona save silently.
+      const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+      setSaveError(data.message ?? data.error ?? `فشل الحفظ (${res.status})`);
     }
   }
 
@@ -246,8 +252,13 @@ export default function PersonasPage() {
           <Field label="أسلوب البيع">
             <Input name="salesStyle" defaultValue={form.salesStyle} placeholder="مثال: helpful" />
           </Field>
-          <Field label="تعليمات خاصة" className="sm:col-span-2">
-            <Textarea name="systemInstructions" defaultValue={form.systemInstructions} rows={2} />
+          <Field label="تعليمات خاصة (حتى 20000 حرف)" className="sm:col-span-2">
+            <Textarea
+              name="systemInstructions"
+              defaultValue={form.systemInstructions}
+              rows={10}
+              maxLength={20000}
+            />
           </Field>
           <Field label="عبارات ممنوعة (سطر لكل عبارة)" className="sm:col-span-2">
             <Textarea name="prohibitedPhrases" defaultValue={form.prohibitedPhrases} rows={2} />
@@ -255,6 +266,9 @@ export default function PersonasPage() {
           <Field label="قواعد إضافية (سطر لكل قاعدة)" className="sm:col-span-2">
             <Textarea name="customRules" defaultValue={form.customRules} rows={2} />
           </Field>
+          {saveError && (
+            <p className="sm:col-span-2 text-xs font-semibold text-red-600 dark:text-red-400">{saveError}</p>
+          )}
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>{t.common.cancel}</Button>
             <Button type="submit">{t.common.save}</Button>

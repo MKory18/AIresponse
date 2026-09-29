@@ -252,6 +252,10 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
         workspaceId: input.workspaceId,
         type: "process_ai_message",
         payload: { conversationId: conversation.id, messageId: message.id },
+        // Deterministic active-job idempotency (partial unique index):
+        // webhook redelivery or a sweeper race can never create two ACTIVE
+        // AI jobs for the same inbound message.
+        idempotencyKey: `ai:${message.id}`,
       });
     } catch (err) {
       childLogger("pipeline").error({ err }, "ai_job_enqueue_failed");
