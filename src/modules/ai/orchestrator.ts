@@ -98,9 +98,11 @@ export async function processAIMessage(
   // retried by the job queue and must not be blocked).
   // 3. Conversation state gating (+ soft-deleted threads never run AI).
   // Independent reads run in parallel to cut latency without losing safety.
+  // The guard covers every terminal RESPONSE decision (answered, handed off,
+  // or disabled) so a redelivered job can never double-send or double-decide.
   const [existing, conversation] = await timed("gating", () => Promise.all([
     db.aIUsageLog.findFirst({
-      where: { messageId: message.id, purpose: "RESPONSE", status: "SUCCESS" },
+      where: { messageId: message.id, purpose: "RESPONSE", status: { in: ["SUCCESS", "HANDOFF", "AI_DISABLED"] } },
       select: { id: true },
     }),
     db.conversation.findUnique({ where: { id: params.conversationId } }),
@@ -109,8 +111,30 @@ export async function processAIMessage(
   if (!conversation || conversation.workspaceId !== params.workspaceId) throw new NotFoundError("Conversation");
   if ((conversation as { deletedAt?: Date | null }).deletedAt) return { status: "SKIPPED" };
   if (!conversation.aiEnabled || conversation.aiState !== "AI_ACTIVE") {
-    if (!params.dryRun) return { status: "AI_DISABLED" };
+    if (!params.dryRun) {
+      // Terminal + visible: without this log the message would sit with no
+      // reply, no alert, and no record — indistinguishable from lost.
+      await logUsage(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        purpose: "RESPONSE",
+        provider: "none",
+        model: "none",
+        promptVersion: PROMPT_VERSIONS.RESPONSE,
+        promptTokens: 0,
+        completionTokens: 0,
+        latencyMs: Date.now() - pipelineStarted,
+        success: true,
+        status: "AI_DISABLED",
+      });
+      return { status: "AI_DISABLED" };
+    }
   }
+  log.info(
+    { conversationId: conversation.id, messageId: message.id, workspaceId: params.workspaceId },
+    "ai_started"
+  );
 
   // 4. Config + persona (page-assigned → workspace default) + customer +
   // channel page: independent reads in parallel.
@@ -124,6 +148,23 @@ export async function processAIMessage(
     }),
   ]));
   const settings = settingsRaw as AISettingsLike | null;
+  if (settings && (!settings.aiEnabled || settings.autoRespond === false) && !params.dryRun) {
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: "none",
+      model: "none",
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: Date.now() - pipelineStarted,
+      success: true,
+      status: "AI_DISABLED",
+    });
+    return { status: "AI_DISABLED" };
+  }
   if (settings && !settings.aiEnabled) return { status: "AI_DISABLED" };
   if (settings && settings.autoRespond === false && !params.dryRun) return { status: "AI_DISABLED" };
   const persona: PersonaConfig = {
@@ -151,6 +192,7 @@ export async function processAIMessage(
   } catch (err) {
     const message_text = err instanceof Error ? err.message : String(err);
     log.error({ err: message_text, conversationId: conversation.id }, "ai_provider_not_configured");
+    log.warn({ conversationId: conversation.id, messageId: message.id, retryable: false }, "ai_failed");
     if (!params.dryRun) {
       await logUsage(db, {
         workspaceId: params.workspaceId,
@@ -165,7 +207,7 @@ export async function processAIMessage(
         latencyMs: 0,
         success: false,
         status: "AI_FAILED",
-        error: message_text,
+        error: `PERMANENT: ${message_text}`,
       });
       const { createHandoff } = await import("@/modules/handoffs/handoff-service");
       await createHandoff(db, {
@@ -335,6 +377,10 @@ export async function processAIMessage(
     })
   );
 
+  // Response model resolved before any terminal decision so HANDOFF/AI_FAILED
+  // logs carry the exact runtime model (resolveModel is pure — no side effects).
+  const responseModelCfg = resolveModel(settings, "RESPONSE");
+
   // 8. Deterministic response plan (rules, not generation — spec §17).
   const plan = buildPlan(extraction, context);
   if (orderResult?.handled && orderResult.action !== "NONE") {
@@ -372,6 +418,24 @@ export async function processAIMessage(
         entityType: "Conversation",
         entityId: conversation.id,
         metadata: { reason: "ORDER_REQUIRES_HUMAN" },
+      });
+      // Terminal + visible: marks this message decided so redeliveries return
+      // DUPLICATE and the orphan sweeper never mistakes it for lost work.
+      await logUsage(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        purpose: "RESPONSE",
+        provider: provider.name,
+        model: responseModelCfg.model,
+        intent: extraction.intent,
+        confidence: extraction.confidence,
+        promptVersion: PROMPT_VERSIONS.RESPONSE,
+        promptTokens: 0,
+        completionTokens: 0,
+        latencyMs: Date.now() - pipelineStarted,
+        success: true,
+        status: "HANDOFF",
       });
     }
     return {
@@ -427,6 +491,22 @@ export async function processAIMessage(
     });
     // Handoff is an alert/review request only — NO auto-reply to customer.
     // Human agent will respond manually.
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: provider.name,
+      model: responseModelCfg.model,
+      intent: extraction.intent,
+      confidence: extraction.confidence,
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: Date.now() - pipelineStarted,
+      success: true,
+      status: "HANDOFF",
+    });
     return {
       status: "HANDOFF",
       intent: extraction.intent as Intent,
@@ -438,7 +518,6 @@ export async function processAIMessage(
   }
 
   // 10. Response generation (validated by guardrails; regenerate once, then safe fallback).
-  const responseModelCfg = resolveModel(settings, "RESPONSE");
   const system = [
     coreSystemRules(),
     personaPrompt(persona),
@@ -544,6 +623,21 @@ export async function processAIMessage(
   } catch (err) {
     // AI failure: never fabricate. Keep the message; surface AI_FAILED.
     // Record usage + create a visible handoff so the failure never disappears.
+    // Error category (TRANSIENT vs PERMANENT) tells operators whether a retry
+    // can succeed or configuration must be corrected first — either way the
+    // message stays recoverable via job retry + the orphan sweeper.
+    const retryable = err instanceof AIProviderError ? err.retryable : true;
+    const rawMessage = err instanceof AIProviderError ? err.message : String(err);
+    const categorized = `${retryable ? "TRANSIENT" : "PERMANENT"}: ${rawMessage}`;
+    log.warn(
+      {
+        conversationId: conversation.id,
+        messageId: message.id,
+        retryable,
+        httpStatus: err instanceof AIProviderError ? err.httpStatus : undefined,
+      },
+      "ai_failed"
+    );
     await logUsage(db, {
       workspaceId: params.workspaceId,
       conversationId: conversation.id,
@@ -558,7 +652,7 @@ export async function processAIMessage(
       latencyMs: 0,
       success: false,
       status: "AI_FAILED",
-      error: err instanceof AIProviderError ? err.message : String(err),
+      error: categorized,
     });
     if (!params.dryRun) {
       const { createHandoff } = await import("@/modules/handoffs/handoff-service");
@@ -586,7 +680,9 @@ export async function processAIMessage(
       intent: extraction.intent as Intent,
       confidence: extraction.confidence,
       plan,
-      error: err instanceof Error ? err.message : String(err),
+      // Categorized so job lastError + sweeper logs tell operators whether a
+      // retry can succeed (TRANSIENT) or config must be fixed (PERMANENT).
+      error: categorized,
     };
   }
 

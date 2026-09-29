@@ -160,7 +160,16 @@ export async function logUsage(db: any, rec: UsageRecord): Promise<void> {
   }
 }
 
-/** Executes an AI call with retry + backoff and usage logging. */
+/**
+ * Executes an AI call with retry + backoff.
+ *
+ * Durability contract: transient failures (timeouts, 429, 5xx) retry here for
+ * fast recovery AND propagate as retryable AI_FAILED for the durable
+ * job/sweeper backoff. Permanent failures (bad credentials, unknown model)
+ * fail FAST — no hammering — while the message stays operator-visible and
+ * recoverable via the orphan sweeper once configuration is corrected.
+ */
+const MAX_RETRY_AFTER_WAIT_MS = 5_000; // longer waits belong to durable backoff, not the worker slot
 export async function withRetry<T>(
   fn: () => Promise<T>,
   opts: { attempts?: number; onRetry?: (attempt: number, err: Error) => void } = {}
@@ -173,8 +182,18 @@ export async function withRetry<T>(
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
       opts.onRetry?.(i, lastErr);
+      // Permanent provider errors never succeed on immediate retry — surface
+      // them at once so the durable layers (job backoff, orphan sweeper) own
+      // the timeline instead of burning worker time.
+      if (lastErr instanceof AIProviderError && !lastErr.retryable) throw lastErr;
       if (i < attempts) {
-        await new Promise((r) => setTimeout(r, 50 * 2 ** i));
+        let waitMs = 50 * 2 ** i;
+        // Respect the server's Retry-After hint, capped so a long hint never
+        // parks the worker; the durable backoff covers the remainder.
+        if (lastErr instanceof AIProviderError && lastErr.retryAfterMs !== undefined) {
+          waitMs = Math.max(waitMs, Math.min(lastErr.retryAfterMs, MAX_RETRY_AFTER_WAIT_MS));
+        }
+        await new Promise((r) => setTimeout(r, waitMs));
       }
     }
   }

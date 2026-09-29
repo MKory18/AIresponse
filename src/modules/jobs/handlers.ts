@@ -354,7 +354,10 @@ async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, 
     { webhookEventId, workspaceId, processed, failed, durationMs: Date.now() - started },
     "webhook_event_processed"
   );
-  return failed > 0 && processed === 0
+  // ANY poisoned message fails the batch: successes are idempotent (redelivery
+  // returns duplicate:true without new jobs), so retrying is safe — while a
+  // partial success would silently abandon the failed messages forever.
+  return failed > 0
     ? { success: false, error: `${failed} message(s) failed` }
     : { success: true };
 }

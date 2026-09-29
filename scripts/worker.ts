@@ -25,9 +25,33 @@ const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 6
 let stopping = false;
 let currentCycle: Promise<void> | null = null;
 
+// Liveness heartbeat: proves the loop is alive and draining (not just the
+// process existing). Safe fields only — ids, counts, durations.
+const HEARTBEAT_EVERY_CYCLES = 12;
+const startedAt = Date.now();
+let cycles = 0;
+let lastProcessed = 0;
+let lastFailed = 0;
+
 async function cycle(): Promise<void> {
-  await runJobs(prisma, { limit: 10, workerId: WORKER_ID });
+  const result = await runJobs(prisma, { limit: 10, workerId: WORKER_ID });
+  lastProcessed = result.processed;
+  lastFailed = result.failed;
   await processDueFollowUps(prisma, 10);
+  cycles += 1;
+  if (cycles % HEARTBEAT_EVERY_CYCLES === 0) {
+    log.info(
+      {
+        workerId: WORKER_ID,
+        uptimeMs: Date.now() - startedAt,
+        cycles,
+        lastProcessed,
+        lastFailed,
+        pollIntervalMs: POLL_INTERVAL_MS,
+      },
+      "worker_heartbeat"
+    );
+  }
 }
 
 async function main(): Promise<void> {

@@ -77,13 +77,30 @@ export class OpenAICompatibleProvider implements AIProvider {
     } catch (err) {
       clearTimeout(timer);
       if (err instanceof Error && err.name === "AbortError") {
-        throw new AIProviderError(`${this.name} request timed out after ${timeoutMs}ms`);
+        throw new AIProviderError(`${this.name} request timed out after ${timeoutMs}ms`, {
+          retryable: true,
+        });
       }
       throw err;
     }
     clearTimeout(timer);
     if (!res.ok) {
-      throw new AIProviderError(`${this.name} request failed with status ${res.status}`);
+      // Classify BEFORE reading the body: 429/5xx are transient (durable
+      // retry with backoff); 401/403/404/400 are permanent configuration or
+      // request errors (fail fast, stay operator-visible, never hammer).
+      const status = res.status;
+      const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
+      if (status === 429 || status >= 500) {
+        throw new AIProviderError(`${this.name} request failed with status ${status}`, {
+          retryable: true,
+          httpStatus: status,
+          retryAfterMs,
+        });
+      }
+      throw new AIProviderError(`${this.name} request failed with status ${status}`, {
+        retryable: false,
+        httpStatus: status,
+      });
     }
     const json = (await res.json()) as {
       choices: { message: { content: string } }[];
@@ -144,11 +161,40 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 }
 
+export interface AIProviderErrorOptions {
+  /**
+   * False for permanent configuration/request errors (bad credentials, unknown
+   * model, invalid request) that retries will never fix — callers fail fast
+   * and keep the message operator-visible instead of hammering the provider.
+   * Defaults to true (transient until proven otherwise — never silently drop).
+   */
+  retryable?: boolean;
+  httpStatus?: number;
+  /** Server's Retry-After hint in milliseconds, when provided. */
+  retryAfterMs?: number;
+}
+
 export class AIProviderError extends Error {
-  constructor(message: string) {
+  readonly retryable: boolean;
+  readonly httpStatus?: number;
+  readonly retryAfterMs?: number;
+  constructor(message: string, opts: AIProviderErrorOptions = {}) {
     super(message);
     this.name = "AIProviderError";
+    this.retryable = opts.retryable ?? true;
+    this.httpStatus = opts.httpStatus;
+    this.retryAfterMs = opts.retryAfterMs;
   }
+}
+
+/** Parses a Retry-After header (delta-seconds or HTTP-date) into milliseconds. */
+export function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const dateMs = Date.parse(header);
+  if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+  return undefined;
 }
 
 /** Extracts a JSON object from possibly-fenced/free-form model output. */

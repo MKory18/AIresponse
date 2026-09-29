@@ -227,6 +227,18 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     customerId,
     channelType: input.channelType,
   };
+  // Durability anchor: every accepted inbound is logged with ids only, so an
+  // operator can always answer "where is this message right now".
+  childLogger("pipeline").info(
+    {
+      conversationId: conversation.id,
+      messageId: message.id,
+      customerId,
+      channelType: input.channelType,
+      duplicate: false,
+    },
+    "inbound_message_received"
+  );
   await eventBus.publish(makeEvent("MessageReceived", input.workspaceId, payload));
   await eventBus.publish(makeEvent("MessageCreated", input.workspaceId, { ...payload, direction: "INBOUND" }));
 
