@@ -1,7 +1,17 @@
-# ── Development stack ──────────────────────────────────────────────────────
-# Usage: docker compose up -d
+# ── Production stack (also used as the Coolify "Docker Compose" resource) ──
+# Usage: docker compose up -d --build
 # Postgres runs with the pgvector extension enabled (used for RAG in Phase 3+).
-
+#
+# Environment precedence per service (highest wins):
+#   1. variables injected by the platform (Coolify UI / shell export) —
+#      ALWAYS win via ${VAR:-default} interpolation below;
+#   2. `.env` file in the repo root when present (local runs);
+#   3. the `:-default` fallbacks (local development only).
+# The `.env` file is optional (`required: false`): platforms that inject
+# environment themselves (Coolify) check out the repo WITHOUT a `.env` file,
+# and a required env_file would fail the entire deployment with
+# "env file not found" — taking the worker down with it.
+#
 services:
   app:
     build: .
@@ -9,16 +19,14 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public}
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - storage:/app/.data/storage
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -40,29 +48,20 @@ services:
       retries: 10
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
-  # Dedicated worker: automation evaluation, follow-up scheduler, AI jobs.
+  # Dedicated worker: webhook events, AI jobs, outbound recovery, follow-ups.
+  # Same image + same DATABASE_URL + same secrets as `app`, shared storage
+  # volume (process_media reads asset bytes; signed-URL generation is DB-only).
+  # No ports, no HTTP healthcheck (non-HTTP process — liveness is visible via
+  # the `worker_started` log line). Never runs inside the Next.js process.
   worker:
     build: .
     command: sh -c "npx prisma migrate deploy && npm run worker"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public}
     volumes:
       - storage:/app/.data/storage
     depends_on:
@@ -72,5 +71,4 @@ services:
 
 volumes:
   pgdata:
-  redisdata:
   storage:

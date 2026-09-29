@@ -89,7 +89,17 @@ Migrations use `prisma migrate deploy` only (never `db push`).
 
 ## 6. Worker
 
-In Coolify, add a **second service** from the same Dockerfile (same app resource, duplicated service or a Docker Compose resource containing `worker`):
+**Recommended path:** deploy the repo's `docker-compose.yml` as a Coolify
+**"Docker Compose" resource** — it already defines `app` + `worker` (+ `postgres`)
+from this same Dockerfile, with the correct worker start command
+(`npx prisma migrate deploy && npm run worker`), shared storage volume,
+`restart: unless-stopped`, and no HTTP healthcheck on the worker. No extra
+service setup is needed; just set the environment variables (§4) on the
+resource — `${DATABASE_URL:-...}` interpolation in the compose file guarantees
+the platform-provided `DATABASE_URL` always wins over the local default.
+
+**Alternative (Dockerfile-type app):** add a **second service** from the same
+Dockerfile:
 
 - Same image and env vars (including `DATABASE_URL`).
 - Start command override: `npx prisma migrate deploy && npm run worker`.
@@ -105,13 +115,20 @@ In Coolify, add a **second service** from the same Dockerfile (same app resource
 
 The worker must never share the Next.js process — it polls `BackgroundJob` and claims jobs atomically via `lockedAt`/`lockedBy`.
 
+**Env parity is mandatory, not optional.** The worker validates its environment
+at runtime (`src/core/env.ts` throws unless `DATABASE_URL`, `JWT_SECRET` (32+),
+and `ENCRYPTION_KEY` (32+) are set). A worker service missing any of these
+crash-loops (or spins `worker_cycle_failed` without processing jobs) while the
+web app keeps running — if `worker_started` never appears in the worker logs,
+check env vars first, then the start command.
+
 ## 7. Persistent Volumes
 
 | Service | Mount | Purpose |
 |---|---|---|
 | PostgreSQL | `/var/lib/postgresql/data` | DB data survives restarts. |
 | app | `/app/.data/storage` | `LocalStorageProvider` uploads (`STORAGE_DIR`) survive restarts. |
-| worker | (none) | State lives in PostgreSQL only. |
+| worker | `/app/.data/storage` (same shared volume) | `process_media` reads asset bytes from storage; job state itself lives in PostgreSQL only. |
 
 ## 8–9. Domain & HTTPS
 
@@ -124,8 +141,11 @@ Endpoint: `GET /api/health` (Coolify-managed — the image has no Dockerfile
 `HEALTHCHECK`; configure it in Coolify: path `/api/health`, port `3000`,
 30s interval, ~30s start period, 3 retries).
 
-- Returns `503` when the database is unreachable (`DB_UNHEALTHY`) or queue is unhealthy.
-- `queueDepth` / `failedJobs` expose worker-queue state.
+- Returns `503` only when the database is unreachable (`DB_UNHEALTHY`).
+- Queue pressure is reported WITHOUT failing the probe: `queue: QUEUE_UNHEALTHY`
+  (HTTP 200, top-level `DEGRADED`) when `failedJobs > 50`, plus `queueDepth`
+  (PENDING count) / `failedJobs` for alerting. A choked queue must page the
+  operator (check the worker), never restart-loop the web app.
 - In Coolify, set the health check path to `/api/health`.
 - "Container running" ≠ healthy; rely on the health endpoint status.
 

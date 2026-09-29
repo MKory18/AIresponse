@@ -69,8 +69,24 @@ export async function processAIMessage(
   deps: OrchestratorDeps = {}
 ): Promise<AIExecutionResult> {
   const pipelineStarted = Date.now();
+  // Safe stage timings (ids + durations only — never message contents/secrets).
+  const stageMs: Record<string, number> = {};
+  const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    const s = Date.now();
+    try {
+      return await fn();
+    } finally {
+      stageMs[name] = (stageMs[name] ?? 0) + (Date.now() - s);
+    }
+  };
+  const logTimings = (outcome: string, extra?: Record<string, unknown>) => {
+    log.info(
+      { conversationId: params.conversationId, messageId: params.messageId, outcome, pipelineMs: Date.now() - pipelineStarted, ...stageMs, ...extra },
+      "ai_pipeline_timings"
+    );
+  };
   // 1. Load message — only inbound customer messages drive the AI.
-  const message = await db.message.findUnique({ where: { id: params.messageId } });
+  const message = await timed("messageLoad", () => db.message.findUnique({ where: { id: params.messageId } }));
   if (!message || message.workspaceId !== params.workspaceId || message.conversationId !== params.conversationId) {
     return { status: "SKIPPED" };
   }
@@ -82,13 +98,13 @@ export async function processAIMessage(
   // retried by the job queue and must not be blocked).
   // 3. Conversation state gating (+ soft-deleted threads never run AI).
   // Independent reads run in parallel to cut latency without losing safety.
-  const [existing, conversation] = await Promise.all([
+  const [existing, conversation] = await timed("gating", () => Promise.all([
     db.aIUsageLog.findFirst({
       where: { messageId: message.id, purpose: "RESPONSE", status: "SUCCESS" },
       select: { id: true },
     }),
     db.conversation.findUnique({ where: { id: params.conversationId } }),
-  ]);
+  ]));
   if (existing && !params.dryRun) return { status: "DUPLICATE", executionId: existing.id };
   if (!conversation || conversation.workspaceId !== params.workspaceId) throw new NotFoundError("Conversation");
   if ((conversation as { deletedAt?: Date | null }).deletedAt) return { status: "SKIPPED" };
@@ -98,7 +114,7 @@ export async function processAIMessage(
 
   // 4. Config + persona (page-assigned → workspace default) + customer +
   // channel page: independent reads in parallel.
-  const [settingsRaw, resolvedPersona, customer, channelRow] = await Promise.all([
+  const [settingsRaw, resolvedPersona, customer, channelRow] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
     resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
@@ -106,7 +122,7 @@ export async function processAIMessage(
       where: { id: conversation.channelId },
       select: { displayName: true, externalId: true },
     }),
-  ]);
+  ]));
   const settings = settingsRaw as AISettingsLike | null;
   if (settings && !settings.aiEnabled) return { status: "AI_DISABLED" };
   if (settings && settings.autoRespond === false && !params.dryRun) return { status: "AI_DISABLED" };
@@ -171,12 +187,16 @@ export async function processAIMessage(
     return { status: "AI_FAILED", error: message_text };
   }
   const customerText = message.text ?? "[رسالة وسائط]";
-  const recentMessages = await db.message.findMany({
+  const recentMessages = await timed("history", () => db.message.findMany({
     where: { conversationId: conversation.id, deletedAt: null },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 8,
     select: { senderType: true, direction: true, text: true },
-  });
+  }));
+  // Bound per-message chars so one huge turn can't blow up every prompt.
+  for (const m of recentMessages) {
+    if (m.text && m.text.length > 500) m.text = m.text.slice(0, 500);
+  }
 
   // 5. Intent + entity extraction (structured, repaired, retried, fallback).
   const modelCfg = resolveModel(settings, "EXTRACTION");
@@ -195,33 +215,56 @@ export async function processAIMessage(
 
   let extraction: ExtractionResult;
   let extractionOk = true;
+  // Fast path: trivial greetings skip the extraction LLM call entirely and use
+  // the deterministic heuristic (same shape the catch-fallback produces). This
+  // removes one full blocking model round-trip for the most common messages
+  // without touching order/business logic (greetings never mutate orders).
+  const heuristicPre = heuristicIntent(customerText);
+  const fastPathGreeting =
+    heuristicPre.intent === "GREETING" &&
+    customerText.trim().length <= 40 &&
+    !looksLikeInjection(customerText);
   try {
-    const res = await withRetry(
-      () =>
-        provider.generateStructured<ExtractionResult>({
-          system: extractionSystem,
-          user: extractionUser,
-          model: modelCfg.model,
-          temperature: modelCfg.temperature,
-          maxTokens: modelCfg.maxTokens,
-          validate: (raw) => validateStructured(extractionResultSchema, raw),
-        }),
-      { attempts: 2 }
-    );
-    extraction = res.value;
-    await logUsage(db, {
-      workspaceId: params.workspaceId,
-      conversationId: conversation.id,
-      messageId: message.id,
-      purpose: "EXTRACTION",
-      provider: provider.name,
-      model: modelCfg.model,
-      promptVersion: PROMPT_VERSIONS.EXTRACTION,
-      promptTokens: res.promptTokens,
-      completionTokens: res.completionTokens,
-      latencyMs: res.latencyMs,
-      success: true,
-    });
+    if (fastPathGreeting) {
+      extraction = {
+        intent: heuristicPre.intent,
+        confidence: heuristicPre.confidence,
+        entities: {},
+        missingFields: [],
+        memories: [],
+        requestedAction: "ANSWER",
+      };
+      stageMs.extractionSkipped = 1;
+    } else {
+      const res = await timed("extraction", () =>
+        withRetry(
+          () =>
+            provider.generateStructured<ExtractionResult>({
+              system: extractionSystem,
+              user: extractionUser,
+              model: modelCfg.model,
+              temperature: modelCfg.temperature,
+              maxTokens: modelCfg.maxTokens,
+              validate: (raw) => validateStructured(extractionResultSchema, raw),
+            }),
+          { attempts: 2 }
+        )
+      );
+      extraction = res.value;
+      await logUsage(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        purpose: "EXTRACTION",
+        provider: provider.name,
+        model: modelCfg.model,
+        promptVersion: PROMPT_VERSIONS.EXTRACTION,
+        promptTokens: res.promptTokens,
+        completionTokens: res.completionTokens,
+        latencyMs: res.latencyMs,
+        success: true,
+      });
+    }
   } catch (err) {
     extractionOk = false;
     const fallback = heuristicIntent(customerText);
@@ -273,18 +316,24 @@ export async function processAIMessage(
     }
   }
 
-  // 6. Memory (load before context, save curated candidates after).
-  const memories = await loadMemory(db, params.workspaceId, customer.id);
-
-  // 7. Context per intent (Phase 3 buildAIContext — bounded retrieval).
-  const productId = await resolveProductId(db, params.workspaceId, extraction, customerText);
+  // 6+7. Memory + product resolution are independent — run concurrently.
+  // buildAIContext still waits for productId (dependency), but memory no
+  // longer blocks product lookup and vice versa.
+  const [memories, productId] = await timed("memoryProduct", () =>
+    Promise.all([
+      loadMemory(db, params.workspaceId, customer.id),
+      resolveProductId(db, params.workspaceId, extraction, customerText),
+    ])
+  );
   const vectorStore = deps.vectorStore ?? getVectorStore();
-  const context = await buildAIContext(db, vectorStore, {
-    workspaceId: params.workspaceId,
-    query: customerText,
-    productId: productId ?? undefined,
-    knowledgeLimit: 4,
-  });
+  const context = await timed("context", () =>
+    buildAIContext(db, vectorStore, {
+      workspaceId: params.workspaceId,
+      query: customerText,
+      productId: productId ?? undefined,
+      knowledgeLimit: 4,
+    })
+  );
 
   // 8. Deterministic response plan (rules, not generation — spec §17).
   const plan = buildPlan(extraction, context);
@@ -412,7 +461,11 @@ export async function processAIMessage(
       knowledge: { faqs: context.knowledge.faqs, documents: context.knowledge.documents },
       media: context.media.map((m) => ({ title: m.title, url: m.url })),
       feedback: plan.useFeedback ? context.feedback : [],
-      memory: memories.map((m) => ({ type: m.type, content: m.value })),
+      // Bound memory chars per item so 10 long rows can't bloat every prompt.
+      memory: memories.map((m) => ({
+        type: m.type,
+        content: m.value.length > 200 ? `${m.value.slice(0, 200)}…` : m.value,
+      })),
       summary: conversation.summary,
       orderSummary: orderResult?.summaryText ?? null,
       customer: {
@@ -433,16 +486,18 @@ export async function processAIMessage(
   let violations: string[] = [];
   let responseTokens = { promptTokens: 0, completionTokens: 0, latencyMs: 0 };
   try {
-    const res = await withRetry(
-      () =>
-        provider.generateText({
-          system,
-          user: userPrompt,
-          model: responseModelCfg.model,
-          temperature: responseModelCfg.temperature,
-          maxTokens: responseModelCfg.maxTokens,
-        }),
-      { attempts: 2 }
+    const res = await timed("responseGen", () =>
+      withRetry(
+        () =>
+          provider.generateText({
+            system,
+            user: userPrompt,
+            model: responseModelCfg.model,
+            temperature: responseModelCfg.temperature,
+            maxTokens: responseModelCfg.maxTokens,
+          }),
+        { attempts: 2 }
+      )
     );
     responseText = res.text.trim();
     if (!responseText) {
@@ -539,15 +594,19 @@ export async function processAIMessage(
   // A failed/queued send is NEVER reported as success: return AI_FAILED so
   // the job queue retries (same idempotency key reuses the row — no duplicate).
   const sendStarted = Date.now();
-  const sent = await sendAI(db, {
-    workspaceId: params.workspaceId,
-    conversationId: conversation.id,
-    text: responseText,
-    sourceMessageId: message.id,
-    dryRun: params.dryRun,
-    sendMedia: plan.sendMedia,
-    productId: context.product?.id ?? null,
-  });
+  // Critical path: the reply enters outbound immediately; analytics, citations,
+  // memory writes and summaries all happen AFTER (never block the send).
+  const sent = await timed("send", () =>
+    sendAI(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      text: responseText,
+      sourceMessageId: message.id,
+      dryRun: params.dryRun,
+      sendMedia: plan.sendMedia,
+      productId: context.product?.id ?? null,
+    })
+  );
   const sendMs = Date.now() - sendStarted;
   if (sent && sent.deliveryStatus !== "SENT" && sent.deliveryStatus !== "SKIPPED_DUPLICATE") {
     log.warn(
@@ -571,6 +630,7 @@ export async function processAIMessage(
       status: "AI_FAILED",
       error: `Outbound delivery ${sent.deliveryStatus}`,
     });
+    logTimings("AI_FAILED", { reason: `Outbound delivery ${sent.deliveryStatus}` });
     return {
       status: "AI_FAILED",
       intent: extraction.intent as Intent,
@@ -643,6 +703,7 @@ export async function processAIMessage(
     },
     "ai_pipeline_completed"
   );
+  logTimings(plan.needsClarification ? "CLARIFIED" : "RESPONDED", { intent: extraction.intent });
   return {
     status: plan.needsClarification ? "CLARIFIED" : "RESPONDED",
     intent: extraction.intent as Intent,
@@ -665,21 +726,21 @@ async function resolveProductId(db: Db, workspaceId: string, extraction: Extract
   // ("بدي 3" after a product mention resolves via this path).
   for (const word of customerText.split(/[\s،,.!؟?]+/)) {
     if (word.length >= 3) candidates.push(word);
+    if (candidates.length >= 12) break;
   }
-  for (const name of candidates) {
+  if (!candidates.length) return null;
+  // Single query instead of N sequential findFirst calls (latency fix).
+  const ors: { name: { contains: string } }[] = [];
+  for (const name of candidates.slice(0, 12)) {
+    ors.push({ name: { contains: name } });
     const cleaned = name.replace(/^(ال|الـ)/, "");
-    const product = await db.product.findFirst({
-      where: {
-        workspaceId,
-        isActive: true,
-        isArchived: false,
-        OR: [{ name: { contains: name } }, ...(cleaned !== name ? [{ name: { contains: cleaned } }] : [])],
-      },
-      select: { id: true },
-    });
-    if (product) return product.id;
+    if (cleaned !== name) ors.push({ name: { contains: cleaned } });
   }
-  return null;
+  const product = await db.product.findFirst({
+    where: { workspaceId, isActive: true, isArchived: false, OR: ors },
+    select: { id: true },
+  });
+  return product?.id ?? null;
 }
 
 function buildPlan(extraction: ExtractionResult, context: Awaited<ReturnType<typeof buildAIContext>>): ResponsePlan {

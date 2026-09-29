@@ -31,6 +31,9 @@ let db: ReturnType<typeof createFakeDb>;
 let tmp: string;
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+// Minimal valid headers per claimed MIME (magic-byte check requires a match).
+const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const WEBP = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x08, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
 
 beforeEach(() => {
   db = createFakeDb();
@@ -47,9 +50,10 @@ async function seedProduct() {
 
 describe("MEDIA e2e — upload & storage", () => {
   it("1. uploads JPG/PNG/WEBP: file persists + DB record created", async () => {
-    for (const [filename, mime] of [["a.jpg", "image/jpeg"], ["b.png", "image/png"], ["c.webp", "image/webp"]] as const) {
+    const cases = [["a.jpg", "image/jpeg", JPG], ["b.png", "image/png", PNG], ["c.webp", "image/webp", WEBP]] as const;
+    for (const [filename, mime, data] of cases) {
       const asset = (await uploadMedia(db as Db, ctxA, {
-        filename, mimeType: mime, size: PNG.length, data: PNG, category: "PRODUCT",
+        filename, mimeType: mime, size: data.length, data: Buffer.from(data), category: "PRODUCT",
       })) as unknown as { id: string; storageKey: string; url: string; type: string };
       expect(asset.type).toBe("IMAGE");
       expect(asset.url).toContain("/api/media/file/");
@@ -85,7 +89,7 @@ describe("MEDIA e2e — upload & storage", () => {
 
   it("Arabic filenames work", async () => {
     const asset = (await uploadMedia(db as Db, ctxA, {
-      filename: "صورة منتج.jpg", mimeType: "image/jpeg", size: PNG.length, data: PNG,
+      filename: "صورة منتج.jpg", mimeType: "image/jpeg", size: JPG.length, data: Buffer.from(JPG),
     })) as unknown as { storageKey: string; title: string | null };
     expect(asset.storageKey).toContain("صورة منتج");
     expect(existsSync(join(tmp, ...asset.storageKey.split("/")))).toBe(true);

@@ -136,8 +136,29 @@ async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unk
   return { success: true };
 }
 
-/** Builds an in-memory vector store from this workspace's active chunks. */
+/**
+ * Builds an in-memory vector store from this workspace's active chunks.
+ * Cached per workspace for 60s so a burst of AI jobs doesn't rescan up to
+ * 1000 chunks + JSON.parse embeddings on EVERY message (latency fix).
+ * Read-only snapshot semantics: a 60s delay in seeing new docs is acceptable.
+ */
+const vectorStoreCache = new Map<string, { at: number; store: Awaited<ReturnType<typeof buildWorkspaceVectorStoreUncached>> }>();
+const VECTOR_STORE_CACHE_MS = 60_000;
+
 async function buildWorkspaceVectorStore(db: HandlerDb, workspaceId: string) {
+  const cached = vectorStoreCache.get(workspaceId);
+  if (cached && Date.now() - cached.at < VECTOR_STORE_CACHE_MS) return cached.store;
+  const store = await buildWorkspaceVectorStoreUncached(db, workspaceId);
+  vectorStoreCache.set(workspaceId, { at: Date.now(), store });
+  // Bound cache to avoid unbounded workspace growth in long-lived workers.
+  if (vectorStoreCache.size > 200) {
+    const oldest = [...vectorStoreCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];
+    if (oldest) vectorStoreCache.delete(oldest);
+  }
+  return store;
+}
+
+async function buildWorkspaceVectorStoreUncached(db: HandlerDb, workspaceId: string) {
   const { InMemoryVectorStore } = await import("@/modules/knowledge/vector-store");
   const { getCurrentEmbeddingIdentity } = await import("@/modules/knowledge/embeddings");
   const filter = getCurrentEmbeddingIdentity();
@@ -267,6 +288,21 @@ async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, 
   const { getFacebookClient } = await import("@/modules/channels/facebook/client");
   const { resolveSenderName } = await import("@/modules/channels/facebook/profile");
   const fbClient = getFacebookClient();
+  // Profile lookups for the whole batch run concurrently (each is throttled +
+  // cached inside resolveSenderName), so a 10-message batch doesn't pay
+  // N×4s sequential Graph timeouts before the first message is ingested.
+  const profileResults = await Promise.all(
+    messages.map(async (m) => {
+      const psid = String(m.externalCustomerId ?? "");
+      try {
+        const resolved = await resolveSenderName(db, { workspaceId, psid, pageToken, client: fbClient });
+        return { psid, name: resolved.name, avatar: resolved.avatarUrl };
+      } catch {
+        return { psid, name: null, avatar: null };
+      }
+    })
+  );
+  const profileByPsid = new Map(profileResults.map((r) => [r.psid, r]));
   let processed = 0;
   let failed = 0;
   for (const m of messages) {
@@ -274,16 +310,9 @@ async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<string, 
     // Best-effort sender profile (throttled, cached): fills Customer.name /
     // avatarUrl so the inbox shows real identity instead of fallbacks.
     // Never blocks ingestion on failure — falls through to nulls.
-    let senderName: string | null = null;
-    let senderAvatar: string | null = null;
-    try {
-      const resolved = await resolveSenderName(db, { workspaceId, psid, pageToken, client: fbClient });
-      senderName = resolved.name;
-      senderAvatar = resolved.avatarUrl;
-    } catch {
-      senderName = null;
-      senderAvatar = null;
-    }
+    const prof = profileByPsid.get(psid);
+    const senderName: string | null = prof?.name ?? null;
+    const senderAvatar: string | null = prof?.avatar ?? null;
     try {
       await processIncomingMessage(db, {
         workspaceId,

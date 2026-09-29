@@ -13,6 +13,9 @@ export const JOB_TYPES = [
   "process_ai_message",
   "generate_summary",
   "process_webhook_event",
+  "evaluate_automation",
+  "process_due_followups",
+  "aggregate_workspace_analytics",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

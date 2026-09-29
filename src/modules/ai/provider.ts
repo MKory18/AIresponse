@@ -59,14 +59,29 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   private async chat(body: Record<string, unknown>): Promise<AIResponse> {
     const started = Date.now();
-    const res = await fetch(this.baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    // Bounded execution: a hung provider must never hang the worker forever.
+    const timeoutMs = Math.max(1000, parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? "60000", 10) || 60000);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(this.baseUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new AIProviderError(`${this.name} request timed out after ${timeoutMs}ms`);
+      }
+      throw err;
+    }
+    clearTimeout(timer);
     if (!res.ok) {
       throw new AIProviderError(`${this.name} request failed with status ${res.status}`);
     }

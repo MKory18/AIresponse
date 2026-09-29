@@ -49,9 +49,9 @@ export function MessageBubble({ message, onRetry }: { message: MessageItem; onRe
           {outbound && (
             <span className="inline-flex items-center gap-0.5">
               ·
-              {m.deliveryStatus === "FAILED" ? (
+              {m.deliveryStatus === "FAILED" || m.deliveryStatus === "PENDING" || m.deliveryStatus === "QUEUED" ? (
                 <span className="inline-flex items-center gap-1">
-                  {t.delivery.failed}
+                  {m.deliveryStatus === "FAILED" ? t.delivery.failed : t.delivery.sending}
                   {onRetry && (
                     <button
                       onClick={() => onRetry(m)}
@@ -62,8 +62,6 @@ export function MessageBubble({ message, onRetry }: { message: MessageItem; onRe
                     </button>
                   )}
                 </span>
-              ) : m.deliveryStatus === "PENDING" || m.deliveryStatus === "QUEUED" ? (
-                t.delivery.sending
               ) : (
                 <span className="inline-flex items-center gap-0.5">
                   <CheckCheck size={12} />

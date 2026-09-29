@@ -23,6 +23,9 @@ sleep 10
 docker compose ps | grep -q app && ok "app running" || fail "app"
 docker compose ps | grep -q worker && ok "worker running" || fail "worker"
 docker compose ps | grep -q postgres && ok "postgres running" || fail "postgres"
+sleep 8
+docker compose logs --tail=100 worker 2>/dev/null | grep -q worker_started && ok "worker_started in worker logs" || fail "worker_started missing — worker process never booted (check start command / env / tsx)"
+docker compose logs --tail=100 worker 2>/dev/null | grep -q worker_cycle_failed && fail "worker cycles failing (likely DATABASE_URL / JWT_SECRET / ENCRYPTION_KEY mismatch)" || ok "no worker_cycle_failed"
 
 step "3. Migrations"
 docker compose exec -T app npx prisma migrate deploy && ok "migrate deploy" || fail "migrate deploy"

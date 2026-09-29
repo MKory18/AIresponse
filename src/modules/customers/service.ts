@@ -39,15 +39,17 @@ export async function resolveCustomerByChannelIdentity(
     if (identity.workspaceId !== input.workspaceId) {
       throw new AppError("Channel identity belongs to another workspace", 409, "IDENTITY_CONFLICT");
     }
-    // Backfill names/avatars on every inbound (not just create): the Facebook
-    // webhook carries no profile data, but later enrichment (profile API,
-    // AI-extracted name, manual edit) must stick. Never overwrite real values
-    // with null.
+    // Facebook is the source of truth for name/avatar: persist the latest
+    // profile values on every inbound (refresh policy), so a customer who
+    // changes their FB name/picture converges on next message. Never overwrite
+    // real values with null — only with newer non-null values.
+    const existingDisplay = (identity as { displayName?: string | null }).displayName ?? null;
+    const existingAvatar = (identity as { avatarUrl?: string | null }).avatarUrl ?? null;
     const updates: Record<string, string> = {};
-    if (input.displayName && !(identity as { displayName?: string | null }).displayName) {
+    if (input.displayName && input.displayName !== existingDisplay) {
       updates.displayName = input.displayName;
     }
-    if (input.avatarUrl && !(identity as { avatarUrl?: string | null }).avatarUrl) {
+    if (input.avatarUrl && input.avatarUrl !== existingAvatar) {
       updates.avatarUrl = input.avatarUrl;
     }
     if (Object.keys(updates).length > 0) {
@@ -60,8 +62,8 @@ export async function resolveCustomerByChannelIdentity(
       });
       if (customer) {
         const customerUpdates: Record<string, string> = {};
-        if (input.displayName && !customer.name) customerUpdates.name = input.displayName;
-        if (input.avatarUrl && !(customer as { avatarUrl?: string | null }).avatarUrl) {
+        if (input.displayName && input.displayName !== (customer.name ?? null)) customerUpdates.name = input.displayName;
+        if (input.avatarUrl && input.avatarUrl !== ((customer as { avatarUrl?: string | null }).avatarUrl ?? null)) {
           customerUpdates.avatarUrl = input.avatarUrl;
         }
         if (Object.keys(customerUpdates).length > 0) {
@@ -72,35 +74,53 @@ export async function resolveCustomerByChannelIdentity(
     return { customerId: identity.customerId, created: false };
   }
 
-  const customer = await db.customer.create({
-    data: {
-      workspaceId: input.workspaceId,
-      name: input.displayName ?? null,
-      avatarUrl: input.avatarUrl ?? null,
-      status: "NEW_LEAD",
-      lastContactAt: new Date(),
-      identities: {
-        create: {
-          workspaceId: input.workspaceId,
-          channelType: input.channelType,
-          channelExternalId: input.externalUserId,
-          displayName: input.displayName ?? null,
-          avatarUrl: input.avatarUrl ?? null,
-          metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+  try {
+    const customer = await db.customer.create({
+      data: {
+        workspaceId: input.workspaceId,
+        name: input.displayName ?? null,
+        avatarUrl: input.avatarUrl ?? null,
+        status: "NEW_LEAD",
+        lastContactAt: new Date(),
+        identities: {
+          create: {
+            workspaceId: input.workspaceId,
+            channelType: input.channelType,
+            channelExternalId: input.externalUserId,
+            displayName: input.displayName ?? null,
+            avatarUrl: input.avatarUrl ?? null,
+            metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+          },
         },
       },
-    },
-  });
+    });
 
-  await eventBus.publish(
-    makeEvent("CustomerCreated", input.workspaceId, {
-      customerId: customer.id,
-      channelType: input.channelType,
-      externalUserId: input.externalUserId,
-    })
-  );
+    await eventBus.publish(
+      makeEvent("CustomerCreated", input.workspaceId, {
+        customerId: customer.id,
+        channelType: input.channelType,
+        externalUserId: input.externalUserId,
+      })
+    );
 
-  return { customerId: customer.id, created: true };
+    return { customerId: customer.id, created: true };
+  } catch (err) {
+    // Concurrent first-message race: two webhooks for a new PSID both saw
+    // findUnique=null and both tried create — the unique constraint winner
+    // owns the row; re-read and treat as existing (never 500 the webhook).
+    if ((err as { code?: string }).code === "P2002") {
+      const winner = await db.channelIdentity.findUnique({
+        where: {
+          channelType_channelExternalId: {
+            channelType: input.channelType,
+            channelExternalId: input.externalUserId,
+          },
+        },
+      });
+      if (winner) return { customerId: winner.customerId, created: false };
+    }
+    throw err;
+  }
 }
 
 // â”€â”€ Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

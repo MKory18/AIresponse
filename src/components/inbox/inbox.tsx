@@ -202,7 +202,9 @@ export default function Inbox() {
   }
 
   async function retryMessage(m: MessageItem) {
-    if (!selectedId || m.deliveryStatus !== "FAILED") return;
+    // FAILED always retryable; PENDING/QUEUED retryable too so a message stuck
+    // in "sending" can be recovered manually (server reuses the idempotency row).
+    if (!selectedId || (m.deliveryStatus !== "FAILED" && m.deliveryStatus !== "QUEUED" && m.deliveryStatus !== "PENDING")) return;
     // Optimistic retry under the SAME idempotency identity — the server reuses
     // the row, so Meta never receives a duplicate.
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, deliveryStatus: "QUEUED" } : x)));

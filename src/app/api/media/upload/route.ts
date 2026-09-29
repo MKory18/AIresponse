@@ -41,10 +41,13 @@ export const POST = createHandler({ permission: "media.write" }, async ({ auth, 
     throw new AppError("File size mismatch", 422, "VALIDATION_ERROR");
   }
 
-  // Detect MIME type from extension if browser didn't provide a valid one
+  // Detect MIME type from extension if browser didn't provide a valid one.
+  // Basename first so directory-like names can't confuse the fallback, and a
+  // name without an extension yields "" (no guess) instead of the whole name.
   let mimeType = file.type;
   if (!mimeType || mimeType === "application/octet-stream") {
-    const ext = file.name.split(".").pop()?.toLowerCase();
+    const baseName = file.name.split(/[\\/]/).pop() ?? file.name;
+    const ext = baseName.includes(".") ? baseName.split(".").pop()?.toLowerCase() ?? "" : "";
     const mimeFromExt: Record<string, string> = {
       jpg: "image/jpeg",
       jpeg: "image/jpeg",
@@ -77,9 +80,11 @@ export const POST = createHandler({ permission: "media.write" }, async ({ auth, 
     data,
     category: (categoryRaw as (typeof MEDIA_CATEGORIES)[number] | undefined) as never,
     productId: productIdRaw,
-    title: str("title") ?? null,
-    description: str("description") ?? null,
-    tags: str("tags") ? str("tags")!.split(",").map((t) => t.trim()).filter(Boolean) : [],
+    title: str("title")?.slice(0, 200) ?? null,
+    description: str("description")?.slice(0, 2000) ?? null,
+    tags: str("tags")
+      ? str("tags")!.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 30).map((t) => t.slice(0, 50))
+      : [],
   });
 
   return ok(asset, 201);

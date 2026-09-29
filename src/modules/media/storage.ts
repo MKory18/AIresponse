@@ -40,6 +40,59 @@ export function mediaTypeForMime(mimeType: string): keyof typeof UPLOAD_LIMITS {
   return entry.type;
 }
 
+/**
+ * Best-effort magic-byte verification so a renamed script (evil.jpg containing
+ * HTML/JS) or a mismatched payload can't pass on extension+MIME alone.
+ *
+ * Conservative by design: it throws ONLY on positive evidence of mismatch —
+ * bytes that unambiguously identify a different binary family, or markup
+ * (`<...`) masquerading as an image/document. Opaque/generic bytes pass
+ * through to the MIME/extension/size checks, so valid uploads are never
+ * rejected on a heuristic.
+ * Throws AppError(422, CORRUPT_FILE) on positive mismatch.
+ */
+export function assertMagicBytes(mimeType: string, data: Buffer): void {
+  if (data.length === 0) throw new AppError("Empty file", 422, "EMPTY_FILE");
+  const sniffed = sniffContentType(data);
+  if (!sniffed) return;
+  if (sniffed === "markup") {
+    if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
+      throw new AppError("File content does not match the declared image/document type", 422, "CORRUPT_FILE");
+    }
+    return;
+  }
+  const claimedFamily =
+    mimeType === "image/png" ? "png"
+    : mimeType === "image/jpeg" ? "jpeg"
+    : mimeType === "image/gif" ? "gif"
+    : mimeType === "image/webp" ? "webp"
+    : mimeType === "application/pdf" ? "pdf"
+    : mimeType === "video/mp4" ? "mp4"
+    : null;
+  // Only compare when both sides are positively identified binary families.
+  if (claimedFamily && sniffed !== "unknown-binary" && sniffed !== claimedFamily) {
+    throw new AppError(`File content does not match ${mimeType}`, 422, "CORRUPT_FILE");
+  }
+}
+
+/** Identifies unambiguous content families from leading bytes; null = opaque. */
+function sniffContentType(data: Buffer): "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "mp4" | "markup" | "unknown-binary" | null {
+  const h = data.subarray(0, 12);
+  if (h.length >= 4 && h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4e && h[3] === 0x47) return "png";
+  if (h.length >= 3 && h[0] === 0xff && h[1] === 0xd8 && h[2] === 0xff) return "jpeg";
+  if (h.length >= 3 && h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46) return "gif";
+  if (h.length >= 12 && h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46 && h[8] === 0x57 && h[9] === 0x45 && h[10] === 0x42 && h[11] === 0x50) return "webp";
+  if (h.length >= 4 && h[0] === 0x25 && h[1] === 0x50 && h[2] === 0x44 && h[3] === 0x46) return "pdf";
+  if (h.length >= 4 && h[0] === 0x50 && h[1] === 0x4b && (h[2] === 0x03 || h[2] === 0x05 || h[2] === 0x07)) return "zip";
+  if (h.length >= 8 && h[4] === 0x66 && h[5] === 0x74 && h[6] === 0x79 && h[7] === 0x70) return "mp4";
+  // Leading markup (HTML/XML/SVG/script) after optional whitespace/BOM.
+  let i = 0;
+  if (h.length >= 3 && h[0] === 0xef && h[1] === 0xbb && h[2] === 0xbf) i = 3;
+  while (i < h.length && (h[i] === 0x20 || h[i] === 0x09 || h[i] === 0x0a || h[i] === 0x0d)) i++;
+  if (i < h.length && h[i] === 0x3c) return "markup";
+  return null;
+}
+
 /** Validates mime + extension + size. Throws AppError(422) on any violation. */
 export function validateUpload(input: {
   mimeType: string;
@@ -83,6 +136,17 @@ export interface StorageProvider {
   delete(key: string): Promise<void>;
 }
 
+/** Encodes a storage key for use in a URL path (per-segment, so `/` separators survive). */
+export function encodeStorageKeyUrl(key: string): string {
+  return key.split("/").map((seg) => encodeURIComponent(seg)).join("/");
+}
+
+/** RFC 5987 Content-Disposition value supporting Unicode (Arabic) filenames. */
+export function contentDispositionInline(filename: string): string {
+  const fallback = filename.replace(/["\r\n]/g, "").slice(0, 120) || "file";
+  return `inline; filename="${encodeURIComponent(fallback)}"; filename*=UTF-8''${encodeURIComponent(fallback)}`;
+}
+
 export class LocalStorageProvider implements StorageProvider {
   private readonly root: string;
 
@@ -98,7 +162,7 @@ export class LocalStorageProvider implements StorageProvider {
     }
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, data);
-    return { storageKey: key, url: `/api/media/file/${key}` };
+    return { storageKey: key, url: `/api/media/file/${encodeStorageKeyUrl(key)}` };
   }
 
   async get(key: string) {

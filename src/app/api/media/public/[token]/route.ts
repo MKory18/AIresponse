@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
 import { prisma } from "@/core/db/prisma";
-import { getStorage } from "@/modules/media/storage";
+import { contentDispositionInline, getStorage } from "@/modules/media/storage";
 import { verifyPayload } from "@/core/crypto";
 
 export const runtime = "nodejs";
@@ -25,7 +25,10 @@ export const GET = async (
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   }
 
-  const payload = verifyPayload(token, 0);
+  // verifyPayload already enforces absolute exp; expired/tampered/malformed
+  // tokens all map to 404 so validity cannot be probed via status codes, and
+  // the private endpoint stays the only authenticated path.
+  const payload = verifyPayload(token);
   if (!payload) {
     return NextResponse.json({ error: "INVALID_TOKEN" }, { status: 404 });
   }
@@ -39,7 +42,7 @@ export const GET = async (
   }
 
   if (Math.floor(Date.now() / 1000) > exp) {
-    return NextResponse.json({ error: "TOKEN_EXPIRED" }, { status: 403 });
+    return NextResponse.json({ error: "INVALID_TOKEN" }, { status: 404 });
   }
 
   const asset = await prisma.mediaAsset.findFirst({
@@ -59,7 +62,7 @@ export const GET = async (
       "Content-Type": asset.mimeType,
       "Content-Length": String(file.size),
       "Cache-Control": "public, max-age=3600",
-      "Content-Disposition": `inline; filename="${encodeURIComponent(asset.title ?? "file")}"`,
+      "Content-Disposition": contentDispositionInline(asset.title ?? "file"),
       "X-Content-Type-Options": "nosniff",
     },
   });

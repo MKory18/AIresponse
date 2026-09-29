@@ -27,6 +27,8 @@ export const POST = createHandler(
       throw new NotFoundError("Message");
     }
     const sourceMessageId = row.outboundIdempotencyKey.slice(`${id}:`.length) || row.id;
+    const meta = (row.metadata ?? {}) as { mediaId?: unknown };
+    const mediaId = typeof meta.mediaId === "string" ? meta.mediaId : undefined;
     const result = await dispatchOutbound(prisma, {
       workspaceId: auth!.workspaceId,
       conversationId: id,
@@ -34,6 +36,7 @@ export const POST = createHandler(
       text: row.text ?? "",
       senderType: row.senderType === "HUMAN" ? "HUMAN" : "AI",
       senderId: row.senderId ?? undefined,
+      ...(mediaId ? { mediaId } : {}),
     });
     if (result.deliveryStatus === "FAILED") {
       return Response.json(

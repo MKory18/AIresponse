@@ -1,12 +1,15 @@
 import type { Prisma, MediaCategory, MediaType } from "@prisma/client";
 import { NotFoundError } from "@/core/errors";
+import { childLogger } from "@/core/logger";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
-import { getStorage, generateStorageKey, validateUpload } from "./storage";
+import { getStorage, generateStorageKey, validateUpload, assertMagicBytes } from "./storage";
 export { validateUpload } from "./storage";
 import { signPayload } from "@/core/crypto";
 import { getEnv } from "@/core/env";
+
+const log = childLogger("media");
 
 export interface UploadMediaInput {
   filename: string;
@@ -21,11 +24,16 @@ export interface UploadMediaInput {
 }
 
 export async function uploadMedia(db: Db, ctx: ActorContext, input: UploadMediaInput) {
+  const started = Date.now();
+  log.info({ workspaceId: ctx.workspaceId, filenameLength: input.filename?.length ?? 0, size: input.size }, "media_upload_started");
   const { mediaType, safeName } = validateUpload({
     mimeType: input.mimeType,
     filename: input.filename,
     size: input.size,
   });
+  // Don't trust MIME/extension alone: verify fixed-header magic bytes where
+  // the format allows it (corrupt/renamed files fail fast, before storage).
+  assertMagicBytes(input.mimeType, input.data);
 
   if (input.productId) {
     const product = await db.product.findUnique({ where: { id: input.productId }, select: { workspaceId: true } });
@@ -55,6 +63,7 @@ export async function uploadMedia(db: Db, ctx: ActorContext, input: UploadMediaI
   } catch (err) {
     // No orphan files: storage write succeeded but DB failed.
     await getStorage().delete(storageKey).catch(() => {});
+    log.warn({ workspaceId: ctx.workspaceId, storageKey, error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - started }, "media_upload_failed");
     throw err;
   }
 
@@ -73,6 +82,7 @@ export async function uploadMedia(db: Db, ctx: ActorContext, input: UploadMediaI
   }
 
   await eventBus.publish(makeEvent("MediaCreated", ctx.workspaceId, { mediaId: asset.id, type: mediaType }));
+  log.info({ workspaceId: ctx.workspaceId, mediaId: asset.id, type: mediaType, durationMs: Date.now() - started }, "media_upload_completed");
   return asset;
 }
 
@@ -98,14 +108,28 @@ export async function listMedia(
   const where: Prisma.MediaAssetWhereInput = { workspaceId: params.workspaceId };
   if (params.category) where.category = params.category;
   if (params.type) where.type = params.type;
-  if (params.productId) where.productId = params.productId;
-  if (params.q) {
-    where.OR = [
-      { title: { contains: params.q, mode: "insensitive" } },
-      { description: { contains: params.q, mode: "insensitive" } },
-      { tags: { has: params.q } },
-    ];
+  const andClauses: Prisma.MediaAssetWhereInput[] = [];
+  if (params.productId) {
+    // Canonical links live in ProductMedia (attach API writes join-only rows),
+    // while legacy rows carry the direct FK — cover both so the filter is complete.
+    const links = await db.productMedia.findMany({
+      where: { productId: params.productId, workspaceId: params.workspaceId },
+      select: { mediaAssetId: true },
+      take: 500,
+    });
+    const linkedIds = links.map((l) => l.mediaAssetId);
+    andClauses.push({ OR: [{ productId: params.productId }, ...(linkedIds.length ? [{ id: { in: linkedIds } }] : [])] });
   }
+  if (params.q) {
+    andClauses.push({
+      OR: [
+        { title: { contains: params.q, mode: "insensitive" } },
+        { description: { contains: params.q, mode: "insensitive" } },
+        { tags: { has: params.q } },
+      ],
+    });
+  }
+  if (andClauses.length) where.AND = andClauses;
   const assets = await db.mediaAsset.findMany({
     where,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
