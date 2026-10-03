@@ -322,7 +322,20 @@ export async function sendPlaygroundMessage(
     prohibitedPhrases: persona.prohibitedPhrases,
   });
   if (!guard.valid) {
-    responseText = guard.fallback ?? "شكرًا لتواصلك 🌹 لحظة وأحولك على زميلي يتأكدلك من هالمعلومة.";
+    // NO static customer-facing fallback — the application never invents a
+    // reply. Regenerate once; if guardrails still reject, surface the failure
+    // instead of fabricating text.
+    const retry = await provider.generateText({ system, user: userPrompt, model, temperature: 0.2, maxTokens: modelCfg.maxTokens });
+    const retryText = (retry.text ?? "").trim();
+    const retryGuard = validateResponse({
+      response: retryText,
+      context: productCtx.product ? ({ product: productCtx.product } as never) : null,
+      prohibitedPhrases: persona.prohibitedPhrases,
+    });
+    if (!retryGuard.valid || !retryText) {
+      throw new AppError("تعذر توليد رد ملتزم بالقواعد — أعد المحاولة", 502, "GUARDRAIL_REJECTED");
+    }
+    responseText = retryText;
   }
 
   // 6. Optional dry-run order proposal: pure LLM extraction, zero DB writes.

@@ -124,7 +124,14 @@ export async function recoverStaleJobs(db: Db, leaseMinutes = 10): Promise<numbe
  * TRANSIENT/PERMANENT error category in AIUsageLog) and resume automatically
  * once configuration is corrected.
  */
-const ORPHAN_MAX_AGE_HOURS = 24;
+// Default 72h: a message blocked by a temporary outage (worker down, AI
+// provider outage, misconfiguration) must still be answerable when conditions
+// recover — a 24h cap permanently abandoned those customers. Override with
+// ORPHAN_MAX_AGE_HOURS when needed.
+const ORPHAN_MAX_AGE_HOURS = Math.max(
+  1,
+  parseInt(process.env.ORPHAN_MAX_AGE_HOURS ?? "72", 10) || 72
+);
 const ORPHAN_RETRY_BASE_MS = 30_000;
 const ORPHAN_RETRY_MAX_MS = 2 * 3600_000;
 const ORPHAN_PAGE_SIZE = 100;
@@ -258,7 +265,7 @@ export async function processPendingJobs(
   await recoverStuckOutboundMessages(db, { maxAgeMinutes: 10, limit: 20 });
   // Durable backstop: re-queue inbound messages that never reached a terminal
   // AI decision (enqueue failure, exhausted job attempts, worker downtime).
-  await recoverOrphanedInboundMessages(db, { maxAgeHours: 24, limit: 20 });
+  await recoverOrphanedInboundMessages(db, { limit: 20 });
   const jobs = await db.backgroundJob.findMany({
     where: { status: "PENDING", runAfter: { lte: new Date() } },
     orderBy: { createdAt: "asc" },

@@ -142,14 +142,22 @@ export async function processAIMessage(
   );
 
   // 4. Config + persona (page-assigned → workspace default) + customer +
-  // channel page: independent reads in parallel.
-  const [settingsRaw, resolvedPersona, customer, channelRow] = await timed("config", () => Promise.all([
+  // channel page + recent history: independent reads in parallel. History has
+  // no dependency on the others — serializing it wasted one full DB round-trip
+  // on every single AI turn (critical-path latency).
+  const [settingsRaw, resolvedPersona, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
     resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
     db.channel.findUnique({
       where: { id: conversation.channelId },
       select: { displayName: true, externalId: true },
+    }),
+    db.message.findMany({
+      where: { conversationId: conversation.id, deletedAt: null },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 8,
+      select: { senderType: true, direction: true, text: true },
     }),
   ]));
   const settings = settingsRaw as AISettingsLike | null;
@@ -235,12 +243,7 @@ export async function processAIMessage(
     return { status: "AI_FAILED", error: `PERMANENT: ${message_text}` };
   }
   const customerText = message.text ?? "[رسالة وسائط]";
-  const recentMessages = await timed("history", () => db.message.findMany({
-    where: { conversationId: conversation.id, deletedAt: null },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: 8,
-    select: { senderType: true, direction: true, text: true },
-  }));
+  const recentMessages = recentMessagesRaw as { senderType: string; direction: string; text: string | null }[];
   // Bound per-message chars so one huge turn can't blow up every prompt.
   for (const m of recentMessages) {
     if (m.text && m.text.length > 500) m.text = m.text.slice(0, 500);

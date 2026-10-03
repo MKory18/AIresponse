@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { createProduct, getOwnedProduct, updateProduct, listProducts, attachProductMedia, setPrimaryProductMedia } from "@/modules/products/service";
@@ -68,6 +69,9 @@ describe("Phase 3 — products", () => {
 // ── 4–6: Media ──────────────────────────────────────────────────────────────
 
 describe("Phase 3 — media upload validation", () => {
+  afterEach(async () => {
+    await fs.rm("./.tmp-storage-test", { recursive: true, force: true }).catch(() => {});
+  });
   it("rejects executable and script files", () => {
     expect(() => validateUpload({ mimeType: "application/x-msdownload", filename: "virus.exe", size: 100 })).toThrow();
     expect(() => validateUpload({ mimeType: "text/plain", filename: "script.js", size: 100 })).toThrow();

@@ -1,5 +1,5 @@
 import type { Prisma, MediaCategory, MediaType } from "@prisma/client";
-import { NotFoundError } from "@/core/errors";
+import { AppError, NotFoundError } from "@/core/errors";
 import { childLogger } from "@/core/logger";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
@@ -273,7 +273,18 @@ export async function generatePublicMediaUrl(
 ): Promise<string> {
   const asset = await getOwnedMedia(db, workspaceId, mediaId);
   const env = getEnv();
-  const baseUrl = env.APP_URL ?? "";
+  const baseUrl = (env.APP_URL ?? "").replace(/\/+$/, "");
+  // A relative or non-public base URL makes Meta's fetcher fail with an
+  // opaque Graph error and the customer never receives the image. Fail fast
+  // with an explicit reason in production; allow any value in dev/test.
+  if (env.NODE_ENV === "production") {
+    if (!baseUrl) {
+      throw new AppError("APP_URL is not configured — public media URLs cannot be generated", 500, "APP_URL_MISSING");
+    }
+    if (!baseUrl.startsWith("https://")) {
+      throw new AppError("APP_URL must be an HTTPS public URL for outbound media delivery", 500, "APP_URL_NOT_HTTPS");
+    }
+  }
   const exp = Math.floor(Date.now() / 1000) + ttlMinutes * 60;
   const token = signPayload({ mediaId: asset.id, workspaceId, exp });
   return `${baseUrl}/api/media/public/${token}`;

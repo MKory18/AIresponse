@@ -6,7 +6,9 @@ const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
 const SEND_TIMEOUT_MS = parseInt(process.env.FACEBOOK_SEND_TIMEOUT_MS ?? "30000", 10);
 
 /** Non-retryable Graph error codes (token/permission/recipient/policy). */
-const PERMANENT_CODES = new Set([10, 190, 200, 2500, 551, 100, 613]);
+const PERMANENT_CODES = new Set([10, 190, 200, 2500, 551, 100]);
+/** Graph rate-limit codes — ALWAYS transient (durable backoff, never abandon). */
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
 
 export interface SendPayload {
   text?: string;
@@ -70,8 +72,10 @@ export class FacebookClient {
 
     if (json.error) {
       const permanent =
-        (json.error.code !== undefined && PERMANENT_CODES.has(json.error.code)) ||
-        json.error.is_transient === false;
+        json.error.code === undefined || !RATE_LIMIT_CODES.has(json.error.code)
+          ? (json.error.code !== undefined && PERMANENT_CODES.has(json.error.code)) ||
+            json.error.is_transient === false
+          : false;
       throw new FacebookApiError(
         json.error.message ?? "Graph API error",
         permanent ? "PERMANENT" : "TRANSIENT",
@@ -81,9 +85,13 @@ export class FacebookClient {
       );
     }
     if (!res.ok) {
+      // 429/408/425/5xx are transient — durable retry with backoff, never a
+      // permanent FAIL that abandons the customer message.
       throw new FacebookApiError(
         `Graph API HTTP ${httpStatus}`,
-        httpStatus >= 500 ? "TRANSIENT" : "PERMANENT",
+        httpStatus === 429 || httpStatus === 408 || httpStatus === 425 || httpStatus >= 500
+          ? "TRANSIENT"
+          : "PERMANENT",
         undefined,
         undefined,
         httpStatus
@@ -144,8 +152,10 @@ export class FacebookClient {
     };
     if (json.error) {
       const permanent =
-        (json.error.code !== undefined && PERMANENT_CODES.has(json.error.code)) ||
-        json.error.is_transient === false;
+        json.error.code === undefined || !RATE_LIMIT_CODES.has(json.error.code)
+          ? (json.error.code !== undefined && PERMANENT_CODES.has(json.error.code)) ||
+            json.error.is_transient === false
+          : false;
       throw new FacebookApiError(
         json.error.message ?? "Graph API error",
         permanent ? "PERMANENT" : "TRANSIENT",
@@ -155,9 +165,13 @@ export class FacebookClient {
       );
     }
     if (!res.ok || !json?.message_id) {
+      // A rate-limited/timed-out/unavailable Graph (429/408/425/5xx) is
+      // TRANSIENT — durable backoff. Only true 4xx rejections are permanent.
       throw new FacebookApiError(
         !json?.message_id ? "Graph API returned no message_id" : `Graph API HTTP ${httpStatus}`,
-        !res.ok && httpStatus < 500 ? "PERMANENT" : "TRANSIENT",
+        !res.ok && !(httpStatus === 429 || httpStatus === 408 || httpStatus === 425 || httpStatus >= 500)
+          ? "PERMANENT"
+          : "TRANSIENT",
         undefined,
         undefined,
         httpStatus

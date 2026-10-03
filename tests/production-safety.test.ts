@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import {
@@ -177,13 +178,30 @@ describe("fail-closed orchestrator: no fake replies, visible failure", () => {
 });
 
 describe("production storage path", () => {
+  const roots = new Set<string>();
+  const makeRoot = () => {
+    const root = `./.tmp-prod-safety-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    roots.add(root);
+    return root;
+  };
+  afterEach(async () => {
+    for (const root of roots) {
+      try {
+        await fs.rm(root, { recursive: true, force: true });
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
+    roots.clear();
+  });
+
   it("resolves the exact production directory from STORAGE_DIR", () => {
     const p = new LocalStorageProvider("/app/.data/storage");
     expect((p as unknown as { root: string }).root).toBe("/app/.data/storage");
   });
 
   it("arabic filenames + same-name uploads persist distinctly and reload", async () => {
-    const root = `./.tmp-prod-safety-${Date.now()}`;
+    const root = makeRoot();
     const provider = new LocalStorageProvider(root);
     const k1 = generateStorageKey(WS, "صورة منتج.png");
     const k2 = generateStorageKey(WS, "صورة منتج.png");
@@ -203,7 +221,7 @@ describe("production storage path", () => {
   });
 
   it("rejects path traversal on put", async () => {
-    const provider = new LocalStorageProvider(`./.tmp-prod-safety-${Date.now()}`);
+    const provider = new LocalStorageProvider(makeRoot());
     await expect(provider.put("../../evil.png", Buffer.from("x"), "image/png")).rejects.toThrow();
   });
 });

@@ -41,6 +41,7 @@ export function Avatar({
   );
   if (src) {
     // Real photo — never a random/placeholder image.
+    // eslint-disable-next-line @next/next/no-img-element -- Facebook profile URLs (data/remote), next/image optimization not needed here.
     return <img src={src} alt={display} className={cn(shape, "bg-surface-3 object-cover")} />;
   }
   return (

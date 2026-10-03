@@ -9,3 +9,5 @@ npm-debug.log*
 coverage
 .tmp-storage-test
 *.tsbuildinfo
+.tmp-prod-safety-*
+.tmp-*
