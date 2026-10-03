@@ -258,9 +258,13 @@ export async function processAIMessage(
       text: m.text ?? "[وسائط]",
     }))
   );
+  // Latency: extraction classifies intent/entities only — it does NOT write
+  // the customer reply, so the full persona (up to 20,000 chars) must NOT be
+  // sent to this call. With long personas this alone removed thousands of
+  // tokens from the first of the two serial model round-trips. The RESPONSE
+  // call below still receives the complete persona verbatim.
   const extractionSystem = [
     coreSystemRules(),
-    personaPrompt(persona),
     extractionInstruction(),
   ].join("\n\n");
 

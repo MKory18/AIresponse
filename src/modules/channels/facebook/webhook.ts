@@ -52,7 +52,13 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
     include: { channel: true },
   });
   if (!account || !account.channel || account.channel.status !== "CONNECTED") {
-    log.warn({ event: "facebook.webhook.unknown_page", pageId });
+    // Visible drop (never silent): count the customer messages being dropped
+    // so operators can tell exactly how many customers went unanswered and
+    // why — page not connected/disconnected. Persisting is impossible here
+    // (no valid workspace), so this alert IS the recovery signal.
+    const msgCount = ((payload as { entry?: { messaging?: unknown[] }[] }).entry ?? [])
+      .flatMap((e) => e?.messaging ?? []).length;
+    log.error({ pageId, droppedMessages: msgCount }, "webhook_page_not_connected");
     return { status: "UNKNOWN_PAGE" };
   }
   const workspaceId = account.channel.workspaceId;

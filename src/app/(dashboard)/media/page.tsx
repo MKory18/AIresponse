@@ -134,18 +134,27 @@ export default function MediaPage() {
         load();
         setTimeout(() => setJobs((prev) => prev.filter((j) => j.key !== key)), 4000);
       } else {
-        let message = t.media.uploadFailed;
+        // Surface the REAL server reason — never a generic message. Format:
+        // "الرسالة [code=…, status=…]" so the developer sees the actual cause
+        // (e.g. STORAGE_WRITE_FAILED, FILE_TOO_LARGE, 413 proxy limit).
+        let detail = "";
         try {
           const data = JSON.parse(xhr.responseText);
-          message = data.message ?? message;
+          const msg: string = data.message ?? data.error ?? "";
+          const code: string = data.error ?? "";
+          detail = msg || code;
+          if (code && msg && msg !== code) detail = `${msg} [code=${code}]`;
+          if (!detail) detail = `HTTP ${xhr.status}`;
         } catch {
-          /* keep default */
+          detail = `HTTP ${xhr.status}${xhr.responseText ? ` — ${xhr.responseText.slice(0, 120)}` : ""}`;
         }
-        setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, status: "error", error: message } : j)));
+        setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, status: "error", error: `${t.media.uploadFailed}: ${detail}` } : j)));
       }
     };
     xhr.onerror = () => {
-      setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, status: "error", error: t.media.uploadFailed } : j)));
+      // No HTTP response at all — network error, proxy reset (e.g. body-size
+      // 413 reset), or server crash. Show a developer-readable hint.
+      setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, status: "error", error: `${t.media.uploadFailed}: NO_RESPONSE (network/proxy rejected the request — check reverse-proxy body size limit)` } : j)));
     };
     xhr.send(form);
   }

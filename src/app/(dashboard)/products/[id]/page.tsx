@@ -144,8 +144,14 @@ export default function ProductDetailPage() {
     try {
       const res = await fetch("/api/media/upload", { method: "POST", body: form });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.message ?? t.media.uploadFailed);
+        // Show the real server reason (status + error code + message) instead
+        // of a generic phrase that hides the root cause.
+        const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+        const msg = body?.message ?? "";
+        const code = body?.error ?? "";
+        let detail = msg || code || `HTTP ${res.status}`;
+        if (code && msg && msg !== code) detail = `${msg} [code=${code}]`;
+        setError(`${t.media.uploadFailed}: ${detail}`);
       } else {
         load();
       }

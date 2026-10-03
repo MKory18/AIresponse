@@ -41,7 +41,27 @@ export async function uploadMedia(db: Db, ctx: ActorContext, input: UploadMediaI
   }
 
   const storageKey = generateStorageKey(ctx.workspaceId, safeName);
-  const stored = await getStorage().put(storageKey, input.data, input.mimeType);
+  let stored;
+  try {
+    stored = await getStorage().put(storageKey, input.data, input.mimeType);
+  } catch (err) {
+    // Storage failures (EACCES/ENOENT/volume not mounted) must NEVER surface
+    // as a bare INTERNAL_ERROR — that is what made the real upload failure
+    // invisible ("فشل الرفع" with no cause). Fail with an explicit code +
+    // safe structured log (size/claimed-MIME/extension/duration, no contents).
+    const fsCode = (err as { code?: string }).code ?? "STORAGE_ERROR";
+    log.error(
+      {
+        workspaceId: ctx.workspaceId,
+        size: input.size,
+        claimedMime: input.mimeType,
+        fsCode,
+        durationMs: Date.now() - started,
+      },
+      "media_upload_failed"
+    );
+    throw new AppError(`Storage write failed (${fsCode}) — check storage volume permissions/mount`, 500, "STORAGE_WRITE_FAILED");
+  }
 
   let asset;
   try {
