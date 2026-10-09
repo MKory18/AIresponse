@@ -4,25 +4,9 @@ import { AppError } from "@/core/errors";
 import { childLogger } from "@/core/logger";
 import { getAuthContext, type AuthContext } from "@/modules/auth/context";
 import type { Permission } from "@/modules/rbac/permissions";
+import { rateLimitDb } from "./rate-limit";
 
 const log = childLogger("api");
-
-// â”€â”€ Simple in-memory rate limiter (per IP per route). For multi-instance
-// production this is backed by Redis in later phases.
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-
-export function rateLimit(key: string, limit: number, windowMs: number): void {
-  const now = Date.now();
-  const bucket = rateBuckets.get(key);
-  if (!bucket || bucket.resetAt < now) {
-    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-  bucket.count += 1;
-  if (bucket.count > limit) {
-    throw new AppError("Too many requests", 429, "RATE_LIMITED");
-  }
-}
 
 export class ApiError extends Error {
   constructor(
@@ -91,7 +75,7 @@ export function createHandler<TBody = unknown, TQuery = unknown>(
         return NextResponse.json({ error: "PAYLOAD_TOO_LARGE" }, { status: 413 });
       }
       if (options.rateLimit) {
-        rateLimit(`${ip}:${new URL(req.url).pathname}`, options.rateLimit.limit, options.rateLimit.windowMs);
+        await rateLimitDb(`${ip}:${new URL(req.url).pathname}`, options.rateLimit.limit, options.rateLimit.windowMs);
       }
 
       if (!options.public) {
