@@ -240,7 +240,7 @@ export async function recoverOrphanedInboundMessages(
       where: {
         type: "process_ai_message",
         status: "FAILED",
-        idempotencyKey: { in: messageIds.map((id) => `ai:${id}`) },
+        idempotencyKey: { in: messageIds.map((id: string) => `ai:${id}`) },
       },
       select: { idempotencyKey: true, finishedAt: true },
     });
