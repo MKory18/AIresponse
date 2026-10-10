@@ -1,14 +1,16 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileUp, Images, LayoutGrid, List, Search, Trash2, Upload, X } from "lucide-react";
+import { FileUp, Images, LayoutGrid, List, Search, Trash2, Upload } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type LinkedProduct = { id: string; name: string; isPrimary: boolean };
@@ -415,19 +417,13 @@ export default function MediaPage() {
         </GlassCard>
       )}
 
-      {/* Preview modal */}
-      {preview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setPreview(null)}>
-          <div className="w-full max-w-2xl space-y-3 rounded-2xl bg-white p-4 shadow-xl dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-2">
-              <p className="truncate text-sm font-bold text-ink">{preview.title ?? preview.id}</p>
-              <button onClick={() => setPreview(null)} aria-label={t.common.close} className="rounded-xl p-1.5 text-ink-muted hover:bg-surface-3">
-                <X size={16} />
-              </button>
-            </div>
+      {/* Preview modal — shared Dialog */}
+      <Dialog open={preview !== null} onClose={() => setPreview(null)} title={preview?.title ?? preview?.id ?? ""} className="max-w-2xl">
+        {preview && (
+          <div className="space-y-3">
             {preview.type === "IMAGE" ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={preview.url} alt={preview.title ?? ""} className="max-h-[60vh] w-full rounded-xl object-contain" />
+              <img src={preview.url} alt={preview.title ?? ""} width={800} height={600} className="max-h-[60vh] w-full rounded-xl object-contain" />
             ) : preview.type === "VIDEO" ? (
               <video src={preview.url} controls className="max-h-[60vh] w-full rounded-xl" />
             ) : preview.type === "AUDIO" ? (
@@ -449,15 +445,14 @@ export default function MediaPage() {
               ))}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Dialog>
 
       {/* Link modal */}
-      {linkTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h2 className="text-base font-bold text-ink">{t.media.linkProduct}</h2>
-            <p className="mt-1 truncate text-sm text-ink-muted">{linkTarget.title ?? linkTarget.id}</p>
+      <Dialog open={linkTarget !== null} onClose={() => setLinkTarget(null)} title={t.media.linkProduct} className="max-w-md">
+        {linkTarget && (
+          <div>
+            <p className="truncate text-sm text-ink-muted">{linkTarget.title ?? linkTarget.id}</p>
             <div className="mt-3">
               <Field label={t.customer.product}>
                 <Select value={linkProductId} onChange={(e) => setLinkProductId(e.target.value)}>
@@ -473,25 +468,20 @@ export default function MediaPage() {
               <Button size="sm" variant="primary" disabled={!linkProductId} onClick={confirmLink}>{t.media.linkProduct}</Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Dialog>
 
       {/* Delete dialog */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h2 className="text-base font-bold text-ink">{t.media.deleteTitle}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.media.deleteBody}</p>
-            <div className="mt-4 flex justify-start gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>{t.media.cancel}</Button>
-              <Button size="sm" variant="danger" loading={deleting} disabled={deleting} onClick={confirmDelete}>
-                <Trash2 size={13} />
-                {t.media.deleteFile}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        title={t.media.deleteTitle}
+        body={t.media.deleteBody}
+        confirmLabel={t.media.deleteFile}
+        busy={deleting}
+        danger
+      />
     </div>
   );
 }

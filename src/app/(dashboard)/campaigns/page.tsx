@@ -5,9 +5,11 @@ import { Megaphone, Users } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type Segment = { id: string; name: string; isActive: boolean };
@@ -46,6 +48,11 @@ export default function CampaignsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [runlog, setRunlog] = useState<Runlog | null>(null);
   const [dryRun, setDryRun] = useState<DryRun | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Campaign | null>(null);
+  const [dryRunForId, setDryRunForId] = useState<string | null>(null);
+  const toast = useToast();
 
   // نموذج إنشاء حملة
   const [name, setName] = useState("");
@@ -58,10 +65,17 @@ export default function CampaignsPage() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [c, s] = await Promise.all([fetch("/api/campaigns"), fetch("/api/segments")]);
-    if (c.ok) setItems((await c.json()).items);
-    if (s.ok) setSegments((await s.json()).items);
-    setLoading(false);
+    try {
+      const [c, s] = await Promise.all([fetch("/api/campaigns"), fetch("/api/segments")]);
+      if (!c.ok || !s.ok) throw new Error();
+      setItems((await c.json()).items);
+      setSegments((await s.json()).items);
+      setError(null);
+    } catch {
+      setError("تعذّر تحميل الحملات");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -71,40 +85,72 @@ export default function CampaignsPage() {
   async function openCampaign(id: string) {
     setSelected(id);
     setDryRun(null);
-    const res = await fetch(`/api/campaigns/${id}`);
-    if (res.ok) setRunlog((await res.json()).runlog);
+    setDryRunForId(null);
+    try {
+      const res = await fetch(`/api/campaigns/${id}`);
+      if (!res.ok) throw new Error();
+      setRunlog((await res.json()).runlog);
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    }
   }
 
-  async function dryRunNow() {
-    if (!selected) return;
-    const res = await fetch(`/api/campaigns/${selected}/dry-run`, { method: "POST" });
-    if (res.ok) setDryRun((await res.json()).data ?? (await res.json()));
+  async function dryRunNow(id: string) {
+    setBusy(`dry:${id}`);
+    setDryRunForId(id);
+    setSelected(id);
+    try {
+      const res = await fetch(`/api/campaigns/${id}/dry-run`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      setDryRun((await res.json()).data ?? null);
+    } catch {
+      setDryRun(null);
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function lifecycle(id: string, action: "pause" | "resume" | "cancel") {
-    await fetch(`/api/campaigns/${id}/lifecycle`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...(action === "cancel" ? { reason: "MANUAL" } : {}) }),
-    });
-    if (selected === id) await openCampaign(id);
-    load();
+    setBusy(`${action}:${id}`);
+    try {
+      const res = await fetch(`/api/campaigns/${id}/lifecycle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...(action === "cancel" ? { reason: "MANUAL" } : {}) }),
+      });
+      if (!res.ok) throw new Error();
+      setCancelTarget(null);
+      if (selected === id) await openCampaign(id);
+      load();
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function stageAction(id: string, stage: "validate" | "approve" | "schedule") {
-    const path = stage === "validate" ? "validate" : stage === "approve" ? "approve" : "schedule";
-    const res = await fetch(`/api/campaigns/${id}/${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setFormError(j.error ?? "تعذر تنفيذ الإجراء");
-    } else {
-      setFormError(null);
+    setBusy(`${stage}:${id}`);
+    try {
+      const path = stage === "validate" ? "validate" : stage === "approve" ? "approve" : "schedule";
+      const res = await fetch(`/api/campaigns/${id}/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setFormError(j.error ?? "تعذر تنفيذ الإجراء");
+      } else {
+        setFormError(null);
+      }
+    } catch {
+      setFormError("تعذر تنفيذ الإجراء");
+    } finally {
+      setBusy(null);
+      load();
     }
-    load();
   }
 
   async function createCampaign() {
@@ -150,30 +196,37 @@ export default function CampaignsPage() {
     <div className="page-wrap">
       <PageHeader title="الحملات التسويقية" description="شرائح الجمهور وحملات القنوات المسموحة رسميًا — بلا إرسال خارج السياسات." />
 
+      {error && (
+        <GlassCard>
+          <ErrorState onRetry={load} />
+        </GlassCard>
+      )}
+
       {/* إنشاء حملة */}
+      {!error && (
       <GlassCard level="glass-subtle" className="space-y-3 p-4">
         <p className="flex items-center gap-2 text-sm font-bold text-ink">
           <Megaphone size={15} className="text-brand-500" /> حملة جديدة
         </p>
-        <div className="flex flex-wrap gap-2">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحملة" className="w-56" aria-label="اسم الحملة" />
-          <Select value={segmentId} onChange={(e) => setSegmentId(e.target.value)} className="w-56" aria-label="الشريحة المستهدفة">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحملة" aria-label="اسم الحملة" />
+          <Select value={segmentId} onChange={(e) => setSegmentId(e.target.value)} aria-label="الشريحة المستهدفة">
             <option value="">— اختر الشريحة —</option>
             {segments.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </Select>
-          <Select value={channelType} onChange={(e) => setChannelType(e.target.value as (typeof CAMPAIGN_CHANNELS)[number])} className="w-44" aria-label="القناة">
+          <Select value={channelType} onChange={(e) => setChannelType(e.target.value as (typeof CAMPAIGN_CHANNELS)[number])} aria-label="القناة">
             {CAMPAIGN_CHANNELS.map((c) => (
               <option key={c} value={c}>{label(c)}</option>
             ))}
           </Select>
-          <Input value={ratePerMinute} onChange={(e) => setRatePerMinute(e.target.value)} className="w-32" aria-label="حد الإرسال بالدقيقة" placeholder="30/دقيقة" />
+          <Input value={ratePerMinute} onChange={(e) => setRatePerMinute(e.target.value)} aria-label="حد الإرسال بالدقيقة" placeholder="30/دقيقة" inputMode="numeric" />
         </div>
         {channelType === "WHATSAPP" && (
-          <div className="flex flex-wrap gap-2">
-            <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="اسم القالب المعتمد في Meta" className="w-64" aria-label="اسم القالب" />
-            <Input value={templateLanguage} onChange={(e) => setTemplateLanguage(e.target.value)} placeholder="ar" className="w-20" aria-label="لغة القالب" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px]">
+            <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="اسم القالب المعتمد في Meta" aria-label="اسم القالب" />
+            <Input value={templateLanguage} onChange={(e) => setTemplateLanguage(e.target.value)} placeholder="ar" aria-label="لغة القالب" />
           </div>
         )}
         <textarea
@@ -192,8 +245,10 @@ export default function CampaignsPage() {
           إنشاء مسودة
         </Button>
       </GlassCard>
+      )}
 
       {/* شرائح محفوظة */}
+      {!error && (
       <GlassCard level="glass-subtle" className="p-4">
         <p className="flex items-center gap-2 text-sm font-bold text-ink">
           <Users size={15} className="text-brand-500" /> الشرائح المحفوظة
@@ -211,6 +266,7 @@ export default function CampaignsPage() {
           </ul>
         )}
       </GlassCard>
+      )}
 
       {/* القائمة */}
       {loading && (
@@ -218,7 +274,7 @@ export default function CampaignsPage() {
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}
         </div>
       )}
-      {!loading && items.map((c) => (
+      {!loading && !error && items.map((c) => (
         <GlassCard key={c.id} className="space-y-2 p-4 transition-all hover:shadow-glass">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button onClick={() => openCampaign(c.id)} className="truncate text-sm font-bold text-ink hover:text-brand-600">
@@ -232,20 +288,20 @@ export default function CampaignsPage() {
             {c.failReason ? ` · سبب الفشل: ${c.failReason}` : ""}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {c.status === "DRAFT" && <Button size="sm" variant="secondary" onClick={() => stageAction(c.id, "validate")}>تحقق</Button>}
-            {c.status === "READY" && <Button size="sm" variant="secondary" onClick={() => stageAction(c.id, "approve")}>اعتماد المحتوى</Button>}
-            {c.status === "READY" && <Button size="sm" variant="primary" onClick={() => stageAction(c.id, "schedule")}>جدولة</Button>}
-            {c.status === "RUNNING" && <Button size="sm" variant="secondary" onClick={() => lifecycle(c.id, "pause")}>إيقاف مؤقت</Button>}
-            {c.status === "PAUSED" && <Button size="sm" variant="secondary" onClick={() => lifecycle(c.id, "resume")}>استئناف</Button>}
+            {c.status === "DRAFT" && <Button size="sm" variant="secondary" disabled={busy !== null} loading={busy === `validate:${c.id}`} onClick={() => stageAction(c.id, "validate")}>تحقق</Button>}
+            {c.status === "READY" && <Button size="sm" variant="secondary" disabled={busy !== null} loading={busy === `approve:${c.id}`} onClick={() => stageAction(c.id, "approve")}>اعتماد المحتوى</Button>}
+            {c.status === "READY" && <Button size="sm" variant="primary" disabled={busy !== null} loading={busy === `schedule:${c.id}`} onClick={() => stageAction(c.id, "schedule")}>جدولة</Button>}
+            {c.status === "RUNNING" && <Button size="sm" variant="secondary" disabled={busy !== null} loading={busy === `pause:${c.id}`} onClick={() => lifecycle(c.id, "pause")}>إيقاف مؤقت</Button>}
+            {c.status === "PAUSED" && <Button size="sm" variant="secondary" disabled={busy !== null} loading={busy === `resume:${c.id}`} onClick={() => lifecycle(c.id, "resume")}>استئناف</Button>}
             {["DRAFT", "READY", "SCHEDULED", "RUNNING", "PAUSED"].includes(c.status) && (
-              <Button size="sm" variant="ghost" onClick={() => lifecycle(c.id, "cancel")} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+              <Button size="sm" variant="ghost" onClick={() => setCancelTarget(c)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
                 إلغاء
               </Button>
             )}
-            <Button size="sm" variant="ghost" onClick={dryRunNow}>معاينة (Dry-Run)</Button>
+            <Button size="sm" variant="ghost" disabled={busy !== null} loading={busy === `dry:${c.id}`} onClick={() => dryRunNow(c.id)}>معاينة (Dry-Run)</Button>
           </div>
 
-          {selected === c.id && dryRun && (
+          {selected === c.id && dryRunForId === c.id && dryRun && (
             <div className="rounded-xl border border-line/60 bg-surface-2/50 p-3 text-[12px]">
               <p className="font-bold text-ink">معاينة (بلا إرسال وبلا تغيير أي بيانات):</p>
               <p className="num mt-1 text-ink-muted">
@@ -277,15 +333,25 @@ export default function CampaignsPage() {
           )}
         </GlassCard>
       ))}
-      {!loading && items.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<Megaphone size={28} strokeWidth={1.5} />}
             title="لا حملات بعد"
-            description="أنشئ شر��حة ثم حملة — لا يُرسل شيء قبل التحقق والاعتماد والجدولة."
+            description="أنشئ شريحة ثم حملة — لا يُرسل شيء قبل التحقق والاعتماد والجدولة."
           />
         </GlassCard>
       )}
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => cancelTarget && void lifecycle(cancelTarget.id, "cancel")}
+        title={`إلغاء الحملة "${cancelTarget?.name ?? ""}"؟`}
+        body="سيتوقف الإرسال فورًا: المستلمون غير المعالجون يُلغون ولا تُرسل لهم رسائل. لا يمكن التراجع."
+        confirmLabel="إلغاء الحملة"
+        busy={cancelTarget ? busy === `cancel:${cancelTarget.id}` : false}
+        danger
+      />
     </div>
   );
 }

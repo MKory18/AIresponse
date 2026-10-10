@@ -38,6 +38,8 @@ export const PERMISSIONS = [
   "campaigns.write",
   "campaigns.approve",
   "analytics.read",
+  // P10 — أداء الموظفين (تقارير حساسة): المدير فما فوق فقط، إنفاذ من الخادم.
+  "analytics.agents",
   "usage.read",
   "users.manage",
   "settings.manage",
@@ -91,6 +93,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "channels.send_human",
     "usage.read",
     "settings.manage",
+    // P10 — تقارير أداء الموظفين (حساسة) — المدير فما فوق.
+    "analytics.agents",
     // P8 — الخصم ضمن السقف + رؤية سعر الجملة + اعتماد فوق السقف (المدير فقط).
     "orders.discount",
     "products.wholesale",

@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Bot, Check, ChevronDown, Facebook, Lightbulb, Paperclip, Search, Send, Smile, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, Facebook, Info, Lightbulb, Paperclip, Search, Send, Smile, Sparkles, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { label, t } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ConfirmDialog, ErrorState } from "../ui/confirm";
+import { Dialog, Drawer } from "../ui/dialog";
+import { EmptyState } from "../ui/empty-state";
 import { Input, Select } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
@@ -84,10 +87,18 @@ export default function Inbox() {
   const [deleting, setDeleting] = useState(false);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
   const [actingTakeover, setActingTakeover] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachData, setCoachData] = useState<any>(null);
+  const [coachError, setCoachError] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  // Guards against stale responses: a slow poll/switch must never overwrite
+  // newer state (switching threads or changing filters mid-flight).
+  const listSeq = useRef(0);
+  const msgSeq = useRef(0);
   const toast = useToast();
 
   async function loadDraft(conversationId: string) {
@@ -104,6 +115,7 @@ export default function Inbox() {
 
   const fetchList = useCallback(
     async (opts?: { append?: boolean; cursor?: string | null; signal?: AbortSignal }) => {
+      const seq = ++listSeq.current;
       const params = new URLSearchParams();
       if (query) params.set("q", query);
       if (filter === "unread") params.set("unreadOnly", "true");
@@ -114,10 +126,11 @@ export default function Inbox() {
       if (opts?.cursor) params.set("cursor", opts.cursor);
       const res = await fetch(`/api/conversations?${params}`, { signal: opts?.signal });
       if (!res.ok) {
-        setListError(t.inbox.loadListFailed);
+        if (seq === listSeq.current) setListError(t.inbox.loadListFailed);
         return;
       }
       const data = (await res.json()) as { items: ConversationListItem[]; nextCursor: string | null };
+      if (seq !== listSeq.current) return; // a newer request superseded this one
       setListError(null);
       let items = data.items;
       if (filter === "ai") items = items.filter((c) => c.aiState !== "HUMAN_ACTIVE");
@@ -158,11 +171,20 @@ export default function Inbox() {
   }, [fetchList, selectedId]);
 
   const refreshMessages = useCallback(async (conversationId: string) => {
+    const seq = ++msgSeq.current;
     const res = await fetch(`/api/conversations/${conversationId}/messages`);
-    if (res.ok) {
-      const data = (await res.json()) as { items: MessageItem[] };
-      setMessages(data.items);
-    }
+    if (!res.ok || seq !== msgSeq.current) return;
+    const data = (await res.json()) as { items: MessageItem[] };
+    if (seq !== msgSeq.current) return;
+    setMessages((prev) => {
+      // Preserve unconfirmed optimistic rows (PENDING/QUEUED/FAILED) across
+      // polls — the server list alone would silently wipe them before the
+      // user sees the failure or the retry resolves.
+      const pendingLocal = prev.filter(
+        (m) => m.id.startsWith("optimistic-") && (m.deliveryStatus === "PENDING" || m.deliveryStatus === "QUEUED" || m.deliveryStatus === "FAILED")
+      );
+      return [...data.items, ...pendingLocal];
+    });
   }, []);
 
   // Load thread + customer panel on selection
@@ -171,36 +193,43 @@ export default function Inbox() {
     let cancelled = false;
     setOpenHandoff(null);
     setActivity([]);
+    setMessagesLoading(true);
     (async () => {
-      const [msgRes, custRes] = await Promise.all([
-        fetch(`/api/conversations/${selectedId}/messages`),
-        fetch(`/api/conversations/${selectedId}`),
-      ]);
-      if (cancelled) return;
-      if (msgRes.ok) setMessages(((await msgRes.json()) as { items: MessageItem[] }).items);
-      if (custRes.ok) {
-        const conv = (await custRes.json()) as {
-          customerId: string;
-          openHandoff?: OpenHandoff;
-          assignmentHistory?: AssignmentActivity[];
-        };
-        setOpenHandoff(conv.openHandoff ?? null);
-        setActivity(conv.assignmentHistory ?? []);
-        const customerRes = await fetch(`/api/customers/${conv.customerId}`);
+      try {
+        const [msgRes, custRes] = await Promise.all([
+          fetch(`/api/conversations/${selectedId}/messages`),
+          fetch(`/api/conversations/${selectedId}`),
+        ]);
         if (cancelled) return;
-        if (customerRes.ok) setCustomer((await customerRes.json()) as CustomerDetail);
-        loadDraft(selectedId);
+        if (msgRes.ok) setMessages(((await msgRes.json()) as { items: MessageItem[] }).items);
+        if (custRes.ok) {
+          const conv = (await custRes.json()) as {
+            customerId: string;
+            openHandoff?: OpenHandoff;
+            assignmentHistory?: AssignmentActivity[];
+          };
+          setOpenHandoff(conv.openHandoff ?? null);
+          setActivity(conv.assignmentHistory ?? []);
+          const customerRes = await fetch(`/api/customers/${conv.customerId}`);
+          if (cancelled) return;
+          if (customerRes.ok) setCustomer((await customerRes.json()) as CustomerDetail);
+          loadDraft(selectedId);
+        }
+        // optimistic read
+        setConversations((prev) =>
+          prev.map((c) => (c.id === selectedId ? { ...c, unreadCount: 0 } : c))
+        );
+        void fetch(`/api/conversations/${selectedId}/read`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isRead: true }),
+        }).catch(() => {
+          /* unread flag restores on next poll if the request failed */
+        });
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+      } finally {
+        if (!cancelled) setMessagesLoading(false);
       }
-      // optimistic read
-      setConversations((prev) =>
-        prev.map((c) => (c.id === selectedId ? { ...c, unreadCount: 0 } : c))
-      );
-      fetch(`/api/conversations/${selectedId}/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isRead: true }),
-      });
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     })();
     return () => {
       cancelled = true;
@@ -242,6 +271,7 @@ export default function Inbox() {
         )
       );
       if (data.deliveryStatus === "QUEUED") toast.show(t.delivery.sending, "info");
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 30);
     } catch {
       setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? { ...m, deliveryStatus: "FAILED" } : m)));
       toast.show(t.delivery.sendFailed, "error");
@@ -335,29 +365,37 @@ export default function Inbox() {
   }
 
   async function resolve() {
-    if (!selectedId) return;
-    const res = await fetch(`/api/conversations/${selectedId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "RESOLVED" }),
-    });
-    if (res.ok) {
-      toast.show(t.inbox.resolve, "success");
+    if (!selectedId || acting) return;
+    setActing(true);
+    try {
+      const res = await fetch(`/api/conversations/${selectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "RESOLVED" }),
+      });
+      if (!res.ok) throw new Error();
       await refreshSelected();
+      toast.show(t.inbox.resolve, "success");
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setActing(false);
     }
   }
 
   // P8 — مساعد البيع: اقتراحات داخلية فقط، لا يُرسل شيء تلقائيًا.
   async function loadCoach(conversationId: string) {
     setCoachLoading(true);
+    setCoachError(false);
     try {
       const res = await fetch(`/api/conversations/${conversationId}/coach`, { method: "POST" });
-      if (res.ok) {
-        const json = await res.json();
-        setCoachData(json.data ?? null);
-      } else {
-        setCoachData(null);
-      }
+      if (!res.ok) throw new Error();
+      const json = await res.json();
+      setCoachData(json.data ?? null);
+    } catch {
+      // فشل واضح ≠ فراغ: لا نعرض "لا اقتراحات" حين يكون الطلب فاشلًا.
+      setCoachData(null);
+      setCoachError(true);
     } finally {
       setCoachLoading(false);
     }
@@ -376,7 +414,7 @@ export default function Inbox() {
   }, []);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] gap-3">
+    <div className="flex h-[calc(100dvh-4rem)] gap-3">
       {/* Conversation list — glass panel */}
       <aside
         className={cn(
@@ -539,7 +577,7 @@ export default function Inbox() {
                     <Sparkles size={13} /> {t.inbox.takeOver}
                   </Button>
                 ) : (
-                  <Button size="sm" variant="secondary" onClick={() => action("release-ai")}>
+                  <Button size="sm" variant="secondary" onClick={() => action("release-ai")} disabled={acting} loading={acting}>
                     <Bot size={13} /> {t.inbox.backToAi}
                   </Button>
                 )}
@@ -553,8 +591,17 @@ export default function Inbox() {
                 >
                   <Lightbulb size={13} /> مساعد البيع
                 </Button>
-                <Button size="sm" variant="success" onClick={resolve}>
+                <Button size="sm" variant="success" onClick={resolve} disabled={acting} loading={acting}>
                   <Check size={13} /> {t.inbox.resolve}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPanelOpen(true)}
+                  aria-label="معلومات العميل"
+                  className="xl:hidden"
+                >
+                  <Info size={13} /> ملف العميل
                 </Button>
                 <Button
                   size="sm"
@@ -592,9 +639,13 @@ export default function Inbox() {
             )}
 
             <div className="flex-1 space-y-2 overflow-y-auto px-3 py-4 sm:px-5">
-              {messages.length === 0 ? (
+              {messagesLoading && messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
                   <Skeleton className="h-20 w-2/3 rounded-2xl" />
+                </div>
+              ) : !messagesLoading && messages.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <EmptyState title="لا رسائل بعد" description="ستظهر رسائل هذه المحادثة هنا بمجرد وصولها." />
                 </div>
               ) : (
                 messages.map((m, i) => {
@@ -642,7 +693,12 @@ export default function Inbox() {
                   ملاحظة داخلية
                 </button>
               </div>
-              <div className="glass-subtle flex items-end gap-1.5 rounded-2xl p-1.5">
+              <div
+                className={cn(
+                  "glass-subtle flex items-end gap-1.5 rounded-2xl p-1.5 transition-shadow",
+                  composerTab === "note" && "bg-amber-500/[0.06] ring-2 ring-amber-500/40"
+                )}
+              >
                 <div className="flex gap-0.5 pb-0.5">
                   <button
                     aria-label={t.inbox.attach}
@@ -693,7 +749,7 @@ export default function Inbox() {
         )}
       </section>
 
-      {/* Customer panel — glass */}
+      {/* Customer panel — glass (desktop) + Drawer (small screens — P11) */}
       <aside className="glass hidden w-72 shrink-0 overflow-y-auto rounded-2xl xl:block">
         <CustomerPanel
           customer={customer}
@@ -701,127 +757,105 @@ export default function Inbox() {
           pageName={selected ? pageNameOf(selected) : null}
         />
       </aside>
+      <Drawer open={panelOpen} onClose={() => setPanelOpen(false)} side="end" until="xl" title="ملف العميل">
+        <div className="overflow-y-auto">
+          <CustomerPanel
+            customer={customer}
+            orderDraft={orderDraftCard}
+            pageName={selected ? pageNameOf(selected) : null}
+          />
+        </div>
+      </Drawer>
 
-      {coachOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-base font-bold text-ink">
-                <Lightbulb size={16} className="text-amber-500" /> مساعد البيع
-              </h2>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => selectedId && void loadCoach(selectedId)}
-                disabled={coachLoading}
-              >
-                تحديث
-              </Button>
-            </div>
-            <p className="mt-1 text-[11px] text-ink-subtle">اقتراحات داخلية فقط — لا يُرسل شيء للعميل تلقائيًا.</p>
-            {coachLoading ? (
-              <div className="mt-4 space-y-2">
-                <Skeleton className="h-12 w-full rounded-xl" />
-                <Skeleton className="h-12 w-full rounded-xl" />
-              </div>
-            ) : !coachData ? (
-              <p className="mt-4 text-sm text-ink-muted">لا توجد اقتراحات الآن.</p>
-            ) : (
-              <div className="mt-4 space-y-2">
-                {(coachData.suggestions ?? []).map(
-                  (
-                    s: any,
-                    i: number
-                  ) => (
-                    <div key={i} className="rounded-xl border border-line/60 bg-surface-2/50 p-3">
-                      <p className="text-[11px] font-bold text-brand-600 dark:text-brand-300">
-                        {s.kind === "OBJECTION" ? "معالجة اعتراض" : s.kind === "DISCOUNT" ? "خصم" : s.kind === "CROSS_SELL" ? "بيع مُكمِّل" : s.kind === "OFFER" ? "عرض" : "تلميح رد"}
-                        {s.reason ? ` · ${s.reason}` : ""}
-                      </p>
-                      {s.draftText ? (
-                        <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{s.draftText}</p>
-                      ) : null}
-                      {s.draftText ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="mt-2"
-                          onClick={() => {
-                            setComposerTab("reply");
-                            setDraft(s.draftText);
-                            setCoachOpen(false);
-                          }}
-                        >
-                          إدراج في المحرر
-                        </Button>
-                      ) : null}
-                    </div>
-                  )
-                )}
-                {coachData.noOfferReason ? (
-                  <p className="text-[11px] text-ink-subtle">لا يوجد عرض: {coachData.noOfferReason}</p>
-                ) : null}
-              </div>
+      <Dialog open={coachOpen} onClose={() => setCoachOpen(false)} title="مساعد البيع" className="max-w-lg">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] text-ink-subtle">اقتراحات داخلية فقط — لا يُرسل شيء للعميل تلقائيًا.</p>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => selectedId && void loadCoach(selectedId)}
+            disabled={coachLoading}
+          >
+            تحديث
+          </Button>
+        </div>
+        {coachLoading ? (
+          <div className="mt-4 space-y-2">
+            <Skeleton className="h-12 w-full rounded-xl" />
+            <Skeleton className="h-12 w-full rounded-xl" />
+          </div>
+        ) : coachError ? (
+          <ErrorState className="py-6" title="تعذّر جلب الاقتراحات" onRetry={() => selectedId && void loadCoach(selectedId)} />
+        ) : !coachData ? (
+          <p className="mt-4 text-sm text-ink-muted">لا توجد اقتراحات الآن.</p>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {(coachData.suggestions ?? []).map(
+              (
+                s: any,
+                i: number
+              ) => (
+                <div key={i} className="rounded-xl border border-line/60 bg-surface-2/50 p-3">
+                  <p className="text-[11px] font-bold text-brand-600 dark:text-brand-300">
+                    {s.kind === "OBJECTION" ? "معالجة اعتراض" : s.kind === "DISCOUNT" ? "خصم" : s.kind === "CROSS_SELL" ? "بيع مُكمِّل" : s.kind === "OFFER" ? "عرض" : "تلميح رد"}
+                    {s.reason ? ` · ${s.reason}` : ""}
+                  </p>
+                  {s.draftText ? (
+                    <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{s.draftText}</p>
+                  ) : null}
+                  {s.draftText ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={() => {
+                        setComposerTab("reply");
+                        setDraft(s.draftText);
+                        setCoachOpen(false);
+                      }}
+                    >
+                      إدراج في المحرر
+                    </Button>
+                  ) : null}
+                </div>
+              )
             )}
-            <div className="mt-4 flex justify-start">
-              <Button size="sm" variant="secondary" onClick={() => setCoachOpen(false)}>
-                إغلاق
-              </Button>
-            </div>
+            {coachData.noOfferReason ? (
+              <p className="text-[11px] text-ink-subtle">لا يوجد عرض: {coachData.noOfferReason}</p>
+            ) : null}
           </div>
+        )}
+        <div className="mt-4 flex justify-start">
+          <Button size="sm" variant="secondary" onClick={() => setCoachOpen(false)}>
+            إغلاق
+          </Button>
         </div>
-      )}
-      {confirmTakeover && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h2 className="text-base font-bold text-ink">{t.inbox.takeOverConfirmTitle}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.inbox.takeOverConfirmBody}</p>
-            <div className="mt-4 flex justify-start gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setConfirmTakeover(false)} disabled={actingTakeover}>
-                {t.common.cancel}
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                loading={actingTakeover}
-                disabled={actingTakeover}
-                onClick={() => {
-                  setActingTakeover(true);
-                  action("takeover").finally(() => {
-                    setActingTakeover(false);
-                    setConfirmTakeover(false);
-                  });
-                }}
-              >
-                {t.inbox.takeOverTitle}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h2 className="text-base font-bold text-ink">{t.inbox.deleteConversationTitle}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.inbox.deleteConversationBody}</p>
-            <div className="mt-4 flex justify-start gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                {t.common.cancel}
-              </Button>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() => void removeConversation()}
-                loading={deleting}
-                disabled={deleting}
-              >
-                <Trash2 size={13} />
-                {deleting ? t.common.loading : t.inbox.deleteConversation}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      </Dialog>
+      <ConfirmDialog
+        open={confirmTakeover}
+        onClose={() => setConfirmTakeover(false)}
+        onConfirm={() => {
+          setActingTakeover(true);
+          action("takeover").finally(() => {
+            setActingTakeover(false);
+            setConfirmTakeover(false);
+          });
+        }}
+        title={t.inbox.takeOverConfirmTitle}
+        body={t.inbox.takeOverConfirmBody}
+        confirmLabel={t.inbox.takeOverTitle}
+        busy={actingTakeover}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => void removeConversation()}
+        title={t.inbox.deleteConversationTitle}
+        body={t.inbox.deleteConversationBody}
+        confirmLabel={t.inbox.deleteConversation}
+        busy={deleting}
+        danger
+      />
     </div>
   );
 }

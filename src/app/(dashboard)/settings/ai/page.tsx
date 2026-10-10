@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Bot, Check, Cpu, KeyRound, SlidersHorizontal } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
@@ -33,46 +34,77 @@ export default function AISettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const loadSettings = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/ai/settings");
+      if (!res.ok) throw new Error();
+      setSettings(await res.json());
+    } catch {
+      setLoadError("تعذّر تحميل إعدادات الذكاء الاصطناعي");
+    }
+  }, []);
 
   useEffect(() => {
-    fetch("/api/ai/settings").then(async (res) => {
-      if (res.ok) setSettings(await res.json());
-    });
-  }, []);
+    loadSettings();
+  }, [loadSettings]);
 
   async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     setSaving(true);
+    setSaveError(null);
     const num = (k: string) => Number(form.get(k));
-    const res = await fetch("/api/ai/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        provider: form.get("provider"),
-        classificationModel: form.get("classificationModel") || null,
-        extractionModel: form.get("extractionModel") || null,
-        responseModel: form.get("responseModel") || null,
-        visionModel: form.get("visionModel") || null,
-        summaryModel: form.get("summaryModel") || null,
-        embeddingModel: form.get("embeddingModel") || null,
-        customBaseUrl: form.get("customBaseUrl") || null,
-        fallbackProvider: form.get("fallbackProvider") || null,
-        fallbackModel: form.get("fallbackModel") || null,
-        temperature: num("temperature"),
-        maxTokens: num("maxTokens"),
-        confidenceExecute: num("confidenceExecute"),
-        confidenceRespond: num("confidenceRespond"),
-        humanHandoffThreshold: num("humanHandoffThreshold"),
-        aiEnabled: form.get("aiEnabled") === "on",
-        autoRespond: form.get("autoRespond") === "on",
-      }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+    try {
+      const res = await fetch("/api/ai/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: form.get("provider"),
+          classificationModel: form.get("classificationModel") || null,
+          extractionModel: form.get("extractionModel") || null,
+          responseModel: form.get("responseModel") || null,
+          visionModel: form.get("visionModel") || null,
+          summaryModel: form.get("summaryModel") || null,
+          embeddingModel: form.get("embeddingModel") || null,
+          customBaseUrl: form.get("customBaseUrl") || null,
+          fallbackProvider: form.get("fallbackProvider") || null,
+          fallbackModel: form.get("fallbackModel") || null,
+          temperature: num("temperature"),
+          maxTokens: num("maxTokens"),
+          confidenceExecute: num("confidenceExecute"),
+          confidenceRespond: num("confidenceRespond"),
+          humanHandoffThreshold: num("humanHandoffThreshold"),
+          aiEnabled: form.get("aiEnabled") === "on",
+          autoRespond: form.get("autoRespond") === "on",
+        }),
+      });
+      setSaving(false);
+      if (res.ok) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setSaveError(data.message ?? "فشل الحفظ — تحقق من الصلاحيات وحاول مجددًا");
+      }
+    } catch {
+      setSaving(false);
+      setSaveError("فشل الحفظ — تعذر الاتصال بالخادم");
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="page-wrap">
+        <PageHeader title={t.pages.aiSettingsTitle} description={t.pages.aiSettingsDesc} />
+        <GlassCard className="p-2">
+          <ErrorState onRetry={loadSettings} />
+        </GlassCard>
+      </div>
+    );
   }
 
   if (!settings) {
@@ -192,6 +224,12 @@ export default function AISettingsPage() {
           </label>
         </div>
       </GlassCard>
+
+      {saveError && (
+        <GlassCard level="glass-subtle" role="alert" className="border-red-500/25 bg-red-500/[0.06] px-4 py-2.5 text-sm font-medium text-red-700 dark:text-red-300">
+          {saveError}
+        </GlassCard>
+      )}
 
       <div className="sticky bottom-4 flex justify-end">
         <Button type="submit" loading={saving} disabled={saving} size="lg" className="shadow-glass">

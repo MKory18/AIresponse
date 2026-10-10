@@ -75,7 +75,7 @@ export default function OrdersPage() {
         description="تابع حالات الطلبات وتأكيدها لحظة بلحظة."
         actions={
           <Button size="sm" variant="secondary" onClick={() => window.print()}>
-            <Printer size={14} /> {t.common.export}
+            <Printer size={14} /> طباعة
           </Button>
         }
       />

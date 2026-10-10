@@ -13,10 +13,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 
 type Overview = {
   conversations: { total: number; active: number; resolved: number };
+  customers: { newInRange: number; total: number };
   messages: { inbound: number; outbound: number };
   orders: { created: number; confirmed: number; delivered: number; cancelled: number };
   revenue: { confirmed: number; delivered: number };
-  ai: { calls: number; failed: number; tokens: number; estimatedCost: number };
+  ai: { calls: number; failed: number; tokens: number; estimatedCost: number | null };
   handoffs: { total: number; open: number; avgResolutionMinutes: number | null };
   automation: { executions: number; completed: number; failed: number; skipped: number };
 };
@@ -155,7 +156,8 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             <StatCard label={t.dashboard.conversations} value={formatNumber(data.conversations.total)} tone="brand" icon={<MessagesSquare size={18} />} />
             <StatCard label={t.dashboard.orders} value={formatNumber(data.orders.created)} tone="sky" icon={<Receipt size={18} />} />
-            <StatCard label={t.dashboard.customers} value={formatNumber(data.conversations.total)} tone="violet" icon={<Users size={18} />} />
+            {/* P10 — عملاء جدد حقيقيون (كانت تستنسخ عدد المحادثات — placeholder) */}
+            <StatCard label={`${t.dashboard.customers} (جدد)`} value={formatNumber(data.customers.newInRange)} tone="violet" icon={<Users size={18} />} />
             <StatCard label={t.dashboard.conversion} value={conversion === null ? "—" : `${conversion}%`} tone="emerald" icon={<TrendingUp size={18} />} />
             <StatCard label={t.dashboard.aiMessages} value={formatNumber(data.ai.calls)} tone="violet" icon={<Bot size={18} />} />
             <StatCard label={t.dashboard.needsHuman} value={formatNumber(data.handoffs.open)} tone="amber" icon={<Hand size={18} />} />
@@ -179,7 +181,8 @@ export default function DashboardPage() {
             <MiniStat label="استدعاءات AI" value={formatNumber(data.ai.calls)} tone="violet" />
             <MiniStat label="استدعاءات فاشلة" value={formatNumber(data.ai.failed)} tone="red" />
             <MiniStat label="Tokens" value={formatNumber(data.ai.tokens)} tone="brand" />
-            <MiniStat label="التكلفة التقديرية" value={formatNumber(data.ai.estimatedCost)} tone="amber" />
+            {/* null = لا تسعير معروف — تُعرض "غير متاح" لا صفر */}
+            <MiniStat label="التكلفة التقديرية" value={data.ai.estimatedCost === null ? "غير متاح" : formatNumber(data.ai.estimatedCost)} tone="amber" />
           </Section>
 
           <div className="grid gap-4 lg:grid-cols-2">

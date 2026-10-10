@@ -11,22 +11,28 @@ function matchesCondition(value: any, cond: any): boolean {
   if (typeof cond !== "object" || Array.isArray(cond) || cond instanceof Date) {
     return value === cond;
   }
-  if ("not" in cond) return value !== cond.not;
-  if ("contains" in cond) {
-    const hay = String(value ?? "");
-    const needle = String(cond.contains);
-    return cond.mode === "insensitive"
-      ? hay.toLowerCase().includes(needle.toLowerCase())
-      : hay.includes(needle);
+  // Prisma semantics: multiple operators on one field are ANDed (e.g. gte+lt ranges).
+  let result = true;
+  for (const [op, arg] of Object.entries(cond)) {
+    if (op === "mode") continue; // modifier for contains, not an operator
+    if (op === "not") { result = result && (value ?? null) !== (arg ?? null); continue; }
+    if (op === "contains") {
+      const hay = String(value ?? "");
+      const needle = String(arg);
+      result = result && (cond.mode === "insensitive" ? hay.toLowerCase().includes(needle.toLowerCase()) : hay.includes(needle));
+      continue;
+    }
+    if (op === "gt") { result = result && value > arg; continue; }
+    if (op === "gte") { result = result && value >= arg; continue; }
+    if (op === "lt") { result = result && value < arg; continue; }
+    if (op === "lte") { result = result && value <= arg; continue; }
+    if (op === "equals") { result = result && value === arg; continue; }
+    if (op === "in") { result = result && arg.includes(value); continue; }
+    if (op === "notIn") { result = result && !arg.includes(value); continue; }
+    if (op === "hasSome") { result = result && (Array.isArray(value) ? value : []).some((v) => arg.includes(v)); continue; }
+    if (op === "hasEvery") { result = result && (Array.isArray(value) ? value : []).every((v) => arg.includes(v)); continue; }
   }
-  if ("gt" in cond) return value > cond.gt;
-  if ("gte" in cond) return value >= cond.gte;
-  if ("lt" in cond) return value < cond.lt;
-  if ("lte" in cond) return value <= cond.lte;
-  if ("gte" in cond) return value >= cond.gte;
-  if ("in" in cond) return cond.in.includes(value);
-  if ("notIn" in cond) return !cond.notIn.includes(value);
-  return false;
+  return result;
 }
 
 function matchesWhere(row: Row, where: Row | undefined): boolean {

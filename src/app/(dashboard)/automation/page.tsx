@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Plus, Power, Trash2, Workflow, Zap } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, label as enumLabel } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 
@@ -40,11 +42,21 @@ export default function AutomationPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<Automation | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/automations");
-    if (res.ok) setItems((await res.json()).items);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/automations");
+      if (!res.ok) throw new Error();
+      setItems((await res.json()).items);
+      setError(null);
+    } catch {
+      setError("تعذّر تحميل الأتمتة");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -85,17 +97,34 @@ export default function AutomationPage() {
   }
 
   async function toggle(automation: Automation) {
-    await fetch(`/api/automations/${automation.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: automation.isEnabled ? "disable" : "enable" }),
-    });
-    load();
+    setBusy(`toggle:${automation.id}`);
+    try {
+      const res = await fetch(`/api/automations/${automation.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: automation.isEnabled ? "disable" : "enable" }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
+      load();
+    }
   }
 
   async function remove(id: string) {
-    await fetch(`/api/automations/${id}`, { method: "DELETE" });
-    load();
+    setBusy(`delete:${id}`);
+    try {
+      const res = await fetch(`/api/automations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      setDeleteTarget(null);
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
+      load();
+    }
   }
 
   return (
@@ -119,7 +148,13 @@ export default function AutomationPage() {
         </div>
       )}
 
-      {!loading && (
+      {!loading && error && items.length === 0 && (
+        <GlassCard>
+          <ErrorState onRetry={load} />
+        </GlassCard>
+      )}
+
+      {!loading && !error && (
         <div className="space-y-2.5">
           {items.map((a) => {
             const last = a.executions[0];
@@ -133,21 +168,21 @@ export default function AutomationPage() {
                     <div className="min-w-0">
                       <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ink">
                         {a.name}
-                        <Badge tone="AI_ACTIVE">{a.trigger}</Badge>
+                        <Badge tone="AI_ACTIVE">{enumLabel(a.trigger)}</Badge>
                         {!a.isEnabled && <Badge tone="CLOSED">معطلة</Badge>}
                       </p>
                       <p className="num mt-1 text-xs text-ink-muted">
-                        {a.actions.map((ac) => ac.type).join("، ")} · أولوية {a.priority}
-                        {last && <> · آخر تنفيذ: {last.status}</>}
+                        {a.actions.map((ac) => enumLabel(ac.type)).join("، ")} · أولوية {a.priority}
+                        {last && <> · آخر تنفيذ: {enumLabel(last.status)}</>}
                       </p>
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    <Button size="sm" variant="secondary" onClick={() => toggle(a)}>
+                    <Button size="sm" variant="secondary" onClick={() => toggle(a)} disabled={busy !== null} loading={busy === `toggle:${a.id}`}>
                       <Power size={13} />
                       {a.isEnabled ? "تعطيل" : "تفعيل"}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => remove(a.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+                    <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(a)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
                       <Trash2 size={13} />
                       {t.common.delete}
                     </Button>
@@ -158,7 +193,7 @@ export default function AutomationPage() {
           })}
         </div>
       )}
-      {!loading && items.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<Zap size={28} strokeWidth={1.5} />}
@@ -176,7 +211,7 @@ export default function AutomationPage() {
           </Field>
           <Field label="الحدث المشغّل">
             <Select value={form.trigger} onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value }))}>
-              {TRIGGERS.map((trigger) => <option key={trigger} value={trigger}>{trigger}</option>)}
+              {TRIGGERS.map((trigger) => <option key={trigger} value={trigger}>{enumLabel(trigger)}</option>)}
             </Select>
           </Field>
           <Field label="شرط المحافظة" hint="اتركه فارغًا لتجاهل الشرط.">
@@ -193,10 +228,21 @@ export default function AutomationPage() {
           </Field>
           <div className="flex items-end justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>{t.common.cancel}</Button>
-            <Button type="submit" loading={creating}>{creating ? "جارٍ الإنشاء…" : "إنشاء"}</Button>
+            <Button type="submit" loading={creating}>إنشاء</Button>
           </div>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && void remove(deleteTarget.id)}
+        title={`حذف الأتمتة "${deleteTarget?.name ?? ""}"؟`}
+        body="لن تُنفَّذ هذه القاعدة التلقائية بعد الآن. سجل التنفيذ السابق يبقى محفوظًا."
+        confirmLabel="حذف نهائي"
+        busy={busy === `delete:${deleteTarget?.id}`}
+        danger
+      />
     </div>
   );
 }

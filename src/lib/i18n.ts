@@ -387,6 +387,49 @@ export const LABELS: Record<string, string> = {
   RUNNING: "جارٍ التنفيذ",
   SENT: "أُرسلت",
   SKIPPED: "متجاوزة",
+  // AI states
+  AI_ACTIVE: "الذكاء نشط",
+  AI_PAUSED: "الذكاء موقوف",
+  HUMAN_ACTIVE: "موظف يدير المحادثة",
+  // Workflow / automation statuses
+  DRAFT: "مسودة",
+  PUBLISHED: "منشور",
+  PAUSED: "متوقف مؤقتًا",
+  // Workflow execution / preview outcomes
+  WOULD_RUN: "سينفَّذ",
+  WOULD_WAIT: "سيدخل انتظارًا",
+  WOULD_SKIP: "سيتجاوز",
+  COMPLETED: "مكتمل",
+  // Workflow triggers
+  MESSAGE_RECEIVED: "عند رسالة جديدة",
+  CONVERSATION_CREATED: "عند إنشاء محادثة",
+  CONVERSATION_STATUS_CHANGED: "عند تغير حالة المحادثة",
+  CONVERSATION_ASSIGNED: "عند إسناد المحادثة",
+  HANDOFF_CREATED: "عند إنشاء تحويل",
+  CUSTOMER_TAGGED: "عند وسْم عميل",
+  CUSTOMER_CREATED: "عند إنشاء عميل",
+  ORDER_CREATED: "عند إنشاء طلب",
+  ORDER_CONFIRMED: "عند تأكيد طلب",
+  ORDER_CANCELLED: "عند إلغاء طلب",
+  ORDER_DELIVERED: "عند تسليم الطلب",
+  ORDER_STATUS_CHANGED_FROM_OMS: "عند تحديث حالة الطلب من OMS",
+  // Condition operators
+  EQ: "يساوي",
+  NEQ: "لا يساوي",
+  GT: "أكبر من",
+  GTE: "أكبر أو يساوي",
+  LT: "أصغر من",
+  LTE: "أصغر أو يساوي",
+  CONTAINS: "يحتوي",
+  NOT_CONTAINS: "لا يحتوي",
+  IN: "ضمن قائمة",
+  NOT_IN: "خارج قائمة",
+  EXISTS: "موجود",
+  NOT_EXISTS: "غير موجود",
+  // Sentiment
+  positive: "إيجابي",
+  negative: "سلبي",
+  neutral: "محايد",
 };
 
 export function label(v: string | null | undefined): string {

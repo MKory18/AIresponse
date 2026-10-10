@@ -85,7 +85,12 @@ export default function AIStudioPage() {
       if (res.ok) {
         const r = (await res.json()) as TestResult;
         setResults((prev) => ({ ...prev, [id]: r }));
+      } else {
+        // فشل صريح — لا اختفاء للاختبار بلا نتيجة
+        setResults((prev) => ({ ...prev, [id]: { provider: id, status: "failed", latencyMs: 0, detail: `فشل الاختبار (${res.status})` } }));
       }
+    } catch {
+      setResults((prev) => ({ ...prev, [id]: { provider: id, status: "failed", latencyMs: 0, detail: "تعذر الاتصال بالخادم" } }));
     } finally {
       setTesting(null);
     }
@@ -135,7 +140,10 @@ export default function AIStudioPage() {
               <div key={p.id} className="rounded-xl border border-line bg-surface-2/50 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <strong className="text-sm text-ink" dir="ltr">{p.id}</strong>
-                  <Badge tone={STATUS_TONE[shown] ?? "CLOSED"} dot>{STATUS_AR[shown] ?? shown}</Badge>
+                  <Badge tone={STATUS_TONE[shown] ?? "CLOSED"} dot>
+                    {STATUS_AR[shown] ?? shown}
+                    {r?.status !== shown && <span className="ms-1 font-normal text-[10px]">(حالة محفوظة — لم يُختبر حيًا)</span>}
+                  </Badge>
                 </div>
                 <p className="mt-1 truncate text-[11px] text-ink-muted" dir="ltr">{p.endpoint ?? "—"}</p>
                 {r && <p className="mt-1 text-[11px] text-ink-muted" dir="ltr">{r.detail} · {r.latencyMs}ms{r.model ? ` · ${r.model}` : ""}</p>}

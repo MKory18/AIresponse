@@ -52,6 +52,7 @@ type ProductOption = { id: string; name: string };
 export default function AIPlaygroundPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [personas, setPersonas] = useState<PersonaOption[]>([]);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
@@ -90,6 +91,7 @@ export default function AIPlaygroundPage() {
     const res = await fetch(`/api/ai/playground/sessions/${id}`);
     if (res.ok) {
       const data = await res.json();
+      sessionIdRef.current = data.session.id;
       setSessionId(data.session.id);
       setMessages(data.messages);
       setConfigDirty(false);
@@ -124,6 +126,7 @@ export default function AIPlaygroundPage() {
       return;
     }
     const session = await res.json();
+    sessionIdRef.current = session.id;
     setSessionId(session.id);
     setMessages([]);
     setConfigDirty(false);
@@ -137,6 +140,7 @@ export default function AIPlaygroundPage() {
       return;
     }
     await fetch(`/api/ai/playground/sessions/${sessionId}`, { method: "DELETE" });
+    sessionIdRef.current = null;
     setSessionId(null);
     setMessages([]);
     await newChat();
@@ -147,25 +151,13 @@ export default function AIPlaygroundPage() {
     if (!text || sending) return;
     let sid = sessionId;
     if (!sid) {
+      // جلسة واحدة فقط: استخدم نتيجة newChat بدل إنشاء جلسة ثانية بالتوازي
       await newChat();
-      // newChat sets state async — create inline instead for immediate send.
-      const res = await fetch("/api/ai/playground/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          personaId: personaId || null,
-          channelId: channelId || null,
-          productId: productId || null,
-          useKnowledge,
-          model: model.trim() || null,
-        }),
-      });
-      if (!res.ok) {
-        setError("فشل الإنشاء");
+      sid = sessionIdRef.current;
+      if (!sid) {
+        setError("فشل إنشاء جلسة — حاول مجددًا");
         return;
       }
-      sid = (await res.json()).id;
-      setSessionId(sid);
     }
     if (!sid) {
       setSending(false);

@@ -4,11 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GitBranch, PlayCircle, Plus, Send, Trash2, Upload, Eye, Square, PauseCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { label as enumLabel } from "@/lib/i18n";
 
 type Condition = { field: string; operator: string; value?: string | number | boolean | null };
 
@@ -105,11 +108,20 @@ export default function WorkflowsPage() {
   const [detail, setDetail] = useState<Workflow | null>(null);
   const [preview, setPreview] = useState<{ mode: string; conditionsMet: boolean; steps: PreviewStep[]; note?: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/workflows");
-    if (res.ok) setItems((await res.json()).items);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/workflows");
+      if (!res.ok) throw new Error();
+      setItems((await res.json()).items);
+      setError(null);
+    } catch {
+      setError("تعذّر تحميل سير العمل");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -198,13 +210,19 @@ export default function WorkflowsPage() {
 
   async function remove(id: string) {
     setBusy(`delete:${id}`);
-    const res = await fetch(`/api/workflows/${id}`, { method: "DELETE" });
-    setBusy(null);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.message ?? "فشل الحذف");
+    try {
+      const res = await fetch(`/api/workflows/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.message ?? "فشل الحذف");
+      }
+    } catch {
+      setError("فشل الحذف");
+    } finally {
+      setBusy(null);
+      setDeleteTarget(null);
+      load();
     }
-    load();
   }
 
   return (
@@ -228,6 +246,12 @@ export default function WorkflowsPage() {
         </div>
       )}
 
+      {!loading && error && items.length === 0 && (
+        <GlassCard>
+          <ErrorState onRetry={load} />
+        </GlassCard>
+      )}
+
       {!loading && (
         <div className="space-y-2.5">
           {items.map((wf) => (
@@ -240,12 +264,12 @@ export default function WorkflowsPage() {
                   <span className="block min-w-0">
                     <span className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ink">
                       {wf.name}
-                      <Badge tone={STATUS_TONE[wf.status] ?? "NORMAL"}>{wf.status}</Badge>
+                      <Badge tone={STATUS_TONE[wf.status] ?? "NORMAL"}>{enumLabel(wf.status)}</Badge>
                       <Badge tone="NORMAL">v{wf.version}</Badge>
                     </span>
                     <span className="num mt-1 block text-xs text-ink-muted">
-                      {wf.trigger} · {wf.actions?.length ?? 0} خطوة · {wf._count?.executions ?? 0} تنفيذ
-                      {wf.executions?.[0] && <> · آخر حالة: {wf.executions[0].status}</>}
+                      {enumLabel(wf.trigger)} · {wf.actions?.length ?? 0} خطوة · {wf._count?.executions ?? 0} تنفيذ
+                      {wf.executions?.[0] && <> · آخر حالة: {enumLabel(wf.executions[0].status)}</>}
                     </span>
                   </span>
                 </button>
@@ -269,7 +293,7 @@ export default function WorkflowsPage() {
                     </>
                   )}
                   {(!wf.isEnabled || wf.status !== "PUBLISHED") && (
-                    <Button size="sm" variant="ghost" onClick={() => remove(wf.id)} loading={busy === `delete:${wf.id}`} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+                    <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(wf)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
                       <Trash2 size={13} /> حذف
                     </Button>
                   )}
@@ -300,7 +324,7 @@ export default function WorkflowsPage() {
             </Field>
             <Field label="المشغّل">
               <Select value={trigger} onChange={(e) => setTrigger(e.target.value)}>
-                {TRIGGERS.map((tr) => <option key={tr} value={tr}>{tr}</option>)}
+                {TRIGGERS.map((tr) => <option key={tr} value={tr}>{enumLabel(tr)}</option>)}
               </Select>
             </Field>
           </div>
@@ -313,12 +337,12 @@ export default function WorkflowsPage() {
               </Button>
             </div>
             {conditions.map((c, i) => (
-              <div key={i} className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
+              <div key={i} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr_auto]">
                 <Select value={c.field} onChange={(e) => setConditions((arr) => arr.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))}>
                   {CONDITION_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </Select>
                 <Select value={c.operator} onChange={(e) => setConditions((arr) => arr.map((x, j) => (j === i ? { ...x, operator: e.target.value } : x)))}>
-                  {OPERATORS.map((op) => <option key={op} value={op}>{op}</option>)}
+                  {OPERATORS.map((op) => <option key={op} value={op}>{enumLabel(op)}</option>)}
                 </Select>
                 <Input value={String(c.value ?? "")} onChange={(e) => setConditions((arr) => arr.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} dir="ltr" />
                 <Button type="button" size="sm" variant="ghost" onClick={() => setConditions((arr) => arr.filter((_, j) => j !== i))}><Trash2 size={12} /></Button>
@@ -371,8 +395,8 @@ export default function WorkflowsPage() {
                 {s.type === "CHANGE_AI_STATE" && (
                   <Field label="الحالة الجديدة">
                     <Select value={s.aiState ?? "AI_ACTIVE"} onChange={(e) => setSteps((arr) => arr.map((x, j) => (j === i ? { ...x, aiState: e.target.value } : x)))}>
-                      <option value="AI_ACTIVE">AI_ACTIVE</option>
-                      <option value="AI_PAUSED">AI_PAUSED</option>
+                      <option value="AI_ACTIVE">الذكاء نشط</option>
+                      <option value="AI_PAUSED">الذكاء موقوف</option>
                     </Select>
                   </Field>
                 )}
@@ -393,7 +417,7 @@ export default function WorkflowsPage() {
           {(detail?.executions ?? []).map((ex) => (
             <div key={ex.id} className="rounded-xl border border-surface-3 p-3">
               <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-ink">
-                <Badge tone={STATUS_TONE[ex.status] ?? ex.status}>{ex.status}</Badge>
+                <Badge tone={STATUS_TONE[ex.status] ?? ex.status}>{enumLabel(ex.status)}</Badge>
                 <span className="num text-ink-muted">v{ex.version} · خطوة {ex.stepIndex}</span>
               </p>
               {ex.error && <p className="num mt-1 text-xs text-red-600 dark:text-red-400" dir="ltr">{ex.error}</p>}
@@ -417,13 +441,24 @@ export default function WorkflowsPage() {
             <div key={i} className="flex items-center justify-between rounded-xl border border-surface-3 px-3 py-2">
               <span className="num text-xs text-ink-muted" dir="ltr">{s.stepId} · {s.type}</span>
               <Badge tone={s.outcome === "WOULD_RUN" || s.outcome === "BRANCH_TAKEN" ? "CONNECTED" : s.outcome === "WOULD_WAIT" ? "PENDING" : "NORMAL"}>
-                {s.outcome}
+                {enumLabel(s.outcome)}
               </Badge>
             </div>
           ))}
           <p className="text-[11px] text-ink-subtle">{preview?.note}</p>
         </div>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && void remove(deleteTarget.id)}
+        title={`حذف سير العمل "${deleteTarget?.name ?? ""}"؟`}
+        body="سيُحذف تعريف سير العمل نهائيًا ولن يُنفَّذ بعد الآن. سجلات التنفيذ السابقة تبقى محفوظة."
+        confirmLabel="حذف نهائي"
+        busy={busy === `delete:${deleteTarget?.id}`}
+        danger
+      />
     </div>
   );
 }

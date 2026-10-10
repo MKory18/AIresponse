@@ -25,13 +25,16 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      // Non-JSON failure (proxy 502 HTML, network) must surface — not kill the form.
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data.message ?? data.error ?? "حدث خطأ غير متوقع");
+        setError(data?.message ?? data?.error ?? `تعذر ${mode === "login" ? "تسجيل الدخول" : "إنشاء الحساب"} (${res.status}) — حاول مجددًا`);
         return;
       }
       router.replace("/dashboard");
       router.refresh();
+    } catch {
+      setError("تعذر الاتصال بالخادم — تحقق من الشبكة وحاول مجددًا");
     } finally {
       setLoading(false);
     }
@@ -64,8 +67,8 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
               <Input name="workspaceName" required placeholder="اسم مساحة العمل / المتجر" className="h-10" minLength={2} aria-label="اسم مساحة العمل" />
             </>
           )}
-          <Input name="email" type="email" required placeholder="البريد الإلكتروني" dir="ltr" className="h-10" aria-label="البريد الإلكتروني" />
-          <Input name="password" type="password" required placeholder="كلمة المرور" dir="ltr" className="h-10" minLength={8} aria-label="كلمة المرور" />
+          <Input name="email" type="email" required placeholder="البريد الإلكتروني" dir="ltr" autoComplete="email" className="h-10" aria-label="البريد الإلكتروني" />
+          <Input name="password" type="password" required placeholder="كلمة المرور" dir="ltr" autoComplete={mode === "login" ? "current-password" : "new-password"} className="h-10" minLength={8} aria-label="كلمة المرور" />
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950 dark:text-red-400" role="alert">
               {error}

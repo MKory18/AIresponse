@@ -6,6 +6,7 @@ import { MultiChannelSection } from "./multi-channel-section";
 import { t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
@@ -37,23 +38,33 @@ export default function ChannelsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [confirmPageId, setConfirmPageId] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // أخطاء تظهر بخطورة حمراء، نجاحات بلون العلامة — لا خلط بينهما (P11).
+  const [messageIsError, setMessageIsError] = useState(false);
 
   const load = useCallback(async () => {
-    const [connRes, personaRes] = await Promise.all([
-      fetch("/api/channels/facebook"),
-      fetch("/api/personas"),
-    ]);
-    if (connRes.ok) {
-      const data = await connRes.json();
-      setConnections(data.connections);
-      setOauthConfigured(data.oauthConfigured);
+    try {
+      const [connRes, personaRes] = await Promise.all([
+        fetch("/api/channels/facebook"),
+        fetch("/api/personas"),
+      ]);
+      if (connRes.ok) {
+        const data = await connRes.json();
+        setConnections(data.connections);
+        setOauthConfigured(data.oauthConfigured);
+      } else {
+        setError("تعذّر تحميل القنوات المربوطة");
+      }
+      if (personaRes.ok) {
+        const data = await personaRes.json();
+        const list = (data.items ?? data.personas ?? []) as PersonaOption[];
+        setPersonas(list.map((p) => ({ id: p.id, name: p.name })));
+      }
+    } catch {
+      setError("تعذّر تحميل القنوات المربوطة");
+    } finally {
+      setLoading(false);
     }
-    if (personaRes.ok) {
-      const data = await personaRes.json();
-      const list = (data.items ?? data.personas ?? []) as PersonaOption[];
-      setPersonas(list.map((p) => ({ id: p.id, name: p.name })));
-    }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -89,10 +100,12 @@ export default function ChannelsPage() {
     if (res.ok) {
       setPendingPages([]);
       setSelectionToken(null);
+      setMessageIsError(false);
       setMessage("تم ربط الصفحة بنجاح.");
       load();
     } else {
       const data = await res.json().catch(() => ({}));
+      setMessageIsError(true);
       setMessage(data.message ?? "فشل ربط الصفحة");
     }
   }
@@ -105,8 +118,10 @@ export default function ChannelsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pageId }),
       });
+      setMessageIsError(!res.ok);
       setMessage(res.ok ? "تمت إزالة ربط الصفحة." : "تعذر إزالة ربط الصفحة — حاول مجددًا.");
     } catch {
+      setMessageIsError(true);
       setMessage("تعذر إزالة ربط الصفحة — حاول مجددًا.");
     } finally {
       setDisconnecting(false);
@@ -124,6 +139,7 @@ export default function ChannelsPage() {
       body: JSON.stringify({ pageId, aiPersonaId: aiPersonaId || null }),
     });
     setSavingPersona(null);
+    setMessageIsError(!res.ok);
     setMessage(res.ok ? "تم حفظ شخصية الذكاء الاصطناعي للصفحة." : "تعذّر حفظ الشخصية — تحقق من الصلاحيات وحاول مجددًا.");
     if (res.ok) load();
   }
@@ -136,15 +152,29 @@ export default function ChannelsPage() {
       body: JSON.stringify({ pageId }),
     });
     setTesting(null);
-    setMessage(res.ok ? "الاتصال سليم." : "فشل اختبار الاتصال");
+    setMessageIsError(!res.ok);
+    setMessage(res.ok ? "الاتصال سليم." : "فشل اختبار الاتصال — قد يكون التوكن منتهيًا أو الصفحة غير متاحة.");
   }
 
   return (
     <div className="page-wrap">
       <PageHeader title={t.pages.channelsTitle} description={t.pages.channelsDesc} />
       {message && (
-        <GlassCard level="glass-subtle" className="border-brand-500/20 px-4 py-2.5 text-sm font-medium text-brand-700 dark:text-brand-300">
+        <GlassCard
+          level="glass-subtle"
+          className={
+            messageIsError
+              ? "border-red-500/25 bg-red-500/[0.06] px-4 py-2.5 text-sm font-medium text-red-700 dark:text-red-300"
+              : "border-brand-500/20 px-4 py-2.5 text-sm font-medium text-brand-700 dark:text-brand-300"
+          }
+          role="status"
+        >
           {message}
+        </GlassCard>
+      )}
+      {error && !loading && (
+        <GlassCard>
+          <ErrorState onRetry={load} />
         </GlassCard>
       )}
 
@@ -155,7 +185,7 @@ export default function ChannelsPage() {
             <button
               key={p.id}
               onClick={() => selectPage(p.id)}
-              className="glass-subtle block w-full rounded-xl p-3 text-right text-sm font-medium text-ink transition hover:border-brand-400 hover:shadow-glass"
+              className="glass-subtle block w-full rounded-xl p-3 text-start text-sm font-medium text-ink transition hover:border-brand-400 hover:shadow-glass"
             >
               {p.name} <span className="num text-xs text-ink-subtle" dir="ltr">({p.id})</span>
             </button>
@@ -246,7 +276,7 @@ export default function ChannelsPage() {
           </div>
         </GlassCard>
       ))}
-      {!loading && connections.length === 0 && pendingPages.length === 0 && (
+      {!loading && !error && connections.length === 0 && pendingPages.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<Facebook size={28} strokeWidth={1.5} />}
@@ -255,30 +285,16 @@ export default function ChannelsPage() {
           />
         </GlassCard>
       )}
-      {confirmPageId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h2 className="text-base font-bold text-ink">إزالة ربط الصفحة؟</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              سيتم إيقاف اتصال هذه الصفحة بالنظام ولن يتم استقبال رسائل جديدة منها. لن يتم حذف المحادثات أو العملاء أو الطلبات السابقة.
-            </p>
-            <div className="mt-4 flex justify-start gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setConfirmPageId(null)} disabled={disconnecting}>
-                تراجع
-              </Button>
-              <Button
-                size="sm"
-                className="bg-red-600 text-white hover:bg-red-700"
-                onClick={() => disconnect(confirmPageId)}
-                loading={disconnecting}
-                disabled={disconnecting}
-              >
-                {disconnecting ? "جارٍ إزالة الربط…" : "إزالة الربط"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirmPageId !== null}
+        onClose={() => setConfirmPageId(null)}
+        onConfirm={() => confirmPageId && void disconnect(confirmPageId)}
+        title="إزالة ربط الصفحة؟"
+        body="سيتم إيقاف اتصال هذه الصفحة بالنظام ولن يتم استقبال رسائل جديدة منها. لن يتم حذف المحادثات أو العملاء أو الطلبات السابقة."
+        confirmLabel="إزالة الربط"
+        busy={disconnecting}
+        danger
+      />
     </div>
   );
 }

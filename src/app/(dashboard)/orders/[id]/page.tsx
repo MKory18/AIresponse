@@ -7,6 +7,7 @@ import { ArrowLeft, History, MapPin, Receipt, UserRound } from "lucide-react";
 import { label } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
@@ -46,6 +47,7 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/orders/${params.id}`);
@@ -61,6 +63,11 @@ export default function OrderDetailPage() {
   }, [load]);
 
   async function changeStatus(status: string) {
+    // الإلغاء قرار حساس — عبر نافذة تأكيد (P11)
+    if (status === "CANCELLED") {
+      setConfirmCancel(true);
+      return;
+    }
     setSaving(true);
     const res = await fetch(`/api/orders/${params.id}`, {
       method: "PATCH",
@@ -207,6 +214,32 @@ export default function OrderDetailPage() {
           </GlassCard>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={() => {
+          setConfirmCancel(false);
+          void (async () => {
+            setSaving(true);
+            const res = await fetch(`/api/orders/${params.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "CANCELLED" }),
+            });
+            setSaving(false);
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              setError(data.message ?? "انتقال غير مسموح");
+            }
+            load();
+          })();
+        }}
+        title={`إلغاء الطلب ${order.orderNumber}؟`}
+        body="سيُلغى الطلب نهائيًا وفق انتقالات الحالة المسموحة. لا يمكن التراجع من هذه الواجهة."
+        confirmLabel="إلغاء الطلب"
+        busy={saving}
+        danger
+      />
     </div>
   );
 }

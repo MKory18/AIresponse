@@ -34,7 +34,8 @@ export function MessageBubble({ message, onRetry }: { message: MessageItem; onRe
   }
 
   return (
-    <div className={cn("flex w-full animate-fade-in", outbound ? "justify-start" : "justify-end")}>
+    // RTL: رسالة الموظف الصادرة إلى اليسار (نهاية السطر) ورسالة العميل إلى اليمين — عرف تطبيقات المحادثة العربية
+    <div className={cn("flex w-full animate-fade-in", outbound ? "justify-end" : "justify-start")}>
       <div className={cn("max-w-[78%] sm:max-w-[62%]", outbound ? "bubble-out" : "bubble-in")}>
         {m.senderType === "AI" && !outbound && (
           <p className="mb-1 flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-300">

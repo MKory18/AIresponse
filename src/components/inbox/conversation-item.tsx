@@ -25,7 +25,8 @@ export function ConversationItem({
   return (
     <button
       onClick={() => onSelect(c.id)}
-      aria-current={selected ? "true" : undefined}
+      role="option"
+      aria-selected={selected}
       className={cn(
         "relative block w-full rounded-xl px-3 py-3 text-start transition-all duration-150",
         selected

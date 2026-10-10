@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
+import type { Permission } from "@/modules/rbac/permissions";
 import {
   getConversationAnalytics,
   getOrderAnalytics,
@@ -22,8 +23,11 @@ export const rangeQuerySchema = z.object({
 });
 
 /** Shared factory: validates the range server-side, scopes to the workspace. */
-export function analyticsRoute(fn: (db: typeof prisma, workspaceId: string, q: z.infer<typeof rangeQuerySchema>) => Promise<unknown>) {
-  return createHandler({ query: rangeQuerySchema, permission: "analytics.read" }, async ({ auth, query }) => {
+export function analyticsRoute(
+  fn: (db: typeof prisma, workspaceId: string, q: z.infer<typeof rangeQuerySchema>) => Promise<unknown>,
+  permission: Permission = "analytics.read"
+) {
+  return createHandler({ query: rangeQuerySchema, permission }, async ({ auth, query }) => {
     resolveRange(query);
     const data = await fn(prisma, auth!.workspaceId, query);
     return ok(data);

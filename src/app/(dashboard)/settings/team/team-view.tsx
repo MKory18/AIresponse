@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,6 +57,9 @@ export default function TeamView() {
   const [wsName, setWsName] = useState("");
   const [wsSaving, setWsSaving] = useState(false);
   const [wsMsg, setWsMsg] = useState<string | null>(null);
+  // تأكيدات العمليات الحساسة — بلا window.confirm الخام
+  const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<Member | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -102,10 +106,10 @@ export default function TeamView() {
   }
 
   async function remove(id: string) {
-    if (!window.confirm("إزالة هذا العضو من مساحة العمل؟")) return;
     setBusy(true);
     try {
       await api(`/api/workspaces/members/${id}`, "DELETE");
+      setRemoveTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "فشل الإزالة");
@@ -197,7 +201,10 @@ export default function TeamView() {
                         <Select
                           value={m.status}
                           disabled={busy || m.status === "INVITED"}
-                          onChange={(e) => change(m.id, { status: e.target.value })}
+                          onChange={(e) => {
+                            if (e.target.value === "SUSPENDED") setSuspendTarget(m);
+                            else void change(m.id, { status: e.target.value });
+                          }}
                           aria-label="الحالة"
                         >
                           <option value="ACTIVE">نشط</option>
@@ -206,7 +213,7 @@ export default function TeamView() {
                       </div>
                     </td>
                     <td>
-                      <Button size="sm" variant="danger" disabled={busy} onClick={() => remove(m.id)}>
+                      <Button size="sm" variant="danger" disabled={busy} onClick={() => setRemoveTarget(m)}>
                         <Trash2 size={13} /> إزالة
                       </Button>
                     </td>
@@ -252,6 +259,31 @@ export default function TeamView() {
           </Button>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => removeTarget && void remove(removeTarget.id)}
+        title={`إزالة العضو "${removeTarget?.user.name ?? ""}"؟`}
+        body="سيفقد هذا العضو الوصول إلى مساحة العمل فورًا. لا تُحذف بياناته أو سجل تدقيقه."
+        confirmLabel="إزالة العضو"
+        busy={busy}
+        danger
+      />
+      <ConfirmDialog
+        open={suspendTarget !== null}
+        onClose={() => setSuspendTarget(null)}
+        onConfirm={() => {
+          const target = suspendTarget;
+          setSuspendTarget(null);
+          target && void change(target.id, { status: "SUSPENDED" });
+        }}
+        title={`إيقاف وصول "${suspendTarget?.user.name ?? ""}"؟`}
+        body="لن يستطيع العضو استخدام المنصة حتى يُعاد تفعيله. الجلسة الحالية تُبطل."
+        confirmLabel="إيقاف العضو"
+        busy={busy}
+        danger
+      />
     </div>
   );
 }

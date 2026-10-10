@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { MessageCircle, Package, Plus, Star } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, formatNumber } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,6 +36,7 @@ export default function FeedbackPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<FeedbackItem | null>(null);
 
   useEffect(() => {
     fetch("/api/products?limit=100").then(async (res) => {
@@ -89,20 +91,31 @@ export default function FeedbackPage() {
   }
 
   async function setApproved(id: string, isApproved: boolean) {
-    await fetch(`/api/feedback/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isApproved }),
-    });
+    try {
+      const res = await fetch(`/api/feedback/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isApproved }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setError("فشل تحديث حالة الرأي");
+    }
     load();
   }
 
   async function archive(id: string) {
-    await fetch(`/api/feedback/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isArchived: true }),
-    });
+    try {
+      const res = await fetch(`/api/feedback/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isArchived: true }),
+      });
+      if (!res.ok) throw new Error();
+      setArchiveTarget(null);
+    } catch {
+      setError("فشل الأرشفة");
+    }
     load();
   }
 
@@ -190,7 +203,7 @@ export default function FeedbackPage() {
                 ) : (
                   <Button size="sm" variant="secondary" onClick={() => setApproved(f.id, false)}>إلغاء الاعتماد</Button>
                 )}
-                <Button size="sm" variant="ghost" onClick={() => archive(f.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">أرشفة</Button>
+                <Button size="sm" variant="ghost" onClick={() => setArchiveTarget(f)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">أرشفة</Button>
               </div>
             </GlassCard>
           ))}
@@ -223,10 +236,20 @@ export default function FeedbackPage() {
           </Field>
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button type="button" variant="ghost" onClick={() => setShowCreate(false)}>{t.common.cancel}</Button>
-            <Button type="submit" loading={creating}>{creating ? "جارٍ الإضافة…" : "إضافة"}</Button>
+            <Button type="submit" loading={creating}>إضافة</Button>
           </div>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={archiveTarget !== null}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={() => archiveTarget && void archive(archiveTarget.id)}
+        title="أرشفة هذا الرأي؟"
+        body="سيختفي من قوائم الآراء المعروضة. يمكن الرجوع عنه من قاعدة البيانات فقط."
+        confirmLabel="أرشفة"
+        danger
+      />
     </div>
   );
 }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
-/** Accessible modal dialog: focusable close, ESC to dismiss, overlay click closes. */
+/** Accessible modal dialog: focus trap + restore, ESC to dismiss, overlay click closes. */
 export function Dialog({
   open,
   onClose,
@@ -19,14 +19,43 @@ export function Dialog({
   children: React.ReactNode;
   className?: string;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    // Focus trap: keep Tab inside the dialog, restore focus on close.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusables = () =>
+      Array.from(
+        panel?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      ).filter((el) => !el.hasAttribute("disabled"));
+    focusables()[0]?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const list = focusables();
+      if (list.length === 0) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", trap);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", trap);
       document.body.style.overflow = "";
+      previouslyFocused?.focus?.();
     };
   }, [open, onClose]);
 
@@ -34,7 +63,7 @@ export function Dialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={onClose} aria-hidden />
-      <div className={cn("glass-strong animate-scale-in relative z-10 max-h-[85vh] w-full max-w-lg overflow-hidden rounded-2xl", className)}>
+      <div ref={panelRef} className={cn("glass-strong animate-scale-in relative z-10 max-h-[85vh] w-full max-w-lg overflow-hidden rounded-2xl", className)}>
         <div className="flex items-center justify-between border-b border-line/70 px-5 py-3.5">
           <h2 className="text-sm font-bold text-ink">{title}</h2>
           <button onClick={onClose} aria-label={t.a11y.closePanel} className="rounded-lg p-1.5 text-ink-subtle transition hover:bg-surface-3 hover:text-ink">
@@ -47,7 +76,7 @@ export function Dialog({
   );
 }
 
-/** Side drawer (used for mobile sidebar + customer panel on small screens). */
+/** Side drawer (mobile sidebar + customer panel on small screens). */
 export function Drawer({
   open,
   onClose,
@@ -55,6 +84,7 @@ export function Drawer({
   title,
   children,
   className,
+  until = "lg",
 }: {
   open: boolean;
   onClose: () => void;
@@ -62,6 +92,8 @@ export function Drawer({
   title?: string;
   children: React.ReactNode;
   className?: string;
+  /** Hidden at this breakpoint and up (defaults to lg). */
+  until?: "lg" | "xl";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -72,7 +104,7 @@ export function Drawer({
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 lg:hidden">
+    <div className={cn("fixed inset-0 z-50", until === "xl" ? "xl:hidden" : "lg:hidden")}>
       <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={onClose} aria-hidden />
       <div
         role="dialog"

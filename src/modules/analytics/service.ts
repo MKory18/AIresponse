@@ -27,7 +27,7 @@ export async function getOverview(db: DbClient, workspaceId: string, q: RangeQue
   const { start, end } = resolveRange(q);
   const range = { gte: start, lt: end };
 
-  const [conversationsTotal, conversationsActive, conversationsResolved, inbound, outbound, aiLogs, orders, handoffs, automations] =
+  const [conversationsTotal, conversationsActive, conversationsResolved, inbound, outbound, aiLogs, orders, handoffs, automations, customersNew, customersTotal] =
     await Promise.all([
       db.conversation.count({ where: { workspaceId, createdAt: range } }),
       db.conversation.count({ where: { workspaceId, status: "OPEN" } }),
@@ -50,10 +50,15 @@ export async function getOverview(db: DbClient, workspaceId: string, q: RangeQue
         where: { workspaceId, startedAt: range },
         select: { status: true },
       }),
+      // P10 — عملاء حقيقيون (كانت البطاقة تستنسخ عدد المحادثات — placeholder).
+      db.customer.count({ where: { workspaceId, createdAt: range } }),
+      db.customer.count({ where: { workspaceId } }),
     ]);
 
   const aiTokens = aiLogs.reduce((s, l) => s + l.promptTokens + l.completionTokens, 0);
-  const aiCost = aiLogs.reduce((s, l) => s + (l.costUsd ?? 0), 0);
+  const knownCosts = aiLogs.filter((l) => l.costUsd !== null);
+  // دلالة التكلفة: null = لا تسعير معروف (وليست صفرًا حقيقيًا) — مطابقة getAIAnalytics.
+  const aiCost = knownCosts.length ? knownCosts.reduce((s, l) => s + (l.costUsd ?? 0), 0) : aiLogs.length ? null : 0;
   const orderCount = (statuses: string[]) => orders.filter((o) => statuses.includes(o.status)).length;
   const revenue = (statuses: string[]) =>
     orders.filter((o) => statuses.includes(o.status)).reduce((s, o) => s + Number(o.total), 0);
@@ -65,6 +70,10 @@ export async function getOverview(db: DbClient, workspaceId: string, q: RangeQue
       total: conversationsTotal,
       active: conversationsActive,
       resolved: conversationsResolved,
+    },
+    customers: {
+      newInRange: customersNew, // P10 — عملاء جدد حقيقيون (بديل الـ placeholder)
+      total: customersTotal,
     },
     messages: { inbound, outbound },
     orders: {
@@ -81,6 +90,7 @@ export async function getOverview(db: DbClient, workspaceId: string, q: RangeQue
       calls: aiLogs.length,
       failed: aiLogs.filter((l) => !l.success).length,
       tokens: aiTokens,
+      // null = لا تسعير معروف — الواجهة تعرض "غير متاح" لا صفر
       estimatedCost: aiCost,
     },
     handoffs: {

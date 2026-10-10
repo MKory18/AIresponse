@@ -5,6 +5,7 @@ import { Pencil, Play, Plus, Power, UserRound } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,11 +55,21 @@ export default function PersonasPage() {
   const [loading, setLoading] = useState(true);
   const [versions, setVersions] = useState<Record<string, PersonaVersionRow[]>>({});
   const [versionsError, setVersionsError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<{ personaId: string; version: number; name: string } | null>(null);
+  const [versionBusy, setVersionBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/personas");
-    if (res.ok) setPersonas((await res.json()).items);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/personas");
+      if (!res.ok) throw new Error();
+      setPersonas((await res.json()).items);
+      setError(null);
+    } catch {
+      setError("تعذّر تحميل الشخصيات");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -141,19 +152,34 @@ export default function PersonasPage() {
   }
 
   async function publish(personaId: string, version: number) {
-    const res = await fetch(`/api/personas/${personaId}/versions/${version}/publish`, { method: "POST" });
-    if (res.ok) {
+    setVersionBusy(`publish:${personaId}:${version}`);
+    try {
+      const res = await fetch(`/api/personas/${personaId}/versions/${version}/publish`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      setVersionsError(null);
       load();
       loadVersions(personaId);
-    } else setVersionsError("فشل النشر");
+    } catch {
+      setVersionsError("فشل النشر");
+    } finally {
+      setVersionBusy(null);
+    }
   }
 
   async function rollback(personaId: string, version: number) {
-    const res = await fetch(`/api/personas/${personaId}/versions/${version}/rollback`, { method: "POST" });
-    if (res.ok) {
+    setVersionBusy(`rollback:${personaId}:${version}`);
+    try {
+      const res = await fetch(`/api/personas/${personaId}/versions/${version}/rollback`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      setRollbackTarget(null);
+      setVersionsError(null);
       load();
       loadVersions(personaId);
-    } else setVersionsError("فشل الرجوع");
+    } catch {
+      setVersionsError("فشل الرجوع");
+    } finally {
+      setVersionBusy(null);
+    }
   }
 
   async function runPreview() {
@@ -200,10 +226,17 @@ export default function PersonasPage() {
         </div>
       )}
 
-      {!loading && (
+      {!loading && error && (
+        <GlassCard>
+          <ErrorState onRetry={load} />
+        </GlassCard>
+      )}
+
+      {!loading && !error && (
         <div className="space-y-2.5">
           {personas.map((p) => (
-            <GlassCard key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
+            <div key={p.id} className="space-y-2.5">
+              <GlassCard className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
               <div className="flex min-w-0 items-start gap-2.5">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/20 to-brand-500/20 text-brand-600 dark:text-brand-300">
                   <UserRound size={18} />
@@ -236,10 +269,8 @@ export default function PersonasPage() {
                 </Button>
               </div>
             </GlassCard>
-          ))}
-          {personas.map((p) =>
-            versions[p.id] ? (
-              <GlassCard key={`${p.id}-versions`} className="p-4">
+            {versions[p.id] && (
+              <GlassCard className="p-4">
                 <h3 className="text-xs font-bold text-ink">إصدارات {p.name} — النشر صريح والرجوع متاح (اختبر المسودة في Playground قبل النشر)</h3>
                 {versionsError && <p className="mt-1 text-xs text-red-600">{versionsError}</p>}
                 <div className="mt-2 space-y-1.5">
@@ -247,19 +278,20 @@ export default function PersonasPage() {
                     <div key={v.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-2/60 px-3 py-2 text-xs">
                       <span className="text-ink">v{v.version} · {v.status} · {v.name}</span>
                       <span className="flex gap-1.5">
-                        {v.status === "DRAFT" && <Button size="sm" variant="secondary" onClick={() => publish(p.id, v.version)}>نشر</Button>}
-                        {(v.status === "PUBLISHED" || v.status === "ROLLED_BACK") && <Button size="sm" variant="ghost" onClick={() => rollback(p.id, v.version)}>رجوع لهذا</Button>}
+                        {v.status === "DRAFT" && <Button size="sm" variant="secondary" disabled={versionBusy !== null} loading={versionBusy === `publish:${p.id}:${v.version}`} onClick={() => publish(p.id, v.version)}>نشر</Button>}
+                        {(v.status === "PUBLISHED" || v.status === "ROLLED_BACK") && <Button size="sm" variant="ghost" disabled={versionBusy !== null} onClick={() => setRollbackTarget({ personaId: p.id, version: v.version, name: p.name })}>رجوع لهذا</Button>}
                       </span>
                     </div>
                   ))}
                   {(versions[p.id] ?? []).length === 0 && <p className="text-xs text-ink-muted">لا مسودات بعد — أنشئ مسودة من التعليمات الحالية.</p>}
                 </div>
               </GlassCard>
-            ) : null
-          )}
+            )}
+            </div>
+          ))}
         </div>
       )}
-      {!loading && personas.length === 0 && (
+      {!loading && !error && personas.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<UserRound size={28} strokeWidth={1.5} />}
@@ -347,6 +379,17 @@ export default function PersonasPage() {
           </div>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={rollbackTarget !== null}
+        onClose={() => setRollbackTarget(null)}
+        onConfirm={() => rollbackTarget && void rollback(rollbackTarget.personaId, rollbackTarget.version)}
+        title={`الرجوع إلى الإصدار v${rollbackTarget?.version ?? ""} من "${rollbackTarget?.name ?? ""}"؟`}
+        body="سيتغير سلوك المساعد الحي في كل القنوات المرتبطة بهذه الشخصية فورًا. النسخة الحالية تبقى كإصدار قابل للاستعادة."
+        confirmLabel="الرجوع لهذا الإصدار"
+        busy={rollbackTarget ? versionBusy === `rollback:${rollbackTarget.personaId}:${rollbackTarget.version}` : false}
+        danger
+      />
     </div>
   );
 }

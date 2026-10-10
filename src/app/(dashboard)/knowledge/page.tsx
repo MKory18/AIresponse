@@ -1,13 +1,15 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, FlaskConical, MessageCircleQuestion, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { BookOpen, FlaskConical, MessageCircleQuestion, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type Doc = {
@@ -415,80 +417,58 @@ export default function KnowledgePage() {
         </div>
       </GlassCard>
 
-      {/* Edit modal */}
-      {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-lg space-y-3 rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-ink">{t.knowledge.edit}</h2>
-              <button onClick={() => setEditing(null)} aria-label={t.common.close} className="rounded-xl p-1.5 text-ink-muted hover:bg-surface-3">
-                <X size={16} />
-              </button>
-            </div>
-            <Field label="عنوان المستند">
-              <Input value={editForm.title} onChange={(e) => setEditForm((s) => ({ ...s, title: e.target.value }))} />
-            </Field>
-            <Field label="التصنيف">
-              <Select value={editForm.category} onChange={(e) => setEditForm((s) => ({ ...s, category: e.target.value }))}>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="نص جديد (اتركه فارغًا للإبقاء على النص الحالي — التعديل يعيد الفهرسة)">
-              <Textarea value={editForm.content} onChange={(e) => setEditForm((s) => ({ ...s, content: e.target.value }))} rows={5} />
-            </Field>
-            <div className="flex justify-start gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setEditing(null)}>{t.common.cancel}</Button>
-              <Button size="sm" variant="primary" loading={savingEdit} disabled={savingEdit || !editForm.title.trim()} onClick={saveEdit}>{t.knowledge.save}</Button>
-            </div>
+      {/* Edit modal — shared Dialog (focus trap + ESC + scroll lock) */}
+      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={t.knowledge.edit} className="max-w-lg">
+        <div className="space-y-3">
+          <Field label="عنوان المستند">
+            <Input value={editForm.title} onChange={(e) => setEditForm((s) => ({ ...s, title: e.target.value }))} />
+          </Field>
+          <Field label="التصنيف">
+            <Select value={editForm.category} onChange={(e) => setEditForm((s) => ({ ...s, category: e.target.value }))}>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="نص جديد (اتركه فارغًا للإبقاء على النص الحالي — التعديل يعيد الفهرسة)">
+            <Textarea value={editForm.content} onChange={(e) => setEditForm((s) => ({ ...s, content: e.target.value }))} rows={5} />
+          </Field>
+          <div className="flex justify-start gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setEditing(null)}>{t.common.cancel}</Button>
+            <Button size="sm" variant="primary" loading={savingEdit} disabled={savingEdit || !editForm.title.trim()} onClick={saveEdit}>{t.knowledge.save}</Button>
           </div>
         </div>
-      )}
+      </Dialog>
 
       {/* Delete confirm */}
-      {deleting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <h2 className="text-base font-bold text-ink">{t.knowledge.delete}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.knowledge.deleteConfirm}</p>
-            <div className="mt-4 flex justify-start gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setDeleting(null)}>{t.common.cancel}</Button>
-              <Button size="sm" variant="danger" onClick={confirmDelete}>
-                <Trash2 size={13} />
-                {t.knowledge.delete}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        onConfirm={confirmDelete}
+        title={t.knowledge.delete}
+        body={t.knowledge.deleteConfirm}
+        confirmLabel={t.knowledge.delete}
+        danger
+      />
 
       {/* Detail modal */}
-      {detail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
-          <div className="max-h-[85vh] w-full max-w-2xl space-y-3 overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
-            <div className="flex items-center justify-between">
-              <h2 className="truncate text-base font-bold text-ink">{detail.doc.title}</h2>
-              <button onClick={() => setDetail(null)} aria-label={t.common.close} className="rounded-xl p-1.5 text-ink-muted hover:bg-surface-3">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Badge tone={DOC_TONE[detail.doc.status]} dot>{statusLabel(detail.doc.status)}</Badge>
-              <Badge>{label(detail.doc.category) ?? detail.doc.category}</Badge>
-            </div>
-            <div className="space-y-2">
-              {detail.chunks.map((c) => (
-                <div key={c.id} className="glass-subtle rounded-xl p-3">
-                  <p className="num mb-1 text-[10px] font-bold text-ink-subtle">#{c.chunkIndex + 1}</p>
-                  <p className="whitespace-pre-wrap text-xs leading-relaxed text-ink">{c.content}</p>
-                </div>
-              ))}
-              {detail.chunks.length === 0 && <p className="text-sm text-ink-muted">{t.knowledge.noResults}</p>}
-            </div>
+      <Dialog open={detail !== null} onClose={() => setDetail(null)} title={detail?.doc.title ?? ""} className="max-w-2xl">
+        <div className="space-y-3">
+          <div className="flex items-center gap-1.5">
+            <Badge tone={DOC_TONE[detail?.doc.status ?? ""]} dot>{statusLabel(detail?.doc.status ?? "")}</Badge>
+            <Badge>{label(detail?.doc.category ?? "") ?? detail?.doc.category}</Badge>
+          </div>
+          <div className="space-y-2">
+            {(detail?.chunks ?? []).map((c) => (
+              <div key={c.id} className="glass-subtle rounded-xl p-3">
+                <p className="num mb-1 text-[10px] font-bold text-ink-subtle">#{c.chunkIndex + 1}</p>
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-ink">{c.content}</p>
+              </div>
+            ))}
+            {(detail?.chunks ?? []).length === 0 && <p className="text-sm text-ink-muted">{t.knowledge.noResults}</p>}
           </div>
         </div>
-      )}
+      </Dialog>
 
     </div>
   );

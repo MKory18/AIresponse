@@ -5,9 +5,11 @@ import { Clock } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type FollowUp = {
@@ -27,13 +29,24 @@ export default function FollowUpsPage() {
   const [items, setItems] = useState<FollowUp[]>([]);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<FollowUp | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
-    const res = await fetch(`/api/follow-ups?${params}`);
-    if (res.ok) setItems((await res.json()).items);
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/follow-ups?${params}`);
+      if (!res.ok) throw new Error();
+      setItems((await res.json()).items);
+      setError(null);
+    } catch {
+      setError(t.states.error);
+    } finally {
+      setLoading(false);
+    }
   }, [status]);
 
   useEffect(() => {
@@ -41,8 +54,17 @@ export default function FollowUpsPage() {
   }, [load]);
 
   async function cancel(id: string) {
-    await fetch(`/api/follow-ups/${id}/cancel`, { method: "POST" });
-    load();
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/follow-ups/${id}/cancel`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      setCancelTarget(null);
+      load();
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setCancelling(false);
+    }
   }
 
   return (
@@ -61,7 +83,12 @@ export default function FollowUpsPage() {
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}
         </div>
       )}
-      {!loading && (
+      {error && !loading && (
+        <GlassCard>
+          <ErrorState onRetry={load} />
+        </GlassCard>
+      )}
+      {!loading && !error && (
         <div className="space-y-2.5">
           {items.map((f) => (
             <GlassCard key={f.id} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
@@ -80,14 +107,14 @@ export default function FollowUpsPage() {
               <div className="flex items-center gap-2">
                 <StatusBadge value={f.status} dot />
                 {f.status === "SCHEDULED" && (
-                  <Button size="sm" variant="ghost" onClick={() => cancel(f.id)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">{t.common.cancel}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setCancelTarget(f)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">{t.common.cancel}</Button>
                 )}
               </div>
             </GlassCard>
           ))}
         </div>
       )}
-      {!loading && items.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<Clock size={28} strokeWidth={1.5} />}
@@ -96,6 +123,16 @@ export default function FollowUpsPage() {
           />
         </GlassCard>
       )}
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => cancelTarget && void cancel(cancelTarget.id)}
+        title="إلغاء المتابعة المجدولة؟"
+        body="لن تُرسل هذه الرسالة المجدولة إلى العميل. لا يمكن التراجع."
+        confirmLabel={t.common.cancel}
+        busy={cancelling}
+        danger
+      />
     </div>
   );
 }

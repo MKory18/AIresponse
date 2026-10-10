@@ -30,7 +30,8 @@ export function timezoneOffsetMinutes(timezone: string, instant: Date): number {
       Number(parts.year), Number(parts.month) - 1, Number(parts.day),
       Number(parts.hour === "24" ? "0" : parts.hour), Number(parts.minute), Number(parts.second)
     );
-    return (asUTC - instant.getTime()) / 60_000;
+    // Offsets are whole minutes in real zones — round to kill sub-minute drift.
+    return Math.round((asUTC - instant.getTime()) / 60_000);
   } catch {
     return 0; // unknown timezone → UTC
   }

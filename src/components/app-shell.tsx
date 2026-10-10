@@ -111,7 +111,7 @@ export function AppShell({
                 className="relative rounded-xl p-2 text-ink-muted transition hover:bg-surface-3 hover:text-ink"
               >
                 <Bell size={18} />
-                <span aria-hidden className="absolute end-2 top-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-surface-2" />
+                {/* لا نقطة زائفة: العدد الفعلي يظهر داخل صفحة التحويلات نفسها */}
               </Link>
               <ThemeToggle />
               <span className="hidden items-center gap-2 rounded-xl border border-line/70 bg-surface-2/70 py-1 pe-3 ps-1 backdrop-blur sm:inline-flex">
