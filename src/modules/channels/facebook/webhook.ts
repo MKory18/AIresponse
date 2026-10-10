@@ -1,6 +1,10 @@
 import { enqueueJob } from "@/modules/jobs/service";
 import { childLogger } from "@/core/logger";
-import { deriveEventId, normalizeFacebookWebhook } from "./normalizer";
+import { deriveEventId } from "./normalizer";
+import { normalizeFeedComments } from "./comments";
+import { FacebookChannelAdapter } from "./adapter";
+import { getChannelAdapter } from "../registry";
+import { ChannelNotSupportedError } from "../types";
 import type { Db } from "@/modules/customers/service";
 
 const log = childLogger("webhooks.meta");
@@ -91,7 +95,43 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
     data: { lastWebhookAt: new Date() },
   });
 
-  const normalized = normalizeFacebookWebhook(payload as never, account.id, pageId, externalEventId);
+  // P1.1: normalization resolves through the channel registry — the real
+  // Facebook adapter. receiveNative delegates to normalizeFacebookWebhook
+  // (same function, same args, same output); only the resolution path is
+  // new. A non-Facebook resolution here is a configuration fault and throws
+  // instead of silently normalizing through the wrong path.
+  const adapter = getChannelAdapter("FACEBOOK", {
+    facebook: { pageId, channelAccountId: account.id },
+  });
+  if (!(adapter instanceof FacebookChannelAdapter)) {
+    throw new ChannelNotSupportedError("FACEBOOK");
+  }
+  const normalized = adapter.receiveNative(payload, externalEventId);
+
+  // P5-A: feed comments ride the same POST. They are persisted (deduplicated
+  // by comment id) for operator moderation — never auto-processed, never
+  // auto-replied, never merged into conversations (no trustworthy join key).
+  let commentCount = 0;
+  for (const comment of normalizeFeedComments(payload)) {
+    try {
+      await db.webhookEvent.create({
+        data: {
+          workspaceId,
+          channelType: "FACEBOOK",
+          externalEventId: `fb-comment:${comment.commentId}`,
+          source: "meta-comments",
+          payload: JSON.parse(JSON.stringify(comment)) as never,
+        },
+      });
+      commentCount += 1;
+    } catch (err) {
+      if ((err as { code?: string })?.code !== "P2002") throw err;
+    }
+  }
+  if (commentCount > 0) {
+    log.info({ pageId, commentCount }, "facebook.comments.persisted");
+  }
+
   if (normalized.length > 0) {
     await enqueueJob(db, {
       workspaceId,

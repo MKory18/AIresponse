@@ -8,7 +8,7 @@ import { setSessionCookie } from "@/modules/auth/session";
 import { createWorkspaceForUser } from "@/modules/workspaces/service";
 
 export const POST = createHandler(
-  { body: registerSchema, public: true, rateLimit: { limit: 5, windowMs: 60_000 } },
+  { body: registerSchema, public: true, rateLimit: { limit: 5, windowMs: 60_000 }, rateLimitStrict: true },
   async ({ body }) => {
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
     if (existing) throw new ConflictError("An account with this email already exists");

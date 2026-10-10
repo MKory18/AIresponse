@@ -71,13 +71,19 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }
     const env = getEnv();
     if (!env.OPENAI_API_KEY) throw new AIError("OPENAI_API_KEY is not configured");
+    // P1 privacy: RAG queries carry raw customer turns and KB chunks may
+    // carry contact details — strip phone/email shapes before the external
+    // call. Applied here (single choke point) so index-time and query-time
+    // vectors stay consistent with each other.
+    const { scrubForEmbedding } = await import("@/modules/ai/privacy-gate");
+    const safeInput = scrubForEmbedding(text);
     const res = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({ model: this.model, input: text }),
+      body: JSON.stringify({ model: this.model, input: safeInput }),
     });
     if (!res.ok) {
       throw new AIError(`Embedding request failed with status ${res.status}`);

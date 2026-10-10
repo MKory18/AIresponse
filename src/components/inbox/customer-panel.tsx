@@ -46,6 +46,11 @@ export function CustomerPanel({
           )}
           <div className="mt-2 flex justify-center gap-1.5">
             <StatusBadge value={customer.status} dot />
+            {customer.isBlacklisted && (
+              <Badge tone="FAILED" dot>
+                قائمة سوداء{customer.blacklistSource ? ` · ${customer.blacklistSource}` : ""}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -53,6 +58,7 @@ export function CustomerPanel({
       {/* Contact info */}
       <GlassCard level="glass-subtle" className="space-y-2 p-3.5 text-xs">
         <p className="section-title">{t.customer.panelTitle}</p>
+        {customer.email && <Row text={`البريد الإلكتروني: ${customer.email}`} />}
         {customer.province && <Row icon={<MapPin size={12} className="shrink-0 text-ink-subtle" />} text={`${t.customer.province}: ${customer.province}`} />}
         {customer.address && <Row text={`${t.customer.address}: ${customer.address}`} />}
         {customer.conversations.length > 0 && (
@@ -102,6 +108,11 @@ export function CustomerPanel({
                 <span className="num text-ink-muted">{formatNumber(o.total)}</span>
               </div>
             ))}
+            {customer.orders.some((o) => o.adSource) && (
+              <p className="px-2 pt-1 text-[10px] text-ink-subtle">
+                مصدر الاكتساب: {customer.orders.map((o) => o.adSource).find(Boolean)}
+              </p>
+            )}
           </div>
         )}
       </GlassCard>

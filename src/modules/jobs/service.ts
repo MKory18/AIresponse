@@ -13,6 +13,7 @@ export const JOB_TYPES = [
   "process_ai_message",
   "generate_summary",
   "process_webhook_event",
+  "process_channel_inbound",
   "evaluate_automation",
   "process_due_followups",
   "aggregate_workspace_analytics",

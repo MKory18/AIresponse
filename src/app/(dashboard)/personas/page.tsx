@@ -25,6 +25,16 @@ type Persona = {
   prohibitedPhrases: string[];
   customRules: string[];
   isActive: boolean;
+  version: number;
+};
+
+type PersonaVersionRow = {
+  id: string;
+  version: number;
+  name: string;
+  status: string;
+  systemInstructions: string | null;
+  createdAt: string;
 };
 
 const EMPTY = {
@@ -42,6 +52,8 @@ export default function PersonasPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [versions, setVersions] = useState<Record<string, PersonaVersionRow[]>>({});
+  const [versionsError, setVersionsError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/personas");
@@ -111,6 +123,39 @@ export default function PersonasPage() {
     load();
   }
 
+  async function loadVersions(personaId: string) {
+    const res = await fetch(`/api/personas/${personaId}/versions`);
+    if (res.ok) {
+      const data = (await res.json()) as { items?: PersonaVersionRow[] };
+      setVersions((prev) => ({ ...prev, [personaId]: data.items ?? [] }));
+      setVersionsError(null);
+    } else {
+      setVersionsError("فشل تحميل الإصدارات");
+    }
+  }
+
+  async function snapshot(personaId: string) {
+    const res = await fetch(`/api/personas/${personaId}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (res.ok) loadVersions(personaId);
+    else setVersionsError("فشل إنشاء المسودة");
+  }
+
+  async function publish(personaId: string, version: number) {
+    const res = await fetch(`/api/personas/${personaId}/versions/${version}/publish`, { method: "POST" });
+    if (res.ok) {
+      load();
+      loadVersions(personaId);
+    } else setVersionsError("فشل النشر");
+  }
+
+  async function rollback(personaId: string, version: number) {
+    const res = await fetch(`/api/personas/${personaId}/versions/${version}/rollback`, { method: "POST" });
+    if (res.ok) {
+      load();
+      loadVersions(personaId);
+    } else setVersionsError("فشل الرجوع");
+  }
+
   async function runPreview() {
     // Preview: runs the orchestrator in dry-run against the active persona and
     // the demo conversation — nothing is ever sent to Facebook.
@@ -167,13 +212,14 @@ export default function PersonasPage() {
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ink">
                     {p.name}
                     {p.isActive && <Badge tone="DELIVERED" dot>نشطة</Badge>}
+                    <span className="num text-[11px] font-medium text-ink-muted">v{p.version ?? 1}</span>
                   </p>
                   <p className="num mt-1 text-xs text-ink-muted">
                     {p.language}{p.dialect ? ` — ${p.dialect}` : ""} · {p.tone} · {p.responseLength} · إيموجي {p.emojiLevel}/5 · {p.salesStyle}
                   </p>
                 </div>
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {!p.isActive && (
                   <Button size="sm" variant="success" onClick={() => activate(p)}>
                     <Power size={13} /> تفعيل
@@ -182,9 +228,35 @@ export default function PersonasPage() {
                 <Button size="sm" variant="secondary" onClick={() => startEdit(p)}>
                   <Pencil size={13} /> {t.common.edit}
                 </Button>
+                <Button size="sm" variant="ghost" onClick={() => loadVersions(p.id)}>
+                  الإصدارات
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => snapshot(p.id)}>
+                  مسودة من الحالية
+                </Button>
               </div>
             </GlassCard>
           ))}
+          {personas.map((p) =>
+            versions[p.id] ? (
+              <GlassCard key={`${p.id}-versions`} className="p-4">
+                <h3 className="text-xs font-bold text-ink">إصدارات {p.name} — النشر صريح والرجوع متاح (اختبر المسودة في Playground قبل النشر)</h3>
+                {versionsError && <p className="mt-1 text-xs text-red-600">{versionsError}</p>}
+                <div className="mt-2 space-y-1.5">
+                  {(versions[p.id] ?? []).map((v) => (
+                    <div key={v.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-2/60 px-3 py-2 text-xs">
+                      <span className="text-ink">v{v.version} · {v.status} · {v.name}</span>
+                      <span className="flex gap-1.5">
+                        {v.status === "DRAFT" && <Button size="sm" variant="secondary" onClick={() => publish(p.id, v.version)}>نشر</Button>}
+                        {(v.status === "PUBLISHED" || v.status === "ROLLED_BACK") && <Button size="sm" variant="ghost" onClick={() => rollback(p.id, v.version)}>رجوع لهذا</Button>}
+                      </span>
+                    </div>
+                  ))}
+                  {(versions[p.id] ?? []).length === 0 && <p className="text-xs text-ink-muted">لا مسودات بعد — أنشئ مسودة من التعليمات الحالية.</p>}
+                </div>
+              </GlassCard>
+            ) : null
+          )}
         </div>
       )}
       {!loading && personas.length === 0 && (

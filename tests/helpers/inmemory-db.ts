@@ -271,6 +271,7 @@ export function createFakeDb() {
   const backgroundJob: Row[] = [];
   const aISettings: Row[] = [];
   const persona: Row[] = [];
+  const personaVersion: Row[] = [];
   const customerMemory: Row[] = [];
   const knowledgeCitation: Row[] = [];
   const channelAccountRows: Row[] = [];
@@ -289,6 +290,7 @@ export function createFakeDb() {
   const dailyAnalyticsRows: Row[] = [];
   const playgroundSessionRows: Row[] = [];
   const playgroundMessageRows: Row[] = [];
+  const workspaceRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -297,12 +299,13 @@ export function createFakeDb() {
       order: orderRows, orderItem: orderItemRows, orderDraft: orderDraftRows, deliveryRule: deliveryRuleRows,
       channelAccount: channelAccountRows, webhookEvent: webhookEventRows, humanHandoff: humanHandoffRows, automation: automationRows, automationExecution: automationExecutionRows, user: userRows, followUp: followUpRows, workspaceUsage: workspaceUsageRows, dailyWorkspaceAnalytics: dailyAnalyticsRows,
       knowledgeDocument, knowledgeChunk, faq, backgroundJob,
-      aISettings, persona, customerMemory, knowledgeCitation, aIUsageLog,
+      aISettings, persona, personaVersion, customerMemory, knowledgeCitation, aIUsageLog,
       playgroundSession: playgroundSessionRows, playgroundMessage: playgroundMessageRows,
+      workspace: workspaceRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0 }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    message: makeModel("message", message, { deliveryStatus: "PENDING", metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    message: makeModel("message", message, { deliveryStatus: "PENDING", isNote: false, metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channelIdentity: makeModel("channelIdentity", channelIdentity, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channel: makeModel("channel", channel, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     workspaceMember: makeModel("workspaceMember", workspaceMember, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -317,8 +320,9 @@ export function createFakeDb() {
     knowledgeChunk: makeModel("knowledgeChunk", knowledgeChunk, { tokenCount: 0, isActive: true, isArchived: false, isApproved: false, deletedAt: null, tags: [] }),
     faq: makeModel("faq", faq, { isActive: true, isArchived: false, isApproved: false, deletedAt: null, tags: [] }),
     backgroundJob: makeModel("backgroundJob", backgroundJob, { status: "PENDING", attempts: 0, maxAttempts: 3, runAfter: new Date(), tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    aISettings: makeModel("aISettings", aISettings, { provider: "mock", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true }),
-    persona: makeModel("persona", persona, { isActive: true, emojiLevel: 1, prohibitedPhrases: [], customRules: [], tags: [], isArchived: false, isApproved: false, deletedAt: null }),
+    aISettings: makeModel("aISettings", aISettings, { provider: "mock", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true, customBaseUrl: null, fallbackProvider: null, fallbackModel: null }),
+    persona: makeModel("persona", persona, { isActive: true, emojiLevel: 1, prohibitedPhrases: [], customRules: [], version: 1, tags: [], isArchived: false, isApproved: false, deletedAt: null }),
+    personaVersion: makeModel("personaVersion", personaVersion, { status: "DRAFT", prohibitedPhrases: [], customRules: [], tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     customerMemory: makeModel("customerMemory", customerMemory, { confidence: 1, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     knowledgeCitation: makeModel("knowledgeCitation", knowledgeCitation, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channelAccount: makeModel("channelAccount", channelAccountRows, { provider: "FACEBOOK", connectedAt: new Date(), tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -332,11 +336,12 @@ export function createFakeDb() {
     webhookEvent: makeModel("webhookEvent", webhookEventRows, { source: "meta", channelType: "FACEBOOK", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     playgroundSession: makeModel("playgroundSession", playgroundSessionRows, { useKnowledge: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     playgroundMessage: makeModel("playgroundMessage", playgroundMessageRows, { metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    aIUsageLog: makeModel("aIUsageLog", aIUsageLog, { promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, success: true, status: "SUCCESS", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    aIUsageLog: makeModel("aIUsageLog", aIUsageLog, { promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, success: true, status: "SUCCESS", personaId: null, personaVersion: null, fallbackUsed: false, handoffReason: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     order: makeModel("order", orderRows, { status: "NEW", confirmationStatus: "PENDING", paymentStatus: "UNPAID", fulfillmentStatus: "UNFULFILLED", subtotal: 0, discount: 0, deliveryFee: 0, total: 0, currency: "USD", source: "AI", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     orderItem: makeModel("orderItem", orderItemRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     orderDraft: makeModel("orderDraft", orderDraftRows, { state: "COLLECTING", missingFields: [], phone: null, productId: null, quantity: null, rawAddress: null, province: null, customerName: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     deliveryRule: makeModel("deliveryRule", deliveryRuleRows, { fee: 0, isAvailable: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    workspace: makeModel("workspace", workspaceRows, { plan: "FREE", timezone: "UTC", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
   };
 
   const conversationModel = db.conversation as any;
@@ -391,8 +396,7 @@ export function createFakeDb() {
   };
 
   // message idempotency unique constraints (mirrors real Postgres behavior)
-  const baseMessageCreate = (db.message as any).create.bind(db.message);
-  (db.message as any).create = async (args: any) => {
+  const baseMessageCreate = (db.message as any).create.bind(db.message);  (db.message as any).create = async (args: any) => {
     const d = args.data ?? {};
     for (const [key, field] of [["conversationId_externalEventId", "externalEventId"], ["conversationId_externalMessageId", "externalMessageId"]] as const) {
       const v = d[field];
@@ -408,6 +412,57 @@ export function createFakeDb() {
       }
     }
     return baseMessageCreate(args);
+  };
+
+  // conversation unique [workspaceId, channelConversationId] → P2002
+  // (concurrent first-message race mirrors real Postgres behavior).
+  const baseConvCreate = (db.conversation as any).create.bind(db.conversation);  (db.conversation as any).create = async (args: any) => {
+    const d = args.data ?? {};
+    if (d.workspaceId && d.channelConversationId) {
+      const dup = conversation.find(
+        (c) => c.workspaceId === d.workspaceId && c.channelConversationId === d.channelConversationId
+      );
+      if (dup) {
+        const err = new Error("Unique constraint failed: workspaceId_channelConversationId") as Error & { code?: string };
+        err.code = "P2002";
+        throw err;
+      }
+    }
+    return baseConvCreate(args);
+  };
+
+  // channel partial unique (workspaceId, type) WHERE externalId IS NULL
+  // (P5 gate — mirrors migration 20261010090441_p5_channel_auto_unique).
+  const baseChannelCreate = (db.channel as any).create.bind(db.channel);
+  (db.channel as any).create = async (args: any) => {
+    const d = args.data ?? {};
+    if (d.workspaceId && d.type && (d.externalId === undefined || d.externalId === null)) {
+      const dup = channel.find(
+        (c) => c.workspaceId === d.workspaceId && c.type === d.type && (c.externalId === undefined || c.externalId === null)
+      );
+      if (dup) {
+        const err = new Error("Unique constraint failed: Channel_workspace_type_null_external_idx") as Error & { code?: string };
+        err.code = "P2002";
+        throw err;
+      }
+    }
+    return baseChannelCreate(args);
+  };
+
+  // channelIdentity unique [channelType, channelExternalId] → P2002.
+  const baseIdentityCreate = (db.channelIdentity as any).create.bind(db.channelIdentity);  (db.channelIdentity as any).create = async (args: any) => {
+    const d = args.data ?? {};
+    if (d.channelType && d.channelExternalId) {
+      const dup = channelIdentity.find(
+        (i) => i.channelType === d.channelType && i.channelExternalId === d.channelExternalId
+      );
+      if (dup) {
+        const err = new Error("Unique constraint failed: channelType_channelExternalId") as Error & { code?: string };
+        err.code = "P2002";
+        throw err;
+      }
+    }
+    return baseIdentityCreate(args);
   };
 
   // webhookEvent unique [source, externalEventId] → throw on duplicate

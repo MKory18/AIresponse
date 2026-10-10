@@ -1,5 +1,7 @@
 import { prisma } from "@/core/db/prisma";
-import { ConflictError } from "@/core/errors";
+import { AppError, ConflictError, NotFoundError } from "@/core/errors";
+import { recordAudit } from "@/modules/audit/service";
+import type { ActorContext, Db } from "@/modules/customers/service";
 
 function slugify(name: string): string {
   return name
@@ -43,4 +45,46 @@ export function listWorkspacesForUser(userId: string) {
     select: { id: true, name: true, slug: true, plan: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
+}
+
+/**
+ * P3: rename / re-timezone the CURRENT workspace. The target comes from the
+ * session context — never from request input — so workspaceId tampering is
+ * structurally impossible here.
+ */
+export async function updateWorkspaceDetails(
+  db: Db,
+  ctx: ActorContext,
+  input: { name?: string; timezone?: string }
+) {
+  const data: Record<string, unknown> = {};
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+    if (name.length < 2 || name.length > 100) {
+      throw new AppError("Invalid workspace name", 422, "INVALID_WORKSPACE");
+    }
+    data.name = name;
+  }
+  if (input.timezone !== undefined) {
+    const timezone = input.timezone.trim();
+    if (timezone.length === 0 || timezone.length > 64) {
+      throw new AppError("Invalid timezone", 422, "INVALID_WORKSPACE");
+    }
+    data.timezone = timezone;
+  }
+  if (Object.keys(data).length === 0) {
+    throw new AppError("Nothing to update", 422, "EMPTY_UPDATE");
+  }
+  const workspace = await db.workspace.findUnique({ where: { id: ctx.workspaceId } });
+  if (!workspace) throw new NotFoundError("Workspace");
+  const updated = await db.workspace.update({ where: { id: ctx.workspaceId }, data });
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "workspace.updated",
+    entityType: "Workspace",
+    entityId: ctx.workspaceId,
+    metadata: { fields: Object.keys(data) },
+  });
+  return updated;
 }

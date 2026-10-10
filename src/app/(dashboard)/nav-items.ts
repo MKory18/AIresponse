@@ -11,6 +11,7 @@ export const NAV_ITEMS: { href: string; label: string; icon: string; permission:
   { href: "/feedback", label: t.nav.feedback, icon: "MessageCircle", permission: "feedback.read" },
   { href: "/knowledge", label: t.nav.knowledge, icon: "BookOpen", permission: "knowledge.read" },
   { href: "/personas", label: t.nav.personas, icon: "UserRound", permission: "personas.read" },
+  { href: "/ai/studio", label: "استوديو الذكاء", icon: "SlidersHorizontal", permission: "ai.configure" },
   { href: "/ai/playground", label: t.nav.playground, icon: "FlaskConical", permission: "ai.configure" },
   { href: "/channels", label: t.nav.channels, icon: "Radio", permission: "channels.read" },
   { href: "/automation", label: t.nav.automation, icon: "Workflow", permission: "automation.read" },
@@ -18,4 +19,5 @@ export const NAV_ITEMS: { href: string; label: string; icon: string; permission:
   { href: "/handoffs", label: t.nav.handoffs, icon: "Hand", permission: "handoffs.read" },
   { href: "/analytics", label: t.nav.analytics, icon: "ChartNoAxesCombined", permission: "analytics.read" },
   { href: "/settings", label: t.nav.settings, icon: "Settings", permission: "settings.manage" },
+  { href: "/settings/team", label: t.nav.team, icon: "Users", permission: "users.manage" },
 ];

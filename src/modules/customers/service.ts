@@ -187,7 +187,7 @@ export async function getCustomerDetail(db: Db, ctx: ActorContext, customerId: s
       where: { workspaceId: ctx.workspaceId, customerId },
       orderBy: { createdAt: "desc" },
       take: 10,
-      select: { id: true, orderNumber: true, status: true, total: true, currency: true, createdAt: true },
+      select: { id: true, orderNumber: true, status: true, total: true, currency: true, createdAt: true, adSource: true },
     }),
     db.conversation.findMany({
       where: { workspaceId: ctx.workspaceId, customerId, deletedAt: null },

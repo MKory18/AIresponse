@@ -1,12 +1,37 @@
 import { childLogger } from "@/core/logger";
 import { decryptSecret } from "@/core/crypto";
+import { AppError } from "@/core/errors";
 import { getFacebookClient } from "./facebook/client";
 import { FacebookApiError } from "./facebook/types";
+import { FacebookChannelAdapter } from "./facebook/adapter";
+import { InstagramChannelAdapter } from "./instagram/adapter";
+import { TelegramChannelAdapter } from "./telegram/adapter";
+import { WhatsAppChannelAdapter } from "./whatsapp/adapter";
+import { TikTokChannelAdapter } from "./tiktok/adapter";
+import { getChannelAdapter } from "./registry";
+import { ChannelNotSupportedError } from "./types";
 import { canSendToCustomer } from "./facebook/policy";
+import { canSendInstagram } from "./instagram/policy";
+import { canSendTelegram } from "./telegram/policy";
+import { canSendWhatsApp } from "./whatsapp/policy";
+import { canSendTikTok } from "./tiktok/policy";
+import { getInstagramClient } from "./instagram/client";
+import { getTelegramClient, TelegramApiError } from "./telegram/client";
+import { getWhatsAppClient, WhatsAppApiError } from "./whatsapp/client";
+import { getTikTokClient, TikTokApiError } from "./tiktok/client";
+import { InstagramApiError } from "./instagram/client";
 import { generatePublicMediaUrl } from "@/modules/media/service";
 import type { Db } from "@/modules/customers/service";
+import type { ChannelType } from "@prisma/client";
 
 const log = childLogger("outbound");
+
+/** Channel types with a live outbound transport (P5). WEB has none. */
+const OUTBOUND_CHANNELS = ["FACEBOOK", "INSTAGRAM", "TELEGRAM", "WHATSAPP", "TIKTOK"] as const;
+
+function providerOf(channelType: string): string {
+  return channelType.toLowerCase();
+}
 
 export interface DispatchOutboundParams {
   workspaceId: string;
@@ -47,6 +72,55 @@ export async function sendHumanReply(
     senderType: "HUMAN",
     senderId: params.userId,
   });
+}
+
+/**
+ * Per-channel send policy (P5). Messenger keeps its dedicated 24h policy
+ * inline; every other live channel decides here. Reasons surface as
+ * POLICY_<reason> in delivery metadata (never silent, never faked).
+ */
+export function checkChannelPolicy(
+  channelType: string,
+  args: {
+    channelStatus: string;
+    tokenExpiresAt?: Date | string | null;
+    lastCustomerMessageAt?: Date | string | null;
+    tokenValid?: boolean;
+    tiktokApproved?: boolean;
+  }
+): { allowed: true } | { allowed: false; reason: string } {
+  switch (channelType) {
+    case "INSTAGRAM": {
+      const d = canSendInstagram({
+        channelStatus: args.channelStatus,
+        tokenExpiresAt: args.tokenExpiresAt,
+        lastCustomerMessageAt: args.lastCustomerMessageAt,
+      });
+      return d.allowed ? { allowed: true } : { allowed: false, reason: d.reason };
+    }
+    case "TELEGRAM": {
+      const d = canSendTelegram({ channelStatus: args.channelStatus, tokenValid: args.tokenValid ?? false });
+      return d.allowed ? { allowed: true } : { allowed: false, reason: d.reason };
+    }
+    case "WHATSAPP": {
+      const d = canSendWhatsApp({
+        channelStatus: args.channelStatus,
+        tokenValid: args.tokenValid ?? false,
+        lastCustomerMessageAt: args.lastCustomerMessageAt,
+      });
+      return d.allowed ? { allowed: true } : { allowed: false, reason: d.reason };
+    }
+    case "TIKTOK": {
+      const d = canSendTikTok({
+        channelStatus: args.channelStatus,
+        accessApproved: args.tiktokApproved ?? false,
+        lastCustomerMessageAt: args.lastCustomerMessageAt,
+      });
+      return d.allowed ? { allowed: true } : { allowed: false, reason: d.reason };
+    }
+    default:
+      return { allowed: false, reason: "CHANNEL_NOT_CONFIGURED" };
+  }
 }
 
 /**
@@ -220,43 +294,47 @@ export async function dispatchOutbound(
     conversationId: params.conversationId,
     channelId: channel?.id,
     pageId: channel?.externalId ?? undefined,
-    provider: "facebook",
+    provider: providerOf(channel?.type ?? "FACEBOOK"),
   };
 
-  if (!channel || channel.type !== "FACEBOOK" || !account) {
+  if (!channel || !account || !(OUTBOUND_CHANNELS as readonly string[]).includes(channel.type)) {
     await markFailed(db, message.id, "CHANNEL_NOT_CONFIGURED", "القناة غير مربوطة");
     log.warn({ ...ctx, status: "FAILED", reason: "CHANNEL_NOT_CONFIGURED", durationMs: Date.now() - started }, "facebook.message.failed");
     return { messageId: message.id, deliveryStatus: "FAILED", error: "CHANNEL_NOT_CONFIGURED", channelId: ctx.channelId, pageId: ctx.pageId, durationMs: Date.now() - started };
   }
 
-  // 4. Messaging policy.
-  const policy = canSendToCustomer({
-    channelStatus: channel.status,
-    tokenExpiresAt: account.tokenExpiresAt,
-    lastCustomerMessageAt: conversation.lastCustomerMessageAt,
-  });
-  if (!policy.allowed) {
-    await markFailed(db, message.id, `POLICY_${policy.reason}`, "تعذر الإرسال حسب سياسة المنصة");
-    log.warn({ ...ctx, status: "FAILED", reason: `POLICY_${policy.reason}`, durationMs: Date.now() - started }, "facebook.message.failed");
-    return { messageId: message.id, deliveryStatus: "FAILED", error: `POLICY_${policy.reason}`, channelId: ctx.channelId, pageId: ctx.pageId, durationMs: Date.now() - started };
+  // 4. Messaging policy (per channel; Messenger behavior below is verbatim).
+  // Non-Facebook policy runs inside dispatchChannelSend AFTER token decrypt
+  // (it needs token validity) — still before any send. Same guarantee.
+  if (channel.type === "FACEBOOK") {
+    const policy = canSendToCustomer({
+      channelStatus: channel.status,
+      tokenExpiresAt: account.tokenExpiresAt,
+      lastCustomerMessageAt: conversation.lastCustomerMessageAt,
+    });
+    if (!policy.allowed) {
+      await markFailed(db, message.id, `POLICY_${policy.reason}`, "تعذر الإرسال حسب سياسة المنصة");
+      log.warn({ ...ctx, status: "FAILED", reason: `POLICY_${policy.reason}`, durationMs: Date.now() - started }, "facebook.message.failed");
+      return { messageId: message.id, deliveryStatus: "FAILED", error: `POLICY_${policy.reason}`, channelId: ctx.channelId, pageId: ctx.pageId, durationMs: Date.now() - started };
+    }
   }
 
   // 5. Recipient from ChannelIdentity (trusted), scoped to this conversation's
-  // page via channelConversationId — never AI output, never another page.
+  // account via channelConversationId — never AI output, never another account.
   const conversationPsid = (conversation as { channelConversationId?: string }).channelConversationId;
   let identity = conversationPsid
     ? await db.channelIdentity.findFirst({
         where: {
           workspaceId: params.workspaceId,
           customerId: conversation.customerId,
-          channelType: "FACEBOOK",
+          channelType: channel.type as ChannelType,
           channelExternalId: conversationPsid,
         },
         select: { channelExternalId: true },
       })
     : null;
   identity ??= await db.channelIdentity.findFirst({
-    where: { workspaceId: params.workspaceId, customerId: conversation.customerId, channelType: "FACEBOOK" },
+    where: { workspaceId: params.workspaceId, customerId: conversation.customerId, channelType: channel.type as ChannelType },
     select: { channelExternalId: true },
   });
   if (!identity) {
@@ -315,17 +393,58 @@ export async function dispatchOutbound(
       : null;
 
   const persistPart1 = async (part1MessageId: string) => {
-    const cur = await db.message
-      .findUnique({ where: { id: message.id }, select: { metadata: true } })
-      .catch(() => null);
-    await db.message.update({
-      where: { id: message.id },
-      data: { metadata: { ...((cur?.metadata ?? {}) as Record<string, unknown>), ...(params.mediaId ? { mediaId: params.mediaId } : {}), part1MessageId } },
-    });
+    await persistPart1For(db, message.id, params.mediaId ?? undefined, part1MessageId);
   };
+
+  // 7b. Non-Messenger transports share the idempotency shell above and the
+  // persist/error shapes below; only policy + sender differ per provider.
+  if (channel.type !== "FACEBOOK") {
+    return dispatchChannelSend(db, {
+      params,
+      messageId: message.id,
+      channel,
+      account,
+      conversation: {
+        lastCustomerMessageAt: conversation.lastCustomerMessageAt,
+      },
+      recipientId,
+      attachment,
+      priorPart1,
+      started,
+      channelId: ctx.channelId,
+      pageId: ctx.pageId,
+    });
+  }
 
   try {
     // Dual-send when both parts exist; single-send otherwise.
+    // P1.1: Graph sends go through the registry-resolved real adapter. The
+    // bound sender IS the existing client call (same token, same recipient,
+    // same payloads, same error classification) — idempotency, policy,
+    // ordering, retry accounting and recovery above/below are untouched.
+    const adapter = getChannelAdapter("FACEBOOK", {
+      facebook: {
+        pageId: channel.externalId ?? undefined,
+        channelAccountId: account.id,
+        sender: async (recipient, payload) => {
+          if (payload.attachment) {
+            const r = await client.sendMessage(pageAccessToken, recipient, {
+              attachment: { type: payload.attachment.type, payload: { url: payload.attachment.url } },
+            });
+            return { messageId: r.messageId, graphCode: r.graphCode };
+          }
+          const r = await client.sendMessage(pageAccessToken, recipient, { text: payload.text });
+          return { messageId: r.messageId, graphCode: r.graphCode };
+        },
+      },
+    });
+    if (!(adapter instanceof FacebookChannelAdapter)) {
+      throw new ChannelNotSupportedError("FACEBOOK");
+    }
+    const graphCodeOf = (r: { raw?: Record<string, unknown> }): string | undefined =>
+      typeof r.raw?.graphCode === "string" ? (r.raw.graphCode as string) : undefined;
+    const toMessageType = (t: "image" | "video" | "audio" | "file"): "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" =>
+      t === "image" ? "IMAGE" : t === "video" ? "VIDEO" : t === "audio" ? "AUDIO" : "DOCUMENT";
     let firstMid: string | undefined;
     let secondMid: string | undefined;
     let graphCode: string | undefined;
@@ -333,19 +452,20 @@ export async function dispatchOutbound(
       if (priorPart1) {
         firstMid = priorPart1;
       } else {
-        const r1 = await client.sendMessage(pageAccessToken, recipientId, { attachment });
-        firstMid = r1.messageId;
-        graphCode = r1.graphCode;
+        const r1 = await adapter.sendMedia(recipientId, { type: toMessageType(attachment.type), mediaUrl: attachment.payload.url });
+        firstMid = r1.externalMessageId;
+        graphCode = graphCodeOf(r1);
         await persistPart1(firstMid);
       }
-      const r2 = await client.sendMessage(pageAccessToken, recipientId, { text: params.text });
-      secondMid = r2.messageId;
-      graphCode = r2.graphCode ?? graphCode;
+      const r2 = await adapter.sendText(recipientId, params.text);
+      secondMid = r2.externalMessageId;
+      graphCode = graphCodeOf(r2) ?? graphCode;
     } else {
-      const single = attachment ? { attachment } : { text: params.text };
-      const r = await client.sendMessage(pageAccessToken, recipientId, single);
-      firstMid = r.messageId;
-      graphCode = r.graphCode;
+      const single = attachment
+        ? await adapter.sendMedia(recipientId, { type: toMessageType(attachment.type), mediaUrl: attachment.payload.url })
+        : await adapter.sendText(recipientId, params.text);
+      firstMid = single.externalMessageId;
+      graphCode = graphCodeOf(single);
     }
     await db.message.update({
       where: { id: message.id },
@@ -433,6 +553,267 @@ async function markFailed(db: Db, messageId: string, reason: string, arabicMessa
       },
     },
   });
+}
+
+/** Shared part-1 persistence for dual sends (Messenger + generic transports). */
+async function persistPart1For(
+  db: Db,
+  messageId: string,
+  mediaId: string | null | undefined,
+  part1MessageId: string
+): Promise<void> {
+  const cur = await db.message
+    .findUnique({ where: { id: messageId }, select: { metadata: true } })
+    .catch(() => null);
+  await db.message.update({
+    where: { id: messageId },
+    data: {
+      metadata: {
+        ...((cur?.metadata ?? {}) as Record<string, unknown>),
+        ...(mediaId ? { mediaId } : {}),
+        part1MessageId,
+      },
+    },
+  });
+}
+
+interface ChannelSendContext {
+  params: DispatchOutboundParams;
+  messageId: string;
+  channel: { id: string; type: string; status: string; externalId?: string | null };
+  account: { id: string; encryptedCredentials: string; tokenExpiresAt?: Date | string | null; metadata?: Record<string, unknown> | null };
+  conversation: { lastCustomerMessageAt?: Date | string | null };
+  recipientId: string;
+  attachment: { type: "image" | "video" | "audio" | "file"; payload: { url: string } } | null;
+  priorPart1: string | null;
+  started: number;
+  channelId?: string;
+  pageId?: string;
+}
+
+/**
+ * Generic multi-channel send (P5): policy → registry-resolved adapter →
+ * persist, mirroring the Messenger guarantees (single idempotency row,
+ * part-1 resume, transient QUEUED / permanent FAILED, retry accounting).
+ * Provider error classes keep their TRANSIENT/PERMANENT kinds.
+ */
+async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<DispatchOutboundResult> {
+  const scope = `${providerOf(s.channel.type)}.message`;
+  const base = { messageId: s.messageId, conversationId: s.params.conversationId, channelId: s.channelId, pageId: s.pageId } as const;
+
+  let token: string;
+  try {
+    token = decryptSecret(s.account.encryptedCredentials);
+  } catch {
+    await markFailed(db, s.messageId, "TOKEN_DECRYPT_FAILED", "تعذر الاتصال بالقناة");
+    log.warn({ ...base, recipientId: s.recipientId, status: "FAILED", reason: "TOKEN_DECRYPT_FAILED", durationMs: Date.now() - s.started }, `${scope}.failed`);
+    return { messageId: s.messageId, deliveryStatus: "FAILED", error: "TOKEN_DECRYPT_FAILED", channelId: s.channelId, pageId: s.pageId, recipientId: s.recipientId, durationMs: Date.now() - s.started };
+  }
+
+  const verdict = checkChannelPolicy(s.channel.type, {
+    channelStatus: s.channel.status,
+    tokenExpiresAt: s.account.tokenExpiresAt ?? undefined,
+    lastCustomerMessageAt: s.conversation.lastCustomerMessageAt ?? undefined,
+    tokenValid: true,
+    tiktokApproved: (s.account.metadata as { ttAccessApproved?: boolean } | null | undefined)?.ttAccessApproved ?? false,
+  });
+  if (!verdict.allowed) {
+    await markFailed(db, s.messageId, `POLICY_${verdict.reason}`, "تعذر الإرسال حسب سياسة المنصة");
+    log.warn({ ...base, recipientId: s.recipientId, status: "FAILED", reason: `POLICY_${verdict.reason}`, durationMs: Date.now() - s.started }, `${scope}.failed`);
+    return { messageId: s.messageId, deliveryStatus: "FAILED", error: `POLICY_${verdict.reason}`, channelId: s.channelId, pageId: s.pageId, recipientId: s.recipientId, durationMs: Date.now() - s.started };
+  }
+
+  const adapter = resolveChannelSender(s.channel.type, {
+    channelAccountId: s.account.id,
+    channelId: s.channel.id,
+    externalId: s.channel.externalId,
+    token,
+    recipientId: s.recipientId,
+  });
+
+  const codeOf = (r: { raw?: Record<string, unknown> }): string | undefined =>
+    typeof r.raw?.graphCode === "string"
+      ? (r.raw.graphCode as string)
+      : typeof r.raw?.code === "string"
+        ? (r.raw.code as string)
+        : undefined;
+  const toMessageType = (t: "image" | "video" | "audio" | "file"): "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" =>
+    t === "image" ? "IMAGE" : t === "video" ? "VIDEO" : t === "audio" ? "AUDIO" : "DOCUMENT";
+
+  try {
+    let firstMid: string | undefined;
+    let secondMid: string | undefined;
+    let code: string | undefined;
+    if (s.attachment && s.params.text?.trim()) {
+      if (s.priorPart1) {
+        firstMid = s.priorPart1;
+      } else {
+        const r1 = await adapter.sendMedia(s.recipientId, { type: toMessageType(s.attachment.type), mediaUrl: s.attachment.payload.url });
+        firstMid = r1.externalMessageId;
+        code = codeOf(r1);
+        await persistPart1For(db, s.messageId, s.params.mediaId ?? undefined, firstMid);
+      }
+      const r2 = await adapter.sendText(s.recipientId, s.params.text);
+      secondMid = r2.externalMessageId;
+      code = codeOf(r2) ?? code;
+    } else {
+      const single = s.attachment
+        ? await adapter.sendMedia(s.recipientId, { type: toMessageType(s.attachment.type), mediaUrl: s.attachment.payload.url })
+        : await adapter.sendText(s.recipientId, s.params.text);
+      firstMid = single.externalMessageId;
+      code = codeOf(single);
+    }
+    await db.message.update({
+      where: { id: s.messageId },
+      data: {
+        deliveryStatus: "SENT",
+        externalMessageId: firstMid,
+        deliveryError: null,
+        provider: providerOf(s.channel.type),
+        ...(secondMid ? { metadata: { ...(s.params.mediaId ? { mediaId: s.params.mediaId } : {}), ...(s.priorPart1 || s.attachment ? { part1MessageId: firstMid } : {}), secondExternalMessageId: secondMid } } : {}),
+      },
+    });
+    await db.channelAccount.update({
+      where: { id: s.account.id },
+      data: { lastSendAt: new Date() },
+    });
+    await db.conversation.update({
+      where: { id: s.params.conversationId },
+      data: { lastAgentMessageAt: new Date() },
+    });
+    try {
+      const { incrementUsage } = await import("@/core/analytics/usage-service");
+      await incrementUsage(db as never, s.params.workspaceId, { messagesOutbound: 1 });
+    } catch {
+      // never break sending
+    }
+    log.info({ ...base, recipientId: s.recipientId, status: "SENT", graphCode: code, parts: secondMid ? 2 : 1, durationMs: Date.now() - s.started }, `${scope}.sent`);
+    return { messageId: s.messageId, deliveryStatus: "SENT", externalMessageId: firstMid, graphCode: code, channelId: s.channelId, pageId: s.pageId, recipientId: s.recipientId, durationMs: Date.now() - s.started };
+  } catch (err) {
+    const transient =
+      (err instanceof TelegramApiError ||
+        err instanceof WhatsAppApiError ||
+        err instanceof InstagramApiError ||
+        err instanceof TikTokApiError) &&
+      err.kind === "TRANSIENT";
+    const code =
+      err instanceof TelegramApiError || err instanceof WhatsAppApiError || err instanceof InstagramApiError || err instanceof TikTokApiError
+        ? `${err.code ?? ""}`
+        : "";
+    const httpStatus =
+      err instanceof WhatsAppApiError || err instanceof InstagramApiError ? err.httpStatus : undefined;
+    let prevRetryCount = 0;
+    let keepPart1: string | null = s.priorPart1;
+    try {
+      const row = await db.message.findUnique({ where: { id: s.messageId }, select: { metadata: true } });
+      const meta = (row?.metadata ?? {}) as { retryCount?: unknown; part1MessageId?: unknown };
+      prevRetryCount = typeof meta.retryCount === "number" ? meta.retryCount : 0;
+      if (typeof meta.part1MessageId === "string") keepPart1 = meta.part1MessageId;
+    } catch {
+      prevRetryCount = 0;
+    }
+    await db.message.update({
+      where: { id: s.messageId },
+      data: {
+        deliveryStatus: transient ? "QUEUED" : "FAILED",
+        deliveryError: err instanceof Error ? err.message : String(err),
+        metadata: {
+          ...(s.params.mediaId ? { mediaId: s.params.mediaId } : {}),
+          ...(keepPart1 ? { part1MessageId: keepPart1 } : {}),
+          providerErrorCode: code || "UNKNOWN",
+          providerErrorMessage: err instanceof Error ? err.message : String(err),
+          failedAt: new Date().toISOString(),
+          retryable: transient,
+          retryCount: prevRetryCount + 1,
+        },
+      },
+    });
+    log.warn({ ...base, recipientId: s.recipientId, status: transient ? "QUEUED" : "FAILED", graphCode: code, httpStatus, durationMs: Date.now() - s.started }, `${scope}.failed`);
+    return {
+      messageId: s.messageId,
+      deliveryStatus: transient ? "QUEUED" : "FAILED",
+      error: err instanceof Error ? err.message : String(err),
+      graphCode: code || undefined,
+      channelId: s.channelId,
+      pageId: s.pageId,
+      recipientId: s.recipientId,
+      durationMs: Date.now() - s.started,
+    };
+  }
+}
+
+/**
+ * Binds a registry adapter to live credentials for one send. Tokens never
+ * enter the adapter except through this closure (same boundary as P1.1).
+ */
+function resolveChannelSender(
+  channelType: string,
+  ctx: { channelAccountId: string; channelId: string; externalId?: string | null; token: string; recipientId: string }
+): { sendText: (ref: string, text: string) => Promise<{ externalMessageId: string; raw?: Record<string, unknown> }>; sendMedia: (ref: string, m: { type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"; mediaUrl: string }) => Promise<{ externalMessageId: string; raw?: Record<string, unknown> }> } {
+  switch (channelType) {
+    case "INSTAGRAM": {
+      const client = getInstagramClient();
+      const sender = async (to: string, p: { text?: string; attachment?: { type: string; url: string } }) => {
+        const r = p.attachment
+          ? await client.sendMessage(ctx.token, to, { attachment: { type: p.attachment.type, payload: { url: p.attachment.url } } })
+          : await client.sendMessage(ctx.token, to, { text: p.text });
+        return { messageId: r.messageId };
+      };
+      const adapter = getChannelAdapter("INSTAGRAM", {
+        instagram: { channelAccountId: ctx.channelAccountId, channelId: ctx.channelId, sender },
+      });
+      if (!(adapter instanceof InstagramChannelAdapter)) throw new ChannelNotSupportedError("INSTAGRAM");
+      return adapter;
+    }
+    case "TELEGRAM": {
+      const client = getTelegramClient();
+      const sender = async (to: string, p: { text?: string; photoUrl?: string; documentUrl?: string; caption?: string }) => {
+        if (p.photoUrl || p.documentUrl) {
+          const r = await client.sendMessage(ctx.token, to, p.photoUrl ? { photo: p.photoUrl, caption: p.caption } : { document: p.documentUrl!, caption: p.caption });
+          return { messageId: String(r.messageId) };
+        }
+        const r = await client.sendMessage(ctx.token, to, { text: p.text });
+        return { messageId: String(r.messageId) };
+      };
+      const adapter = getChannelAdapter("TELEGRAM", {
+        telegram: { channelAccountId: ctx.channelAccountId, channelId: ctx.channelId, sender },
+      });
+      if (!(adapter instanceof TelegramChannelAdapter)) throw new ChannelNotSupportedError("TELEGRAM");
+      return adapter;
+    }
+    case "WHATSAPP": {
+      if (!ctx.externalId) {
+        throw new AppError("WhatsApp number id missing on channel", 422, "CHANNEL_NOT_CONFIGURED");
+      }
+      const phoneNumberId = ctx.externalId;
+      const client = getWhatsAppClient();
+      const sender = async (to: string, p: { text?: string; media?: { kind: "image" | "video" | "audio" | "document"; url: string; caption?: string } }) => {
+        const r = p.media
+          ? await client.sendMedia(ctx.token, phoneNumberId, to, p.media.kind, p.media.url, p.media.caption)
+          : await client.sendText(ctx.token, phoneNumberId, to, p.text ?? "");
+        return { messageId: r.messageId };
+      };
+      const adapter = getChannelAdapter("WHATSAPP", {
+        whatsapp: { phoneNumberId, channelAccountId: ctx.channelAccountId, channelId: ctx.channelId, sender },
+      });
+      if (!(adapter instanceof WhatsAppChannelAdapter)) throw new ChannelNotSupportedError("WHATSAPP");
+      return adapter;
+    }
+    case "TIKTOK": {
+      const client = getTikTokClient();
+      const sender = async (to: string, text: string) => {
+        const r = await client.sendDirectMessage(ctx.token, to, text);
+        return { messageId: r.messageId };
+      };
+      const adapter = getChannelAdapter("TIKTOK", {
+        tiktok: { channelAccountId: ctx.channelAccountId, channelId: ctx.channelId, sender },
+      });
+      if (!(adapter instanceof TikTokChannelAdapter)) throw new ChannelNotSupportedError("TIKTOK");
+      return adapter;
+    }
+    default:
+      throw new ChannelNotSupportedError(channelType);
+  }
 }
 
 /**

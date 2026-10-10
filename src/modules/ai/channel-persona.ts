@@ -13,6 +13,8 @@ export interface ResolvedPersona {
   systemInstructions: string | null;
   prohibitedPhrases: string[];
   customRules: string[];
+  /** Published instruction version (P6) — null for the builtin fallback. */
+  version: number | null;
   /** Where the persona came from: page assignment or workspace default. */
   source: "channel" | "workspace" | "builtin";
 }
@@ -60,6 +62,7 @@ export async function resolveChannelPersona(
     systemInstructions: null,
     prohibitedPhrases: [],
     customRules: [],
+    version: null,
     source: "builtin",
   };
 }
@@ -78,5 +81,6 @@ function toResolved(row: Record<string, unknown>): Omit<ResolvedPersona, "source
     systemInstructions: (row.systemInstructions as string | null) ?? null,
     prohibitedPhrases: (row.prohibitedPhrases as string[]) ?? [],
     customRules: (row.customRules as string[]) ?? [],
+    version: typeof row.version === "number" ? (row.version as number) : null,
   };
 }

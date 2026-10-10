@@ -110,6 +110,21 @@ export async function createOrderFromDraft(
   const customer = await db.customer.findUnique({ where: { id: draft.customerId } });
   if (!customer) throw new NotFoundError("Customer");
 
+  // P2 OMS blacklist enforcement (single choke point): a blacklisted
+  // customer can still chat and hold a draft, but NO order is ever created
+  // for them — the OMS blacklist decision always wins over local staleness.
+  if ((customer as { isBlacklisted?: boolean }).isBlacklisted === true) {
+    await recordAudit(db, {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "order.blacklisted_blocked",
+      entityType: "OrderDraft",
+      entityId: draft.id,
+      metadata: { customerId: customer.id },
+    });
+    throw new AppError("Customer is blacklisted — order creation refused", 422, "ORDER_CUSTOMER_BLACKLISTED");
+  }
+
   const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${randomId(3).toUpperCase()}`;
   const status = "CONFIRMED";
   const order = await db.order.create({

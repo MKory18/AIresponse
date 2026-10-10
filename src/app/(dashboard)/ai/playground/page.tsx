@@ -62,6 +62,8 @@ export default function AIPlaygroundPage() {
   const [useKnowledge, setUseKnowledge] = useState(true);
   const [productId, setProductId] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [task, setTask] = useState("RESPONSE");
+  const [draftInstructions, setDraftInstructions] = useState("");
   const [withOrderProposal, setWithOrderProposal] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -189,6 +191,8 @@ export default function AIPlaygroundPage() {
           text,
           withOrderProposal,
           customerName: customerName.trim() || undefined,
+          task: task === "RESPONSE" ? undefined : task,
+          draftInstructions: draftInstructions.trim() || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -251,6 +255,16 @@ export default function AIPlaygroundPage() {
             </Field>
             <Field label={t.playground.customerContext}>
               <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="اسم تجريبي (اختياري)" />
+            </Field>
+            <Field label="المهمة (نموذجها الخاص)">
+              <Select value={task} onChange={(e) => { setTask(e.target.value); markDirty(); }}>
+                <option value="RESPONSE">توليد الرد</option>
+                <option value="EXTRACTION">استخراج البيانات</option>
+                <option value="SUMMARY">تلخيص المحادثة</option>
+              </Select>
+            </Field>
+            <Field label="تعليمات مسودة للاختبار (لا تُنشر)">
+              <Input value={draftInstructions} onChange={(e) => setDraftInstructions(e.target.value)} placeholder="اختياري — تُستخدم في هذه الجلسة فقط" />
             </Field>
             <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-ink">
               <input type="checkbox" checked={withOrderProposal} onChange={(e) => setWithOrderProposal(e.target.checked)} className="h-4 w-4 accent-brand-500" />

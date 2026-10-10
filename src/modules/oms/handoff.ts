@@ -9,7 +9,13 @@ import type { OmsOrderPayload } from "./client";
 /**
  * Hands a CONFIRMED local order to the OMS. Idempotent at two layers:
  * the local idempotencyKey is sent as the OMS dedupe key, and the local
- * order stores omsOrderId — a retry never creates a second OMS order.
+ * order stores omsOrderId — a sequential retry never creates a second OMS
+ * order. Concurrent same-order handoffs rely on the OMS honoring
+ * idempotencyKey (contract requirement — proven payload-identical in tests).
+ *
+ * P2: blacklisted customers are refused before any OMS call; ambiguous
+ * outcomes (timeout/unreachable — the OMS may have accepted) retry ONCE
+ * with the SAME idempotencyKey. Definitive answers are never retried.
  * After handoff the local order is read-only reference (OMS owns it).
  */
 export async function handoffOrderToOms(
@@ -29,6 +35,19 @@ export async function handoffOrderToOms(
 
   const customer = await db.customer.findUnique({ where: { id: order.customerId } });
   if (!customer) throw new NotFoundError("Customer");
+
+  // OMS blacklist wins: never hand off service for a blocked customer.
+  if ((customer as { isBlacklisted?: boolean }).isBlacklisted === true) {
+    await recordAudit(db, {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "oms.handoff_blacklisted_blocked",
+      entityType: "Order",
+      entityId: order.id,
+      metadata: { customerId: customer.id },
+    });
+    throw new AppError("Customer is blacklisted — OMS handoff refused", 422, "ORDER_CUSTOMER_BLACKLISTED");
+  }
 
   const conn = await (db as any).omsConnection?.findUnique?.({ where: { workspaceId: ctx.workspaceId } });
   if (!conn || !conn.isActive) {
@@ -64,7 +83,16 @@ export async function handoffOrderToOms(
   };
 
   const omsClient = createOmsClient({ baseUrl: conn.baseUrl, token: decryptSecret(conn.tokenEncrypted) });
-  const result = await omsClient.createOrder(payload);
+  // Ambiguous outcome (timeout/unreachable) → exactly one retry with the
+  // SAME idempotencyKey. Definitive OMS answers are never retried.
+  let result: { id: string; status: string };
+  try {
+    result = await omsClient.createOrder(payload);
+  } catch (err) {
+    const code = err instanceof AppError ? err.code : "";
+    if (code !== "OMS_TIMEOUT" && code !== "OMS_UNREACHABLE") throw err;
+    result = await omsClient.createOrder(payload);
+  }
 
   await db.order.update({
     where: { id: order.id },

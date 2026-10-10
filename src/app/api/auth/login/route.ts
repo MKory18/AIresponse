@@ -7,7 +7,7 @@ import { verifyPassword } from "@/modules/auth/password";
 import { setSessionCookie } from "@/modules/auth/session";
 
 export const POST = createHandler(
-  { body: loginSchema, public: true, rateLimit: { limit: 10, windowMs: 60_000 } },
+  { body: loginSchema, public: true, rateLimit: { limit: 10, windowMs: 60_000 }, rateLimitStrict: true },
   async ({ body }) => {
     const user = await prisma.user.findUnique({
       where: { email: body.email },

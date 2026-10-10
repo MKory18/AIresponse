@@ -98,6 +98,8 @@ model WorkspaceMember {
   // Granular permission overrides, e.g. ["orders.write","ai.configure"]
   permissions String[]     @default([])
   status      MemberStatus @default(ACTIVE)
+  // P3: invitation expiry (null = no expiry / already accepted).
+  expiresAt   DateTime?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -116,6 +118,9 @@ enum ChannelType {
   WHATSAPP
   TELEGRAM
   WEB
+  // P5: TikTok adapter is local-only until Business Messaging access is
+  // approved (BLOCKED external) — the enum value only enables modeling.
+  TIKTOK
 }
 
 enum ChannelStatus {
@@ -145,6 +150,9 @@ model Channel {
 
   @@unique([workspaceId, type, externalId])
   @@index([workspaceId])
+  // P5: partial unique (workspaceId, type) WHERE externalId IS NULL lives in
+  // raw SQL (20261010090441_p5_channel_auto_unique) — Prisma cannot declare
+  // partial indexes. It serializes concurrent auto-channel creation.
 }
 
 // Secrets are encrypted at rest (AES-256-GCM) via core/crypto before persisting.
@@ -372,6 +380,9 @@ model Message {
   deliveryStatus         DeliveryStatus   @default(PENDING)
   deliveryError          String?
   deletedAt              DateTime?
+  // P4: internal team note — visible in the thread, never sent to the
+  // customer, excluded from AI history/analytics volumes.
+  isNote                 Boolean          @default(false)
   // Outbound idempotency: one Facebook send per AI execution (unique).
   outboundIdempotencyKey String?          @unique
   createdAt              DateTime         @default(now())
@@ -710,13 +721,45 @@ model Persona {
   prohibitedPhrases  String[] @default([])
   customRules        String[] @default([])
   isActive           Boolean  @default(true)
+  // P6: published instruction version counter (incremented on each publish).
+  version            Int      @default(1)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   channels  Channel[]
+  versions  PersonaVersion[]
 
   @@index([workspaceId])
+}
+
+// P6: immutable snapshots of persona instructions. Publishing a version
+// copies its snapshot onto the parent Persona (bump version); rollback
+// restores a snapshot as a NEW version (history is never rewritten).
+model PersonaVersion {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  personaId          String
+  version            Int
+  name               String
+  tone               String   @default("friendly")
+  language           String   @default("ar")
+  dialect            String?
+  formality          String   @default("informal")
+  emojiLevel         Int      @default(1)
+  responseLength     String   @default("short")
+  salesStyle         String   @default("helpful")
+  systemInstructions String?
+  prohibitedPhrases  String[] @default([])
+  customRules        String[] @default([])
+  status             String   @default("DRAFT")
+  createdBy          String?
+  createdAt          DateTime @default(now())
+
+  persona Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@unique([personaId, version])
+  @@index([workspaceId, personaId])
 }
 model AISettings {
   id                    String   @id @default(cuid())
@@ -729,6 +772,11 @@ model AISettings {
   visionModel           String?
   summaryModel          String?
   embeddingModel        String?
+  // P6: optional self-hosted OpenAI-compatible endpoint (internal delivery)
+  // and an explicit opt-in fallback model used only after primary failure.
+  customBaseUrl         String?
+  fallbackProvider      String?
+  fallbackModel         String?
   temperature           Float    @default(0.4)
   maxTokens             Int      @default(500)
   confidenceExecute     Float    @default(0.90)
@@ -802,6 +850,8 @@ model Order {
   // سيستم 7 — الترحيل للـ OMS بعد التأكيد، ومصدر الإعلان للمحادثة
   omsOrderId         String?            @unique
   omsStatus          String?
+  // P2: event-time of the last applied OMS status (out-of-order webhooks).
+  omsStatusAt        DateTime?
   handedOffAt        DateTime?
   adSource           String?
   createdAt          DateTime           @default(now())
@@ -1097,9 +1147,17 @@ model AIUsageLog {
   intent           String?
   confidence       Float?
   promptVersion    String?
+  // P6: which published persona instructions drove this call.
+  personaId        String?
+  personaVersion   Int?
+  // P6: true when the recorded model is the configured fallback.
+  fallbackUsed     Boolean  @default(false)
+  // P6: typed handoff reason when this call ended in a handoff.
+  handoffReason    String?
   promptTokens     Int      @default(0)
   completionTokens Int      @default(0)
-  costUsd          Float    @default(0)
+  // P6 fix (F-004): NULL when no pricing is configured — never fake $0.
+  costUsd          Float?
   latencyMs        Int      @default(0)
   success          Boolean  @default(true)
   status           String   @default("SUCCESS")

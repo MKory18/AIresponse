@@ -41,6 +41,9 @@ export type MessageItem = {
   mediaUrl: string | null;
   deliveryStatus: string;
   createdAt: string;
+  /** P4: internal team note — rendered distinctly, never sent or retried. */
+  isNote?: boolean;
+  senderId?: string | null;
 };
 
 export type CustomerDetail = {
@@ -54,11 +57,28 @@ export type CustomerDetail = {
   avatarUrl?: string | null;
   notes: string | null;
   tags: string[];
+  isBlacklisted?: boolean;
+  blacklistSource?: string | null;
   identities: { id: string; channelType: string; channelExternalId: string; displayName?: string | null; avatarUrl?: string | null }[];
   pageName?: string | null;
-  orders: { id: string; orderNumber: string; status: string; total: string; currency: string; createdAt: string }[];
+  orders: { id: string; orderNumber: string; status: string; total: string; currency: string; createdAt: string; adSource?: string | null }[];
   conversations: { id: string; status: string; aiState: string; updatedAt: string }[];
   aiSummary: string | null;
+};
+
+export type OpenHandoff = {
+  id: string;
+  reason: string;
+  status: string;
+  priority?: string | null;
+  createdAt: string;
+} | null;
+
+export type AssignmentActivity = {
+  id: string;
+  action: string;
+  actorName: string | null;
+  createdAt: string;
 };
 
 export type DraftInfo = {

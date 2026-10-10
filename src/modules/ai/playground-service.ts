@@ -1,7 +1,7 @@
 import { AppError, NotFoundError } from "@/core/errors";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { getAIProvider } from "./provider";
-import { loadAISettings, resolveModel } from "./router";
+import { getWorkspaceProvider, loadAISettings, resolveModel } from "./router";
 import { resolveChannelPersona, type ResolvedPersona } from "./channel-persona";
 import {
   buildKnowledgeContext,
@@ -46,10 +46,12 @@ export interface PlaygroundSource {
 export interface PlaygroundDebug {
   provider: string;
   model: string;
-  persona: { name: string; source: ResolvedPersona["source"] };
+  task: string;
+  persona: { name: string; source: ResolvedPersona["source"]; version: number | null };
   page: { id: string; name: string } | null;
   knowledgeUsed: boolean;
   productUsed: boolean;
+  draftUsed: boolean;
   latencyMs: number;
   promptTokens: number;
   completionTokens: number;
@@ -205,6 +207,12 @@ export async function sendPlaygroundMessage(
     customerName?: string;
     vectorStore?: VectorStore;
     embedder?: { embed: (text: string) => Promise<number[]> };
+    /** P6: test unpublished instructions without touching production rows. */
+    draftInstructions?: string | null;
+    /** P6: test a specific PersonaVersion snapshot (workspace-scoped). */
+    personaVersionId?: string | null;
+    /** P6: which task model to exercise (default RESPONSE). */
+    task?: "RESPONSE" | "EXTRACTION" | "SUMMARY";
   }
 ): Promise<PlaygroundReply> {
   const started = Date.now();
@@ -217,8 +225,33 @@ export async function sendPlaygroundMessage(
   });
 
   // 2. Same persona logic as production: explicit override → page → workspace → builtin.
+  // P6: a version snapshot or draft instructions override IN MEMORY ONLY —
+  // the live Persona row is never written from the playground.
   let persona: ResolvedPersona;
-  if (session.personaId) {
+  let draftUsed = false;
+  if (opts?.personaVersionId) {
+    const snap = (await (db as unknown as { personaVersion: { findUnique: (a: unknown) => Promise<Record<string, unknown> | null> } }).personaVersion.findUnique({
+      where: { id: opts.personaVersionId },
+    })) as Record<string, unknown> | null;
+    if (!snap || snap.workspaceId !== ctx.workspaceId) throw new NotFoundError("Persona version");
+    persona = {
+      id: snap.personaId as string,
+      name: `${(snap.name as string) ?? "المساعد"} (مسودة v${snap.version as number})`,
+      language: (snap.language as string) ?? "ar",
+      dialect: (snap.dialect as string | null) ?? null,
+      tone: (snap.tone as string) ?? "friendly",
+      formality: (snap.formality as string) ?? "informal",
+      responseLength: (snap.responseLength as string) ?? "short",
+      emojiLevel: (snap.emojiLevel as number) ?? 1,
+      salesStyle: (snap.salesStyle as string) ?? "helpful",
+      systemInstructions: (snap.systemInstructions as string | null) ?? null,
+      prohibitedPhrases: (snap.prohibitedPhrases as string[]) ?? [],
+      customRules: (snap.customRules as string[]) ?? [],
+      version: (snap.version as number) ?? null,
+      source: "workspace",
+    };
+    draftUsed = true;
+  } else if (session.personaId) {
     await assertWorkspaceOwned(db, ctx.workspaceId, "persona", session.personaId, "Persona");
     const row = (await (db as unknown as { persona: { findFirst: (a: unknown) => Promise<Record<string, unknown> | null> } }).persona.findFirst({
       where: { id: session.personaId, workspaceId: ctx.workspaceId },
@@ -236,10 +269,17 @@ export async function sendPlaygroundMessage(
       systemInstructions: (row?.systemInstructions as string | null) ?? null,
       prohibitedPhrases: (row?.prohibitedPhrases as string[]) ?? [],
       customRules: (row?.customRules as string[]) ?? [],
+      version: typeof row?.version === "number" ? (row.version as number) : null,
       source: "workspace",
     };
   } else {
     persona = await resolveChannelPersona(db, { workspaceId: ctx.workspaceId, channelId: session.channelId });
+  }
+  // P6: draft instructions override in memory only (length-capped, never saved).
+  if (opts?.draftInstructions !== undefined && opts.draftInstructions !== null) {
+    const draft = opts.draftInstructions.slice(0, 20_000);
+    persona = { ...persona, systemInstructions: draft.length ? draft : persona.systemInstructions };
+    draftUsed = true;
   }
 
   // 3. Trusted context: selected product + knowledge (when enabled). Workspace-scoped.
@@ -272,9 +312,20 @@ export async function sendPlaygroundMessage(
   }));
 
   // 5. Real provider (fail-closed) + model routing (AISettings → ENV → defaults).
-  const provider = requireRealProvider();
+  // P6: workspace-aware resolution (settings provider choice is effective) +
+  // per-call task selection (EXTRACTION/SUMMARY exercise their own models).
   const settings = await loadAISettings(db, ctx.workspaceId).catch(() => null);
-  const modelCfg = resolveModel(settings as never, "RESPONSE");
+  let provider: ReturnType<typeof requireRealProvider>;
+  try {
+    provider = getWorkspaceProvider((settings ?? null) as never);
+    void provider.name;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/AI_NOT_CONFIGURED/.test(msg)) throw new AppError("الذكاء الاصطناعي غير مهيأ", 503, "AI_NOT_CONFIGURED");
+    throw err;
+  }
+  const task = opts?.task ?? "RESPONSE";
+  const modelCfg = resolveModel(settings as never, task);
   const model = session.model ?? modelCfg.model;
 
   const system = [
@@ -307,9 +358,20 @@ export async function sendPlaygroundMessage(
     responseInstruction(persona),
   ].join("\n\n");
 
+  // P1 privacy gate: operator-typed test turns may paste real customer
+  // data — external models receive tokens only (restored locally for the
+  // operator's own display). Mock/local providers bypass by design.
+  const { sendProtectedText, sendProtectedStructured } = await import("./privacy-gate");
+  const playgroundPII = opts?.customerName?.trim() ? { name: opts.customerName.trim().slice(0, 100) } : {};
+  // P1.1: quoted product figures must survive reply-side scrubbing.
+  const playgroundAllowedNumbers: Array<string | number> =
+    productCtx.product && (productCtx.product as { price?: string | number }).price !== undefined
+      ? [(productCtx.product as { price?: string | number }).price as string | number]
+      : [];
+
   let res;
   try {
-    res = await provider.generateText({ system, user: userPrompt, model, temperature: modelCfg.temperature, maxTokens: modelCfg.maxTokens });
+    res = await sendProtectedText(provider, { system, user: userPrompt, model, temperature: modelCfg.temperature, maxTokens: modelCfg.maxTokens }, { pii: playgroundPII, allowedNumbers: playgroundAllowedNumbers, purpose: "PLAYGROUND" });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/AI_NOT_CONFIGURED/.test(msg)) throw new AppError("الذكاء الاصطناعي غير مهيأ", 503, "AI_NOT_CONFIGURED");
@@ -325,7 +387,7 @@ export async function sendPlaygroundMessage(
     // NO static customer-facing fallback — the application never invents a
     // reply. Regenerate once; if guardrails still reject, surface the failure
     // instead of fabricating text.
-    const retry = await provider.generateText({ system, user: userPrompt, model, temperature: 0.2, maxTokens: modelCfg.maxTokens });
+    const retry = await sendProtectedText(provider, { system, user: userPrompt, model, temperature: 0.2, maxTokens: modelCfg.maxTokens }, { pii: playgroundPII, allowedNumbers: playgroundAllowedNumbers, purpose: "PLAYGROUND_RETRY" });
     const retryText = (retry.text ?? "").trim();
     const retryGuard = validateResponse({
       response: retryText,
@@ -342,14 +404,14 @@ export async function sendPlaygroundMessage(
   let orderProposal: PlaygroundReply["orderProposal"] = null;
   if (opts?.withOrderProposal) {
     try {
-      const raw = await provider.generateStructured({
+      const raw = await sendProtectedStructured(provider, {
         system: `${coreSystemRules()}\n\n${extractionInstruction()}`,
         user: wrapUntrustedCustomerContent(text, transcript),
         model,
         temperature: 0.2,
         maxTokens: 400,
         validate: (v) => validateStructured(extractionResultSchema, v),
-      });
+      }, { pii: playgroundPII, purpose: "PLAYGROUND_PROPOSAL" });
       const v = raw.value as { intent: string; confidence: number; entities: Record<string, unknown>; missingFields: string[]; requestedAction: string };
       orderProposal = {
         intent: v.intent,
@@ -419,10 +481,12 @@ export async function sendPlaygroundMessage(
   const debug: PlaygroundDebug = {
     provider: provider.name,
     model,
-    persona: { name: persona.name, source: persona.source },
+    task,
+    persona: { name: persona.name, source: persona.source, version: persona.version ?? null },
     page,
     knowledgeUsed: session.useKnowledge,
     productUsed: Boolean(session.productId),
+    draftUsed,
     latencyMs: Date.now() - started,
     promptTokens: res.promptTokens ?? 0,
     completionTokens: res.completionTokens ?? 0,
@@ -438,7 +502,10 @@ export async function sendPlaygroundMessage(
       metadata: {
         provider: debug.provider,
         model: debug.model,
+        task: debug.task,
         persona: debug.persona,
+        personaVersion: persona.version ?? null,
+        draftUsed,
         promptVersion: PROMPT_VERSIONS.RESPONSE,
         latencyMs: debug.latencyMs,
         promptTokens: debug.promptTokens,

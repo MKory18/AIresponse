@@ -22,7 +22,7 @@ export function encryptSecret(plaintext: string): string {
     const tag = cipher.getAuthTag();
     return `${iv.toString("base64")}.${tag.toString("base64")}.${ciphertext.toString("base64")}`;
   } catch (err) {
-    throw new EncryptionError("Failed to encrypt secret");
+    throw new EncryptionError("Failed to encrypt secret", safeCause(err));
   }
 }
 
@@ -43,6 +43,18 @@ export function decryptSecret(payload: string): string {
   } catch {
     throw new EncryptionError("Failed to decrypt secret");
   }
+}
+
+/**
+ * P1: safe failure cause. Crypto must never leak key material, but a bare
+ * "Failed to encrypt" hid a trivial misconfiguration (truncated
+ * ENCRYPTION_KEY after dotenv `#` comment parsing) for a full debug session.
+ * Only the whitelisted env-validation prefix (field names + constraints, no
+ * values) is propagated; everything else stays opaque.
+ */
+function safeCause(err: unknown): string | undefined {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.startsWith("Invalid environment configuration") ? msg : undefined;
 }
 
 export function timingSafeEqual(a: string, b: string): boolean {

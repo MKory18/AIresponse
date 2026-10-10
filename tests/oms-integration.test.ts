@@ -83,7 +83,8 @@ describe("OMS integration (سيستم 7 — B2)", () => {
     });
 
     const count = await syncProductsFromOms(db as Db, AGENT);
-    expect(count).toBe(1);
+    expect(count.synced).toBe(1);
+    expect(count.failed).toBe(0);
     const row = await db.product.findUnique({
       where: { workspaceId_sku: { workspaceId: WS, sku: "TW-500" } },
     });

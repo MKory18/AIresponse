@@ -39,7 +39,8 @@ export async function rebuildDailyAnalytics(db: DbClient, workspaceId: string, d
   const [conversations, messages, aiLogs, orders, handoffs, automations, followUps] = await Promise.all([
     db.conversation.count({ where: { workspaceId, createdAt: range } }),
     db.message.findMany({
-      where: { workspaceId, createdAt: range },
+      // P4: internal notes are team records, not customer/channel volume.
+      where: { workspaceId, createdAt: range, isNote: false },
       select: { direction: true },
     }),
     db.aIUsageLog.findMany({

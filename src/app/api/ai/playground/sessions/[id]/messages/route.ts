@@ -11,6 +11,12 @@ const messageSchema = z.object({
   withOrderProposal: z.boolean().optional(),
   /** Optional display-only test name — prompt context only, never persisted as a Customer. */
   customerName: z.string().trim().max(100).optional(),
+  /** P6: exercise a specific task model (default RESPONSE). */
+  task: z.enum(["RESPONSE", "EXTRACTION", "SUMMARY"]).optional(),
+  /** P6: test unpublished instructions (in-memory only, never saved). */
+  draftInstructions: z.string().max(20000).optional(),
+  /** P6: test a PersonaVersion snapshot (workspace-scoped). */
+  personaVersionId: z.string().cuid().optional(),
 });
 
 /**
@@ -32,6 +38,9 @@ export const POST = createHandler(
     const result = await sendPlaygroundMessage(prisma, auth!, id, body.text, {
       withOrderProposal: body.withOrderProposal,
       customerName: body.customerName,
+      task: body.task,
+      draftInstructions: body.draftInstructions ?? null,
+      personaVersionId: body.personaVersionId ?? null,
       vectorStore,
     });
     return ok(result);

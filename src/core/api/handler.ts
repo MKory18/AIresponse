@@ -27,6 +27,12 @@ interface RouteOptions<TBody, TQuery> {
   /** Allow unauthenticated access. */
   public?: boolean;
   rateLimit?: { limit: number; windowMs: number };
+  /**
+   * P1: when true, rate-limit storage failure refuses with 503 instead of
+   * degrading to per-process memory buckets. Use for brute-force shields
+   * (login/register) which require the database anyway.
+   */
+  rateLimitStrict?: boolean;
 }
 
 interface HandlerArgs<TBody, TQuery> {
@@ -75,7 +81,9 @@ export function createHandler<TBody = unknown, TQuery = unknown>(
         return NextResponse.json({ error: "PAYLOAD_TOO_LARGE" }, { status: 413 });
       }
       if (options.rateLimit) {
-        await rateLimitDb(`${ip}:${new URL(req.url).pathname}`, options.rateLimit.limit, options.rateLimit.windowMs);
+        await rateLimitDb(`${ip}:${new URL(req.url).pathname}`, options.rateLimit.limit, options.rateLimit.windowMs, {
+          onStorageFailure: options.rateLimitStrict ? "fail-closed" : "memory-fallback",
+        });
       }
 
       if (!options.public) {

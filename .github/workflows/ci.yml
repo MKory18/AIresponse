@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: ["main"]
+
+# Least privilege for the checks below (read-only code + status reporting).
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck / lint / test / secrets / build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Format-valid dummies ONLY — the unit suite runs against the in-memory
+      # fake DB (tests/helpers/inmemory-db.ts) and injected mocks, never a
+      # real database or AI provider. No production secret belongs here.
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+      JWT_SECRET: ci-dummy-jwt-secret-value-0000000000000000
+      ENCRYPTION_KEY: ci-dummy-encryption-key-0000000000000000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Reproducible install honoring package-lock.json (npm ci fails fast
+      # when the lockfile is out of sync with package.json).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Secret scan
+        run: npm run scan:secrets
+
+      - name: Production build
+        run: npm run build
+
+  migrate-check:
+    name: prisma migrate deploy (real Postgres + pgvector)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_commerce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_commerce?schema=public
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Proves every migration in prisma/migrations applies cleanly on a real
+      # PostgreSQL with the pgvector extension (closes the local-only gap
+      # where migrations were never applied to a real database).
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Verify schema objects
+        run: |
+          node -e "
+          const { PrismaClient } = require('@prisma/client');
+          (async () => {
+            const p = new PrismaClient();
+            try {
+              const tables = await p.\$queryRaw\`SELECT count(*) AS c FROM information_schema.tables WHERE table_schema = 'public'\`;
+              const migs = await p.\$queryRaw\`SELECT count(*) AS c FROM _prisma_migrations\`;
+              const ext = await p.\$queryRaw\`SELECT count(*) AS c FROM pg_extension WHERE extname = 'vector'\`;
+              console.log('tables=' + tables[0].c, 'migrations=' + migs[0].c, 'pgvector=' + ext[0].c);
+              if (Number(ext[0].c) < 1) throw new Error('pgvector extension missing');
+            } finally {
+              await p.\$disconnect();
+            }
+          })().catch((e) => { console.error(e); process.exit(1); });
+          "

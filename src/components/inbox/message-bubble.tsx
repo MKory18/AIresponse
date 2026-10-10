@@ -19,6 +19,20 @@ export function MessageBubble({ message, onRetry }: { message: MessageItem; onRe
     );
   }
 
+  // P4: internal team note — amber, labeled, no delivery tick, no retry.
+  // Notes never enter ChannelSender (server-enforced); the bubble only renders.
+  if (m.isNote) {
+    return (
+      <div className="flex w-full justify-center py-0.5">
+        <div className="max-w-[85%] rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 dark:border-amber-400/25">
+          <p className="mb-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">ملاحظة داخلية · للفريق فقط</p>
+          <p className="whitespace-pre-wrap break-words text-[13px] text-ink">{m.text}</p>
+          <p className="num mt-1 text-[10px] text-ink-subtle">{formatTime(m.createdAt)}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex w-full animate-fade-in", outbound ? "justify-start" : "justify-end")}>
       <div className={cn("max-w-[78%] sm:max-w-[62%]", outbound ? "bubble-out" : "bubble-in")}>

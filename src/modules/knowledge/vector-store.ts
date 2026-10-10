@@ -94,7 +94,7 @@ export class PgVectorStore implements VectorStore {
       SELECT c.id AS "chunkId", c."documentId" AS "documentId", c.content, c.metadata,
              1 - (c.embedding <=> $1::vector) AS score
       FROM "KnowledgeChunk" c
-      WHERE c.workspaceId = $2
+      WHERE c."workspaceId" = $2
         AND c."isActive" = true
         AND c.embedding IS NOT NULL
         AND c."embeddingProvider" = $3

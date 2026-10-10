@@ -6,6 +6,7 @@ const listQuerySchema = z.object({
   status: z.enum(["OPEN", "CLAIMED", "RESOLVED", "CANCELLED"]).optional(),
   reason: z.enum(["CUSTOMER_REQUEST", "COMPLAINT", "LOW_CONFIDENCE", "AI_FAILURE", "ORDER_BLOCKED", "PAYMENT_ISSUE", "INJECTION_DETECTED", "REPEATED_FAILURE", "MANUAL"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+  conversationId: z.string().cuid().optional(),
 });
 
 export const GET = createHandler(
@@ -14,6 +15,7 @@ export const GET = createHandler(
     const where: Record<string, unknown> = { workspaceId: auth!.workspaceId };
     if (query.status) where.status = query.status;
     if (query.reason) where.reason = query.reason;
+    if (query.conversationId) where.conversationId = query.conversationId;
     // HumanHandoff has no Prisma relation to Conversation (scalar
     // conversationId only) — an `include: { conversation }` throws
     // "Unknown field `conversation`". Fetch plain rows, then hydrate the

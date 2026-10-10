@@ -62,3 +62,416 @@
 5. B6: الفلترة (R03) · قوالب التسلسلات · الوصول للزبائن القدامى · الحملات الآمنة.
 6. B7: ربط الأنظمة · المؤشرات الجديدة · قوالب الردود (R01, R05, R07, R08) · صندوق الجوال · مواءمة Zaki OS.
 7. B8: الفحص النهائي.
+
+---
+
+## P0 — فحص خط الأساس (9 تشرين الأول 2026)
+
+> فحص فقط — لم يُعدَّل أي كود منتج في هذه الجلسة. التعديل الوحيد هو هذا المقطع التوثيقي.
+
+- **الفرع:** `main` — متزامن مع `origin/main` (لا ahead/behind).
+- **الـ commit المفحوص:** `fd59fc6` — «feat(system7): OMS integration (connection, sync, handoff, webhooks) + System 7 docs» (2026-10-09).
+- **الشجرة:** نظيفة — لا ملفات معدَّلة؛ غير متتبَّع فقط: `$null` و`.playwright-mcp/` (مخلّفات أدوات، لم تُمس).
+- **وثائق System 7 v2 الإنجليزية** (`01_SYSTEM7_PRODUCT_SPEC_v2.md` · `02_ZAKI_OMS_INTEGRATION_CONTRACT_v2.md` · `03_SYSTEM7_GLM_PROMPT_PLAYBOOK_v2.md`): **غير موجودة** — لم يُخترع محتواها. البدائل العربية الموجودة: `سيستم_7_المنطق_والأقسام.md` · `سيستم_7_التوافق_مع_OMS.md` · `سيستم_7_برومبتات_GLM.md`. و`docs/SECURITY-AUDIT.md` غير موجود كملف docs لكن نسخة الجذر `SECURITY-AUDIT.md` موجودة ومقروءة.
+
+### نتائج التشغيل الفعلي (P0 — مثبتة، ليست ادعاءات)
+
+| الفحص | الأمر | النتيجة |
+|---|---|---|
+| الاختبارات | `npm test` (vitest) | **446/446 ناجحة — 31 ملف** ✅ (مطابق لادعاء الجلسة السابقة) |
+| الأنواع | `npm run typecheck` | نظيف ✅ |
+| Lint | `npm run lint` | بلا تحذيرات/أخطاء ✅ |
+| الأسرار | `npm run scan:secrets` | نظيف ✅ |
+| البناء | `npm run build` | `Compiled successfully` + `Generating static pages (74/74)` ✅ |
+| الترحيلات | `prisma migrate status` (قراءة فقط) | قاعدة `ai_commerce` على `localhost:5432` **متصلة لكن 0/7 ترحيلات مطبَّقة** ⚠️ |
+| الإقلاع | `next dev -p 3100` مؤقتًا | يقلع (`Ready in 3s`) و`GET /login` → **200** ✅ ثم أُطفئ ونُظِّف |
+| المنفذ 3000 | فحص المستمع | **مشغول بتطبيق آخر** (node تابع لخدمة n8n — استجابة `/api/health` بشكل `zaki-workspace` لا يطابق `src/app/api/health/route.ts`) — ليس تطبيق هذا المستودع ⚠️ |
+
+### تصحيحات B0 (مقابل جدول المطابقة السابق)
+
+1. «واجهة محوّل قناة موحّدة موجودة» — **جزئي**: الواجهة (`channels/types.ts`) موجودة لكن `registry.ts` يعيد `MockChannelAdapter` فقط، وماسنجر (`channels/facebook/*` — 7 ملفات) **لم يُنقل عليها**. الحالة: IN_PROGRESS لا ✅.
+2. «التقنيع قبل الموديل الخارجي منجز» — **جزئي**: أداة `ai/masking.ts` موجودة ومختبرة، لكن **لا يوجد أي استيراد لها في `provider.ts`/`orchestrator.ts`** (البحث يعيد الملف نفسه فقط). الربط الفعلي معلّق أصلًا تحت B3 — الحالة: CODE_COMPLETE للأداة، NOT_STARTED للربط.
+3. عدّادات محدَّثة بالقياس الفعلي: **41 نموذج Prisma** (المراجعة قالت 37 — الجديد المؤكد: `OmsConnection` + `RateLimitEntry`) · **71 ملف `route.ts`** (المراجعة قالت ~50) · **31 ملف اختبار** (مطابق).
+
+### B1 — المؤكد
+
+- محدد السرعة على قاعدة البيانات (`core/api/rate-limit.ts` + نموذج `RateLimitEntry`) موجود مع fallback للذاكرة؛ مسار الـ fallback مُغطّى باختبار ناجح (`api-handler.test.ts` — سقط الاتصال الموجَّه عمدًا إلى fallback). مسار الـ DB الحقيقي **غير متحقق** (لا ترحيلات مطبَّقة).
+- CI (`.github/`): غير موجود — NOT_STARTED (مؤكد).
+- تقسيم `orchestrator.ts` (924 سطرًا مقاسًا) و`conversations/service.ts` (847 سطرًا مقاسًا): لم يبدأ — NOT_STARTED (مؤكد).
+- سكربتات `scripts/staging/` موجودة لكن لم تُشغَّل على بنية حقيقية — BLOCKED (بنية/اعتمادات).
+
+### B2 — المؤكد
+
+- `modules/oms/`: `client.ts` (نطاق قراءة+إنشاء فقط + `verifyOmsWebhookSignature`) · `sync.ts` (مزامنة تحفظ حقول البيع المحلية + قائمة سوداء + اتصال مشفَّر بـ `encryptSecret`) · `handoff.ts` (ترحيل بطبقتي عدم تكرار) · `webhook.ts` (مرآة حالة عبر آلة الحالات + حدث باص للمتابعات) — كلها CODE_COMPLETE ومغطاة بـ `tests/oms-integration.test.ts` (ناجح ضمن الـ 446).
+- المسارات: `POST /api/oms/connection` (settings.manage) · `POST /api/oms/sync` (products.write) · `POST /api/oms/handoff` (orders.write) · `POST /api/webhooks/oms` (عام، HMAC بـ `x-oms-signature`) — موجودة ومطابقة للعقد.
+- الترحيل `20261006000000_system7_oms_integration/migration.sql` موجود لكن **غير مطبَّق على أي قاعدة** — لا OMS حي ولا اتصال مختبَر. الإثبات الحي: BLOCKED.
+
+### خريطة التنفيذ (مختصرة — الدليل الكامل أعلاه)
+
+| الميزة | الحالة | الدليل |
+|---|---|---|
+| Auth + RBAC (37 صلاحية/7 أدوار) + عزل workspace | VERIFIED_LOCAL | `rbac/permissions.ts` (37 سطر صلاحية مقاسًا) + `rbac.test.ts` + `phase9-security.test.ts` ضمن 446 ✅ |
+| Inbox + takeover/release + حذف ناعم | VERIFIED_LOCAL | `inbox-conversations` + `ai-mode-persona` (×100 HUMAN_ACTIVE) ✅ |
+| Messenger (OAuth/HMAC/24h/إرسال idempotent) | CODE_COMPLETE | `channels/facebook/*` + `phase6-facebook` ✅؛ الإثبات على Meta الحقيقي BLOCKED |
+| AI (orchestrator/providers/router/prompts/guardrails/memory) | VERIFIED_LOCAL | `phase4-ai` (29) + `master-reliability` ✅؛ التقسيم NOT_STARTED |
+| RAG + pgvector | CODE_COMPLETE | `phase3-knowledge` + `knowledge-e2e` ✅؛ مسار `PgVectorStore` الحقيقي NOT VERIFIED |
+| Orders/drafts/rules/state-machine | VERIFIED_LOCAL | `phase5-orders` (30) ✅ |
+| Automation/follow-ups/handoffs | VERIFIED_LOCAL | `phase7-automation` ✅ |
+| Analytics/usage/observability | VERIFIED_LOCAL | `phase8-analytics` ✅ |
+| Media/storage/روابط موقعة | VERIFIED_LOCAL | `media-e2e` + `media-public-url` ✅ |
+| Playground معزول | VERIFIED_LOCAL | `playground-isolation` (12) ✅ |
+| Rate limiter على DB | CODE_COMPLETE | كود + اختبار fallback ✅؛ مسار DB الحقيقي غير متحقق |
+| ChannelAdapter موحد | IN_PROGRESS | واجهة فقط؛ ماسنجر خارجها |
+| OMS foundation | CODE_COMPLETE | كود + مسارات + ترحيل + اختبارات ✅؛ بلا DB مهاجَر ولا OMS حي |
+| تقنيع PII قبل الموديل الخارجي | IN_PROGRESS | أداة CODE_COMPLETE؛ الربط في provider NOT_STARTED |
+| ترحيلات محلية (0/7) | BLOCKED | `migrate status` — يحتاج قرار: `migrate dev` على قاعدة التطوير |
+| CI | NOT_STARTED | لا `.github/` |
+| Staging/Meta-prod/pgvector حقيقي/worker طويل/E2E/حمل/backup | BLOCKED/NOT VERIFIED | تحتاج بنية + حسابات خارجية (قائمة SECURITY-AUDIT) |
+
+### قرار P0
+
+**جاهز للانتقال إلى P1** — الفحص مكتمل والأدلة مثبتة أعلاه. شروط P1 المقترحة (بالترتيب): (1) قرار ترحيل قاعدة التطوير المحلية؛ (2) CI؛ (3) ربط التقنيع داخل `provider.ts` مع بوابة fail-closed؛ (4) تقسيم orchestrator/conversations بلا تغيير سلوك؛ (5) إقلاع staging حسب `COOLIFY-STAGING.md`. الممنوعات الخارجية (Meta حقيقي/OMS حي/pgvector إنتاجي) تبقى BLOCKED لحين توفرها — لا تعيق بدء P1.
+
+---
+
+## P1 — التحصين الأمني والموثوقية (10 تشرين الأول 2026)
+
+> الأساس المحافَظ عليه: الفرع `main` من `fd59fc6`. كل البوابات أدناه شُغّلت فعليًا ونتائجها مثبتة — لا ادعاءات.
+
+### نتائج البوابات النهائية (P1)
+
+| الفحص | النتيجة |
+|---|---|
+| `npm test` | **476/476 ناجحة — 35 ملفًا** ✅ (446 أصلية + 12 خصوصية + 7 محدد سرعة + 8 سجل قنوات + 3 pgvector) |
+| `npm run typecheck` | نظيف ✅ |
+| `npm run lint` | بلا تحذيرات/أخطاء ✅ |
+| `npm run scan:secrets` | نظيف ✅ |
+| `npm run build` | `Compiled successfully` + 74/74 صفحة ✅ (أُعيد بعد كل التعديلات) |
+
+### 1. تقنيع PII مربوط فعليًا (الأولوية الأمنية) — VERIFIED_LOCAL
+
+- **الجديد:** `src/modules/ai/privacy-gate.ts` — بوابة مركزية عند حد الاتصال بالنموذج الخارجي: رموز `[PII-N]` لكل استدعاء مع خزينة ذاكرة محلية فقط (لا سجلات/لا تخزين/لا مشاركة بين المحادثات)، استعادة محلية من القيم الموثوقة، حجب الأرقام المخترَعة، توجيه خصوصية، ورفض fail-closed (`PrivacyError` غير قابل لإعادة المحاولة) عند: مزوّد مجهول التسليم، فشل التقنيع، أو تجاوز سقف الخزينة.
+- **الربط:** المنسّق (استخراج + رد + إعادة) · الملعب (نص + استخراج) · ملخصات الـ worker · التضمين الخارجي (`scrubForEmbedding` داخل `OpenAIEmbeddingProvider` — متسق فهرسةً واستعلامًا). التمييز خارجي/داخلي/محلي عبر `delivery` مصرّح به إنشائيًا — لا تخمين بالاسم.
+- **`delivery` أُضيفت لواجهة `AIProvider`** (إضافة فقط): خارجي افتراضيًا، محلي للـ mock.
+- **الحراسة:** قاعدة `UNVERIFIED_CONTACT` (لطيفة: تُفعَّل فقط مع `trustedContacts`؛ السلوك القديم محفوظ بدونه) + تطبيع الأرقام الفارسية.
+- **الاختبارات:** `tests/p1-privacy-gate.test.ts` (12: A–H عبر مسار provider حقيقي بمزوّد خارجي مسجِّل، بما فيه تشغيل المنسّق الكامل).
+- **عربي محفوظ:** الأرقام العربية/الفارسية تُكتشف وتُعاد مطابقة للبايت؛ الأسعار/الكميات (رقم ≤8 بلا شكل هاتفي) لا تُمس. المتبقي الموثّق: رقم هاتفي 7–8 أرقام بلا بادئة/فواصل لا يُرمَّز (نادر، مسجَّل كخطر متبقٍّ).
+
+### 2. قاعدة البيانات والترحيلات — VERIFIED_LOCAL
+
+- **التشخيص (قراءة فقط أولًا):** `ai_commerce@localhost:5432` بمستخدم `aiapp` المخصص (ليست قاعدة Odoo) — **فارغة تمامًا** (0 جداول، بلا سجل ترحيلات). الإثبات: استعلام `information_schema` قبل التطبيق.
+- **القرار:** قاعدة تطوير مخصصة وآمنة + لا بيانات لنسخها (الفراغ المثبت هو الدليل) → طُبِّق `prisma migrate deploy`: **7/7 ناجحة**، ثم `Database schema is up to date`. اللاحق: 42 جدولًا (41 نموذجًا + `_prisma_migrations`)، `OmsConnection` و`RateLimitEntry` موجودان.
+- **المكتشف أثناء الزرع:** `npm run db:seed` كان مكسورًا — `ENCRYPTION_KEY` المحلي يحوي `#` فيقطعه محلل dotenv (<32 حرفًا) و`encryptSecret` كان يخفي السبب. أُصلح السببان: تجديد أسرار `.env` المحلية (hex، والمفاتيح القديمة ميتة — قاعدة فارغة)، + `EncryptionError` يحمل الآن سبب الإعداد الآمن فقط (بادئة `Invalid environment configuration`، بلا أسرار). الزرع يعمل: `Seed complete`.
+- **الدخاني المحلي (DB حقيقية):** إقلاع dev على 3100 → `/api/health` ‏(200: `database APP_HEALTHY`, `queue APP_HEALTHY`, `DEGRADED` فقط لغياب Meta) → login بالحساب التجريبي (200) → `/api/conversations` ‏(200 + بيانات) → `/api/knowledge/search` ‏(200 بعد إصلاح pgvector أدناه) → محدد السرعة على DB حقيقية: 10 ناجحة ثم 429ات (مطابق تمامًا للحد 10/دقيقة).
+- **الـ worker:** إقلاع + دورات + كاسح يتامى يعمل على DB حقيقية (`worker_started`, `worker_cycle_completed`, `orphaned_inbound_recovered`) — الاستقرار طويل الأمد ما زال NOT VERIFIED.
+
+### 3. إصلاح pgvector الحقيقي (صيد الدخاني) — VERIFIED_LOCAL
+
+- `PgVectorStore.search` كان يرسل `c.workspaceId` بلا اقتباس → ‏`42703 column c.workspaceid does not exist` — مسار pgvector الحقيقي **مكسور** وكل الاختبارات كانت على الذاكرة. الإصلاح: `c."workspaceId"` (سطر واحد) + `tests/p1-pgvector-sql.test.ts` (3) يثبّت SQL المولّد وترتيب `$6/$7`. مثبت حيًا: `/api/knowledge/search` ‏200 على Postgres حقيقية.
+
+### 4. CI — CODE_COMPLETE (التنفيذ الخارجي BLOCKED)
+
+- **الجديد:** `.github/workflows/ci.yml` (موثّق YAML بـ pyyaml): عند PR (فتح/تحديث) والدفع لـ `main` — `npm ci` ثم typecheck + lint + test + scan:secrets + build (وظيفة `verify`)، ووظيفة `migrate-check` تطبق الترحيلات على `pgvector/pgvector:pg16` وتتحقق من الجداول والترحيلات والامتداد. بلا أسرار (dummies شكلية فقط).
+- **الدليل المحلي:** كل خطوات `verify` هي نفسها بوابات P1 الخضراء أعلاه؛ و`migrate-check` مطابقة لما نُفّذ محليًا بنجاح (7/7). التشغيل على GitHub Actions نفسها: BLOCKED (يحتاج push/PR).
+
+### 5. Rate Limiter — VERIFIED_LOCAL (التوزيع الحقيقي BLOCKED)
+
+- **أُعيدت كتابته** (`core/api/rate-limit.ts`): جملة upsert ذرية واحدة (قفل الصف يلغي سباق check-then-act ومسار P2002 الخاسر)، `limit` تعني `limit` فعلًا (توحيد off-by-one مع مسار الذاكرة — موثّق)، سياسة فشل صريحة (`memory-fallback` افتراضيًا / `fail-closed` بـ 503 `RATE_LIMIT_STORAGE_DOWN`).
+- **التوصيل:** `rateLimitStrict` على login/register فقط (درع brute-force؛ عند تعطل DB هما ميتان أصلًا فلا خسارة توافر). باقي المسارات على سياستها السابقة — لا تغيير صامت.
+- **الاختبارات:** `tests/p1-rate-limit.test.ts` (7: حد دقيق، تزامن 20 متوازيًا → 5 ناجحة تمامًا، نافذة، عزل مفاتيح، fallback، fail-closed، طبيعة الذاكرة المؤقتة). المثبت حيًا أعلاه (10 ثم 429).
+- **غير المتحقق:** نسختا تطبيق متوازيتان على DB واحدة (يحتاج staging) — موثّق.
+
+### 6. التقسيم بلا تغيير سلوك — VERIFIED_LOCAL
+
+- `conversations/service.ts` (847) → `inbound.ts` (خط الوارد حرفيًا) + `threads.ts` (الباقي حرفيًا) + `service.ts` كـ barrel (كل الاستيرادات القديمة تعمل).
+- `orchestrator.ts` (~946) → `stages/{state,gating,extraction,response}.ts` + منسّق نحيف (~110 أسطر، تسلسل فقط). المنطق منقول حرفيًا سطرًا بسطر (نفس الترتيب والآثار الجانبية)؛ `AIExecutionResult`/`OrchestratorDeps` أُعيد تصديرهما للتوافق.
+- **الإثبات:** typecheck نظيف + كل حزم المحادثات/AI خضراء (119/119 في 6 ملفات مستهدفة) + الحزمة الكاملة 476/476. التغيير التجميلي الوحيد: فواصل تعليقات ASCII بدل المربعات.
+
+### 7. سجل المحوّلات — CODE_COMPLETE (ترحيل التدفقات مؤجل لـ P5)
+
+- **الحقيقة:** `getChannelAdapter` لم يكن مستدعًى في أي مكان — ماسنجر يعمل خارج السجل كليًا. الترحيل الكامل (webhook/إرسال) مخاطرة سلوكية فوق نطاق P1 → **مؤجل موثّقًا لـ P5**، ونُفّذ ما هو آمن:
+- **الجديد:** `facebook/adapter.ts` (`FacebookChannelAdapter` فوق normalizer/existing — الاستقبال من `normalizeFacebookWebhook`، والإرسال عبر sender محقون يملك التوكن؛ الشهادات لا تدخل المحوّل) + `registry.ts` حقيقي (FACEBOOK مربوط، Mock باشتراك صريح فقط، غير المسجَّل ← `ChannelNotSupportedError` بدل mock صامت، وتجاوز للاختبارات مع استعادة).
+- **الاختبارات:** `tests/p1-channel-registry.test.ts` (8: حل حقيقي، رفض بلا ربط، رفض غير المسجَّل، mock الصريح، تطبيع دفعة Meta، تجاهل الصفحات الأخرى، إرسال، fail-closed) + حزم فيسبوك القديمة خضراء (37/37 في 3 ملفات).
+
+### 8. الاستعداد التشغيلي (staging) — فحوص محلية + قائمة BLOCKED
+
+- **المنجز محليًا (§8 الآمن):** ترحيل + زرع + إقلاع + health/login/inbox/RAG/محدد/Worker (أعلاه). Docker **غير مثبّت** على هذه الآلة → تحقق الحاويات BLOCKED.
+- **قائمة staging (للمالك/المشغّل):** نشر compose على Coolify + env الإنتاج + نطاق/HTTPS + `validate-staging.sh` + `concurrency.mjs` ضد نطاق staging + اختبار Meta بحساب تجاري + `migrate deploy` + `db:seed` + مراقبة `/api/health` (نفس خطوات `COOLIFY-STAGING.md` §13). ممنوعات P1 المحترَمة: لا نشر إنتاج، لا DNS، لا تدوير مفاتيح حقيقية، لا رسائل حقيقية.
+
+### تصحيح مهم لسجل الاختبارات (شفافية)
+
+- أثناء P1 ظهر فشل `phase5-orders` واحد (ثم `facebook-oauth` واحد) **مرتبط بالبيئة لا بالكود**، وثّقته الأدلة: `@prisma/client` يحمّل `.env` عبر dotenv عند أول استيراد (بعد تنفيذ `setup.ts`)، فكان `AI_PROVIDER=openai` بلا مفتاح يقلب اختبارًا، و`META_REDIRECT_URI=` الفارغة تكسر `??`. مثبت أن الكود الأصلي (HEAD نظيف) يفشل identically، وأن الإصلاح (`tests/setup.ts`: استيراد مبكر لـ prisma ثم فرض قيم hermetic ومسح مفاتيح AI/META-override) أعاد **476/476**. الدرس موثّق: نتيجة P0 ‏(446/446) كانت معتمدة على ترتيب تحميل بيئي — الآن الحزمة حتمية.
+
+### خريطة الحالات (P1)
+
+| البند | الحالة | الدليل |
+|---|---|---|
+| تقنيع PII خارجي شامل | VERIFIED_LOCAL | 12 اختبارًا عبر provider حقيقي + دخاني محلي |
+| ترحيلات dev (7/7) + زرع | VERIFIED_LOCAL | `migrate status` + `Seed complete` + 42 جدولًا |
+| pgvector حقيقي | VERIFIED_LOCAL | إصلاح + 3 اختبارات + `/api/knowledge/search` ‏200 حيًا |
+| CI | CODE_COMPLETE | YAML صالح + خطواته منفَّذة محليًا؛ Actions الخارجي BLOCKED |
+| Rate limiter ذري + fail-closed | VERIFIED_LOCAL | 7 اختبارات + إثبات حي (10 ثم 429)؛ التوزيع BLOCKED |
+| تقسيم orchestrator/conversations | VERIFIED_LOCAL | 476/476 + typecheck، منطق حرفي |
+| سجل Messenger الحقيقي | CODE_COMPLETE | 8 اختبارات؛ ترحيل التدفقات → P5 |
+| دخاني محلي (health/login/inbox/worker) | VERIFIED_LOCAL | مخرجات HTTP أعلاه + سجلات worker |
+| Meta/OMS حي، staging حاويات، حمل، E2E | BLOCKED | Docker غائب + حسابات خارجية |
+
+### قرار P1
+
+**مكتمل تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P2.** البنود الـ 12 لمعايير القبول محققة أعلاه (10، 11، 12: البوابات الأربع خضراء + scan نظيف + لا أسرار جديدة + كل تغيير قابل للمراجعة عبر `git diff`). المخاطر المتبقية: رقم 7–8 أرقام بلا شكل هاتفي خارج التقنيع؛ fallback الذاكرة أحادي النسخة؛ ترحيل تدفقات Messenger مؤجل لـ P5؛ كل ما يحتاج Docker/حسابات خارجية.
+
+---
+
+## P1.1 — إغلاق ملاحظات الخصوصية ومحوّل Messenger (10 تشرين الأول 2026)
+
+> الأساس: `main` من `fd59fc6` + تغييرات P1 غير المسلّمة. كل البوابات أدناه شُغّلت فعليًا.
+
+### البوابات النهائية
+
+| الفحص | النتيجة |
+|---|---|
+| `npm test` | **494/494 — 36 ملفًا** ✅ (476 من P1 + 14 صيغ هواتف + 4 تدفقات حية جديدة) |
+| `npm run typecheck` | نظيف ✅ |
+| `npm run lint` | نظيف ✅ |
+| `npm run scan:secrets` | نظيف ✅ |
+| `npm run build` | `Compiled successfully` ✅ |
+
+### 1. فجوة صيغ الهواتف — مغلقة (VERIFIED_LOCAL)
+
+- **السياسة الجديدة** (`privacy-gate.ts`): (أ) القيم المعروفة تُرمَّز **بأي تهجئة** — مطابقة رقمية بعد التطبيع (مسافات/شرطات/Indic/بادئة دولة 1–4 أرقام)؛ (ب) الأرقام المجهولة العارية 7–8 تُرمَّز في **سياق هاتفي** (±25 حرفًا، وانحياز آمن عند اجتماع السياقين)؛ (ج) الردود تُحجب بصرامة مع `allowedNumbers` (أسعار/إجماليات من السياق الموثوق)؛ (د) `UNVERIFIED_CONTACT` توحّدت على نفس الكاشف (حُذف المكرر).
+- **المتبقي الموثّق صراحة:** رقم مجهول عارٍ 7–8 أرقام **بلا سياق هاتفي ولا تطابق معروف** يُترك (لا يُميَّز عن الأسعار/الإجماليات بثقة) — السياسة والاختبارات المانعة للتسريب في `tests/p1-phone-formats.test.ts` (14: الصيغ الأربع المطلوبة `12345678` · `12 34 56 78` · `+222 12 34 56 78` · `١٢٣٤٥٦٧٨` عبر مسار provider كامل، تمييز السياق، حفظ الأسعار، عزل الجلسات، استخراج حتمي، حراسة).
+- **OCR/الصوت:** لا مسار إدخال منهما إلى النماذج حاليًا (generateVision بلا مستدعين — موثّق أدناه)؛ أي مسار مستقبلي يدخل عبر `sendProtected*` نفسها.
+
+### 2. تدقيق استدعاءات AI الخارجية — مكتمل (VERIFIED_LOCAL)
+
+| # | الطبقة/الملف | البيانات | عبر البوابة؟ | الإثبات |
+|---|---|---|---|---|
+| 1 | `OpenAICompatibleProvider.chat` (الحد الخارجي الوحيد للـ LLM) | system/user/vision | نعم — كل المستدعين عبر `sendProtected*` | p1-privacy (12) + p1-phone (14) |
+| 2 | orchestrator استخراج/رد/إعادة | نص العميل + التاريخ + الاسم/الذاكرة/الملخص/المسودة | نعم | D/G في p1-privacy |
+| 3 | playground نص/استخراج | مدخلات المشغّل + اسم اختباري | نعم (+allowedNumbers للسعر) | playground-isolation (12) |
+| 4 | `handleGenerateSummary` | transcript كامل (20 رسالة) | نعم | مسار مغطى + G |
+| 5 | `OpenAIEmbeddingProvider.embed` (فهرسة المقاطع + استعلامات RAG) | نصوص KB + استعلام العميل | نعم (`scrubForEmbedding` داخل `embed`) | p1-privacy + دخاني P1 |
+| 6 | `generateVision` | — (لا مستدعين: قدرة خامدة) | N/A — أي تفعيل مستقبلي (R02) يجب أن يمر عبر البوابة لنص الـ prompt؛ بكسلات الصور خطر متبقٍّ موثّق | grep يُظهر صفر مستدعين |
+| 7 | `analyze_feedback` | — (قاعدي، بلا AI) | N/A | `feedback/service` |
+| 8 | `FacebookClient` (Graph: إرسال/صفحات/توكن) | نقل قناة لا استدلال (نص التسليم للمستلم نفسه) | N/A بحكم التصميم | phase6 + p1-channel |
+
+لا مسار يتجاوز البوابة. لا بيانات حقيقية أُرسلت لأي موفّر أثناء الاختبار (mocks مسجِّلة فقط).
+
+### 3. Messenger Adapter في التدفقات الحية — VERIFIED_LOCAL
+
+- **الاستقبال:** `facebook/webhook.ts` يحل `getChannelAdapter("FACEBOOK", {pageId, channelAccountId})` ويطبّع عبر `receiveNative` (نفس الدالة/الوسائط/المخرجات — مثبت بالتطابق العميق)؛ التحقق HMAC وidempotency والترتيب كما هي.
+- **الإرسال:** `dispatchOutbound` (الخطوة 7 فقط) عبر المحوّل بـ sender مربوط (نفس التوكن/المستلم/الحمولات/تصنيف الأخطاء)؛ idempotency والسياسة (24h) والاسترداد كما هي؛ `graphCode` يمر عبر `raw`.
+- **الضمانات:** `pageId`/`sender` اختياريا حسب الاتجاه (صفحة بلا externalId لا تُعطَّل إرسالاتها)؛ أي حل غير فيسبوك ← `ChannelNotSupportedError` (لا mock صامت)؛ `ChannelNotSupportedError` انتقل لـ `types.ts` (بلا دورة).
+- **الإثبات:** `tests/p1-channel-registry.test.ts` (12): استقبال حي عبر السجل + إرسال حي عبر السجل (SENT بـ `mid` حقيقي من stub) + تطابق المخرجات + رفض الربط الناقص. الحزم القديمة خضراء ضمن 494/494. بلا أي اتصال حقيقي بالعملاء في الاختبارات.
+
+### 4. الملفات (P1.1)
+
+معدلة: `ai/{privacy-gate,guardrails,playground-service}`، `ai/stages/response`، `channels/{types,registry,facebook/{adapter,normalizer,webhook},outbound}`. جديدة: `tests/p1-phone-formats.test.ts` (+4 اختبارات موسّعة في `p1-channel-registry`).
+
+### 5. BLOCKED والمخاطر المتبقية
+
+- Meta/OMS الحي، staging الحاويات، الحمل، E2E، multi-worker/instance: **BLOCKED** (بنية/حسابات) — كما في P1.
+- رقم مجهول عارٍ بلا سياق: متروك عمدًا (موثّق + مختبَر) — يُعاد تقييمه مع بيانات إنتاجية حقيقية في P2+.
+- بكسلات الصور (R02 مستقبلي) خارج التغطية حتى توثيق سياسة الرؤية.
+
+### قرار P1.1
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P2.**
+
+---
+
+## P2 — تدقيق وإكمال تكامل Zaki OMS (10 تشرين الأول 2026)
+
+> الأساس: `main` من `fd59fc6` + تغييرات P1/P1.1 غير المسلّمة. البوابات: **520/520 (38 ملفًا)** ✅ · typecheck ✅ · lint ✅ · scan ✅ · build ✅. بلا اتصال إنتاجي، بلا طلبات OMS حقيقية، migration واحد إضافي على dev فقط.
+
+### الخطوة الأولى — العقد الحقيقي: ما هو مثبت وما هو مفترض
+
+وثيقة `سيستم_7_التوافق_مع_OMS.md` تنص صراحة أن «الأسماء النهائية بتنضبط وقت البناء» — أي أن المسارات (`GET /oms/products`، `/oms/customer`، `/oms/order/{id}`، `POST /oms/orders`، `/oms/note`، حدث `order-status-changed`) **مؤشَّرة غير مُثبتة** من طرف OMS. لم يُخترع بديل: الكود يعمل ضد `baseUrl` قابل للضبط بنفس المسارات المفترضة، والفجوات سُجّلت كمتطلبات خارجية (BLOCKED): (1) تثبيت المسارات والطرق؛ (2) تأكيد مخطط المصادقة (حاليًا Bearer)؛ (3) مواصفة pagination؛ (4) مخطط الأخطاء؛ (5) `eventId`/`occurredAt` في الـ webhook + سياسة إعادة الإرسال؛ (6) **ضمان عدم التكرار على `idempotencyKey` في `POST /orders`** (يعتمد عليه الترحيل)؛ (7) سياسة تعطيل المنتجات؛ (8) حدود المعدل. مستودع OMS أو توثيق API الحقيقي: **غير متاح**.
+
+### جدول P2 (الميزة | الحالة | الاختبارات | الأدلة | ما لم يُختبر)
+
+| الميزة | الحالة | الاختبارات | الأدلة | ما لم يُختبر |
+|---|---|---|---|---|
+| عميل OMS (مهلة 15s + retry مصنّف GET/غامض-POST فقط) | VERIFIED_LOCAL | `p2-oms-hardening` (retry ×3، no-retry على 400، timeout، سطح القراءة فقط) | `client.ts` + عدّادات fetch في الاختبارات | سلوك OMS الحقيقي (BLOCKED) |
+| مزامنة المنتجات (تحقق/عزل/تعطيل بلا حذف/طوابع) | VERIFIED_LOCAL | نجاح + صفوف فاسدة + فارغ بلا تعطيل + ضخم مرفوض + حقول بيع محفوظة | `sync.ts` + `POST /api/oms/sync` (مثبت حيًا سابقًا) | pagination (بلا مواصفة — BLOCKED) |
+| العملاء والقائمة السوداء (سياسة عدم رفع الحظر اليدوي) | VERIFIED_LOCAL | حظر/رفع/يدوي-محفوظ/مجهول-مُتخطى | `sync.ts` + إنفاذ أدناه | مطابقة الهوية خارج الرقم (العقد صامت) |
+| إنفاذ الحظر عند الإنشاء والترحيل (`ORDER_CUSTOMER_BLACKLISTED` + تدقيق) | VERIFIED_LOCAL | رفض الإنشاء (0 طلبات) + رفض الترحيل (0 POSTs) | `order-service.ts` + `handoff.ts` | — |
+| ترحيل الطلبات (شروط + مفتاح مكرر + إعادة الغامض) | VERIFIED_LOCAL | ×100 متسلسل (POST واحد) · متوازٍ ×20 (نفس المفتاح) · timeout-ثم-نجاح · رفض غير المؤكد (موجود) · عزل شركات | `handoff.ts` + الحمولة تتضمن السعر/العناصر/adSource | ضمان OMS للمفتاح (BLOCKED خارجي) |
+| AI لا ينشئ طلبات مباشرة | VERIFIED_LOCAL (بالبناء) | `handoffOrderToOms` مستدعى من المسار فقط (grep) + `OrderService` حصرية الإنشاء + phase5 | الكود + الاختبارات القائمة | — |
+| webhook (مشتق workspace + HMAC + dedupe + ترتيب) | VERIFIED_LOCAL | توقيع صح/خطأ/غائب · مجهول 404 بلا آثار · تعارض workspace · replay مرة واحدة · stale لا يرجع · مجهول/قفزة غير صالحة مرآة فقط | `webhook.ts` + `webhooks/oms/route.ts` + 9 اختبارات مسارات | أحداث OMS حقيقية (BLOCKED) |
+| ترحيل `p2_oms_status_at` (`omsStatusAt` nullable) | VERIFIED_LOCAL | `migrate deploy` ناجح + CI يتحقق | `prisma/migrations/20261010080059_p2_oms_status_at/` (يتضمن إصلاح drift آمنًا: FK/index أُعيدا بلا فقد) | إنتاج (ممنوع دون إذن) |
+| تشفير التوكن + HMAC + صلاحيات (settings.manage/products.write/orders.write مثبتة) | VERIFIED_LOCAL | تشفير ذهاب/عودة عبر المسار (بلا نص خام) + 3 اختبارات تثبيت صلاحيات + سطح العميل (قراءة/إنشاء/ملاحظة فقط) | `sync.ts`/`client.ts`/المسارات | مفاتيح إنتاج (ممنوعة) |
+| خصوصية المزامنة (بلا AI في المسار) | VERIFIED_LOCAL | فحص استدعاءات: المزامنة/الترحيل/الwebhook بلا أي generate* | grep + البوابة P1 | — |
+
+### قرار P2
+
+**مغلق محليًا بانتظار أمرين خارجيين: (1) تثبيت العقد/الاتصال مع فريق OMS (القائمة أعلاه)؛ (2) مراجعة المالك. لا PRODUCTION_VERIFIED لأي بند OMS. لا انتقال لـ P3.** ملاحظة الأرقام غير المقنّعة من P1/P1.1 تبقى في المخاطر (تغطية P1.1 قائمة؛ المجهول العاري بلا سياق متروك عمدًا).
+
+---
+
+## P3 — المؤسسات والمستخدمون والفرق والصلاحيات (10 تشرين الأول 2026)
+
+> الأساس: `main` من `fd59fc6` + تغييرات P0–P2 غير المسلّمة. البوابات: **536/536 (40 ملفًا)** ✅ · typecheck ✅ · lint ✅ · scan ✅ · build (يتضمن `/settings/team`) ✅. بلا OMS، بلا إنتاج.
+
+### الموجود أصلًا (احتُفظ به كاملًا)
+
+- نماذج `User`/`Workspace`/`WorkspaceMember` (7 أدوار، 37 صلاحية، حالات ACTIVE/INVITED/SUSPENDED، تجاوزات `permissions[]`) + مصفوفة RBAC + صلاحيات طازجة كل طلب.
+- جلسات JWT (7 أيام، HttpOnly) + `getAuthContext` يرفض غير ACTIVE (إبطال فوري عند التعليق — كان موجودًا وغير مختبَر، الآن مختبر).
+- إنشاء/سرد/تبديل مساحات العمل (التبديل يتحقق من العضوية النشطة) + تسجيل/دخول/خروج.
+- فرض الصلاحيات خادميًا (`createHandler` + صفحات `enforcePermission` + شريط جانبي مُرشَّح).
+
+### المضاف/المُصلح (فجوات حقيقية فقط)
+
+- **الدعوات:** `INVITED`/`expiresAt` (ترحيل `p3_member_invite_expiry`، dev فقط) — دعوة موجودين بالبريد (7 أيام، تجديد، رفض المجهول/المكرر/الموقوف)، قبول ذاتي بالجلسة (بلا توكنات) مع رفض المنتهية (410)، بلا جداول جديدة.
+- **الإدارة:** `src/modules/members/service.ts` (محقون DB، مدقق، مسجَّل تدقيقيًا) + 5 مسارات (`GET/POST /members`، `POST /members/accept`، `PATCH/DELETE /members/[id]`، `PUT /workspaces`) + تحديث اسم/منطقة (`workspace.manage`، الهدف من الجلسة — يستحيل التلاعب).
+- **الحواجز:** لا تعديل ذاتي (403)، لا `SUPER_ADMIN` عبر API، لا صلاحيات مجهولة، أرضية مالك واحد نشط (ترقية/تعليق/إزالة)، العضوية الموقوفة = حظر فوري.
+- **الواجهة:** `/settings/team` (بوابة `users.manage` خادمية) + مكوّن الفريق (قائمة/دعوة/دور/إيقاف/إزالة/إعادة تسمية) + عنصر nav (`users.manage`) + بطاقة إعدادات + مفتاح i18n — نفس التصميم وRTL، بلا إعادة تصميم. صفحة الإعدادات كانت تعد بالفريق «في المراحل القادمة» — أُنجزت.
+- **القاعدة الوهمية:** نموذج `workspace` أُضيف للمضاعفة (إضافي، لا يمس الاختبارات القائمة).
+
+### اختبارات الأمان الستة (كلها خضراء)
+
+1. عزل الشركات (قوائم/عمليات مقيدة + خاصية الجلسة فقط) — `p3-members` + `p3-authz`.
+2. لا تصعيد ذاتي (دور/صلاحيات/إزالة الذات + حظر SUPER_ADMIN) — `p3-members`.
+3. الموقوف محظور فورًا (سياق حقيقي + مسار HTTP حقيقي) — `p3-authz`.
+4. التلاعب بـ workspaceId مرفوض (جلسة بلا عضوية + PUT بلا مدخل) — `p3-authz` + `p3-members`.
+5. كل عملية إدارية في AuditLog (دعوة/قبول/تعديل/إزالة/مساحة) — `p3-members`.
+6. أجسام 403 بلا بريد/أسرار — `p3-authz`.
+
+### الحالات والمتبقي
+
+| البند | الحالة |
+|---|---|
+| نماذج/مصفوفة/جلسات/مسارات موجودة | VERIFIED_LOCAL (محفوظة + مغطاة) |
+| دعوات/فريق/تحديث مساحة + واجهة | VERIFIED_LOCAL (16 اختبارًا جديدًا) |
+| ترحيل `expiresAt` | VERIFIED_LOCAL (dev فقط) |
+| تعدد الجلسات/تدويرها، حذف مساحة، SSO/2FA، E2E متصفح | BLOCKED/not-started (يحتاج staging/قرارات لاحقة) |
+
+### قرار P3
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لاحق.** ملاحظة P2 (العقد الخارجي) والأرقام العارية بلا سياق تبقيان في المخاطر.
+
+---
+
+## P4 — صندوق الوارد الاحترافي وContact 360 (10 تشرين الأول 2026)
+
+> الأساس: `main` من `fd59fc6` + تغييرات P0–P3 غير المسلّمة. البوابات: **551/551 (41 ملفًا)** ✅ · typecheck ✅ · lint ✅ · scan ✅ · build (يتضمن `/api/.../notes`) ✅. بلا Meta/OMS حقيقي، بلا إنتاج.
+
+### تحقق P3 المركز (قبل تعديل P4)
+
+- قبول الدعوة الصحيح ومنع قبول حساب آخر: مغطى أصلًا ومؤكد.
+- **سباق المالك الأخير: وُجد وثُبت.** الفحص المتزامن كان نظريًا فقط؛ أُضيف تحقق لاحق مع تعويض (استعادة الصف عند كسر الأرضية) في `updateMember`/`removeMember` + اختبار تزامني يثبت الثابت تحت كل interleaving (≥1 مالك نشط دائمًا، وكل رفض هو `OWNER_REQUIRED`).
+
+### الموجود أصلًا (محفوظ)
+
+القائمة/البحث/الفلاتر الأساسية/pagination/السلاسل الزمنية/الرد المتفائل + idempotency/التعليم كمقروء/الحل/takeover/release/الحذف الناعم/شارات AI-HUMAN/المعيَّن/الشخصية/لوحة العميل (هوية/طلبات/مسودة/ملخص/جدول زمني)/إعادة المحاولة/السياسات — كلها بقيت دون مساس.
+
+### المضاف (فجوات حقيقية فقط)
+
+- **فلاتر خادمية:** `priority`/`assignee(me/none/cuid)`/`channelType`/`dateFrom-dateTo` في `listConversations` + المخطط + المسار + صف فلاتر بالواجهة (التبويبات القديمة بقيت عميلة).
+- **الملاحظات الداخلية:** `Message.isNote` (ترحيل dev) + `postNote` + `POST notes` (صلاحية `conversations.reply`) — صف HUMAN/INBOUND معلَّم، مستبعد من: المرسِل (لا يقرأ إلا صفوفه)، الاسترداد/إعادة المحاولة (OUTBOUND + مفتاح فقط)، سجل AI، أحجام التحليلات، معاينات القوائم. تدقيق `note.created`. واجهة: لسان رد/ملاحظة + فقاعة كهرمانية بلا tick/إعادة.
+- **Contact 360:** بريد + شارة قائمة سوداء + `adSource` للطلبات (خدمة + لوحة).
+- **التفاصيل:** `openHandoff` (بانر السبب) + `assignmentHistory` (آخر 10 مدققة مع أسماء) — استعلامان محدودان، بلا N+1 جديدة.
+- **سباق حقيقي مُصلح:** إنشاء المحادثة المتزامن كان يرمي 500 (بلا P2002) — الآن يعيد القراءة ويلتحق (مطابق نمط الهوية) + إنفاذ التفرد في المضاعفة.
+
+### الاختبارات (14 جديدة، `tests/p4-inbox.test.ts`)
+
+فلاتر/ترتيب/pagination/كرسور فاسد/فراغ؛ ملاحظات (إنشاء/ظهور/لا-إرسال/استبعاد AI/فصل الأنواع)؛ 360 (علاقات + 404 عابر)؛ إسناد + تدقيق + بانر + نشاط؛ إخفاء/إعادة فتح؛ عزل الشركات الأربع؛ تثبيت صلاحيات المسارات؛ هوية متزامنة (محادثة + رسالة واحدتان)؛ كلها خضراء ضمن 551/551.
+
+### الحالات والمتبقي
+
+| البند | الحالة |
+|---|---|
+| الوارد والفلاتر والملاحظات و360 والهوية | VERIFIED_LOCAL |
+| ترحيلا `isNote` | VERIFIED_LOCAL (dev فقط) |
+| E2E متصفح للواجهة الجديدة، Meta حي، staging | BLOCKED |
+| قنوات جديدة، دمج عملاء، حذف ملاحظات، أرشفة | مؤجل موثّق (خارج P4) |
+
+### قرار P4
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P5.** لا جاهزية إنتاجية مُعلنة.
+
+---
+
+## P5 — القنوات المتعددة عبر واجهات API الرسمية (10 تشرين الأول 2026)
+
+> الأساس: `main` من `fd59fc6` + تغييرات P0–P4 غير المسلّمة. البوابات: **598/598 (45 ملفًا)** ✅ · typecheck ✅ · lint ✅ · scan ✅ · build (كل مسارات القنوات الجديدة) ✅. بلا حسابات خارجية، بلا رسائل حقيقية، ترحيلان dev فقط.
+
+### البوابة قبل التوسعة: قناة `auto` المتزامنة — محلولة ومختبرة
+
+- **المقصود:** `ensureChannelId` تنشئ صف `TYPE (auto)` عند غياب `channelId` في webhook.
+- **الحالة:** تزامن أول-تواصل مزدوج → صفّان مكرران (القيد `@@unique(workspaceId,type,externalId)` لا يطلق على NULL) → تشتت التوجيه/الشارات، بلا فقدان رسائل (هوية المحادثة مستقلة).
+- **الإصلاح:** فهرس فريد جزئي `(workspaceId,type) WHERE externalId IS NULL` (ترحيل، مطبق dev بعد إثبات صفر تكرار) + التقاط P2002 وإعادة القراءة + إنفاذ مماثل في المضاعفة + اختبار تزامني (8 متوازية → صف واحد).
+
+### العقد المشترك
+
+- `CHANNEL_CAPABILITIES` الصريحة لكل نوع + `ChannelFeatureError` (501، لا تقليد) + `ChannelTransport` + سياسات `canSend*` لكل مزوّد + مهمة `process_channel_inbound` المشتركة (نفس عقد الدفعة الفيسبوكي) + `Channel.identity` لكل نوع (PSID/IGSID/wa_id/chat-id/open_id — استحالة الخلط بنيويًا).
+- `dispatchOutbound`: مسار Messenger **حرفي** (85/85 حزم فيسبوك خضراء) + فرع `dispatchChannelSend` للقنوات الجديدة بنفس القشرة (idempotency/استرداد/جزء أول/استخدام).
+
+### لكل قناة
+
+| القناة | الموجود | المضاف | الحالة |
+|---|---|---|---|
+| Messenger | تكامل حي كامل | متحقق بلا تغيير (85/85) | VERIFIED_LOCAL (الحي BLOCKED) |
+| FB Comments | — | استقبال feed (تخزين مُكرر-آمن، بلا رد تلقائي) + رد عام/خاص(مرة/7أيام)/إخفاء + 6 مسارات | VERIFIED_LOCAL (الحي BLOCKED) |
+| Instagram | — | عميل/تطبيع/HMAC/سياسة 24h (تحفظ موثّق)/محوّل/webhook/تعليقات/ربط | VERIFIED_LOCAL (اعتماد Meta BLOCKED) |
+| Telegram | — | عميل Bot API/سرّ header/سياسة بلا نافذة/محوّل/webhook/ربط (getMe + secret + setWebhook) | VERIFIED_LOCAL (حساب حقيقي BLOCKED) |
+| WhatsApp | — | عميل Cloud/تطبيع wa_id/HMAC/سياسة 24h+قوالب/محوّل/webhook/ربط | VERIFIED_LOCAL (رقم تجاري BLOCKED) |
+| TikTok | — | شكل محلي فقط (تطبيع/سياسة/محوّل نصي/رفض وسائط صريح)/الربط مرفوض سببيًا | CODE_COMPLETE (الوصول BLOCKED) |
+
+### الأمان والإدارة والواجهة
+
+- أسرار مشفرة، لا إرجاع/تسجيل، إثبات ملكية الحساب (صراع عبر المساحات مرفوض)، فصل آمن (السياسات توقف الإرسال)، تحقق لكل مزوّد بشكله الرسمي، WebhookEvent لكل حدث، عزل كامل، AI لا يرى الاعتمادات.
+- `POST/DELETE /api/channels/[type]` (تحقق حي قبل التخزين) + `GET /api/channels` (بلا أسرار) + قسم واجهة (نماذج IG/WA/TG، حالات، فصل، TikTok إرشادي) — Messenger القديمة untouched.
+- الاختبارات: 47 جديدة (عقد/بوابة auto/webhooks/إرسال/تعليقات/ربط/عزل/ملاحظات) + كل القديمة خضراء. لا Mock صامت (مثبت)، لا رسائل حقيقية.
+
+### قرار P5
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P6.** كل اتصال حي واعتماد خارجي: **BLOCKED** (Meta/Telegram/WhatsApp/TikTok). لا PRODUCTION_VERIFIED لأي قناة جديدة.
+
+---
+
+## P6 — استوديو الذكاء الاصطناعي والوكلاء وقاعدة المعرفة (10 تشرين الأول 2026)
+
+> الأساس: `main` من `fd59fc6` + تغييرات P0–P5 غير المسلّمة. البوابات: **632/632 (46 ملفًا)** ✅ · typecheck ✅ · lint ✅ · scan:secrets ✅ · build (`Compiled successfully` + 91/91 صفحة، كانت 74) ✅. ترحيل واحد إضافي مطبق على dev فقط (`p6_ai_studio`). بلا اتصال إنتاجي، بلا مفاتيح حقيقية، بلا رسائل حقيقية.
+
+### الفحص قبل التنفيذ — الموجود مقابل الناقص (مثبت بالكود)
+
+| الوحدة | الموجود (احتُفظ به) | الناقص (نُفّذ في P6) |
+|---|---|---|
+| Provider Registry/Model Router | `resolveModel` لكل مهمة + `estimateCost` null-safe + `logUsage` + `withRetry` + `delivery` | اختيار `AISettings.provider` كان **شكليًا** (الواجهة تعرضه و`getAIProvider` يقرأ ENV فقط) → أصبح فعّالًا عبر `getWorkspaceProvider` (أولوية: حقن الاختبار > اختيار حقيقي للمساحة > ENV > fail-closed)؛ مهام `EMBEDDING`/`RETRIEVAL`؛ `validateTaskModel`؛ بديل صريح `fallbackModel`؛ `customBaseUrl` داخلي (`delivery: internal`)؛ اختبار اتصال PII-free |
+| Personas | CRUD + ربط القناة (`aiPersonaId`) + أولوية قناة→مساحة→مدمج + حدود `PERSONA_LIMITS` | **لا إصدارات** → جدول `PersonaVersion` + مسارات مسودة/نشر/رجوع + `Persona.version` + ربط قناة↔شخصية عبر API + تسجيل `personaId/personaVersion` في كل usage |
+| Playground | جلسات معزولة + نفس منطق الشخصية + معرفة + debug | مسودات `draftInstructions` و`personaVersionId` (ذاكرة فقط) + اختيار المهمة `task` + `draftUsed/task/version` في debug — العزل محفوظ ومختبر |
+| Knowledge/RAG | مستندات/مقاطع/FAQ/بحث/`reindex`/حذف + فلتر هوية التضمين + عزل مساحات | مكتمل أصلًا — أُضيفت اختبارات المسار الحقيقي (استرجاع معلومة معروفة، عزل مساحات، رفض الأجيال غير المتوافقة، FAILED الصريح) |
+| Privacy Gate | `sendProtected*` على كل المسارات + `UNVERIFIED_CONTACT` | كل المسارات الجديدة عبر البوابة (مثبت) + إصلاح تسريب: `logUsage` كان يسجل كائن الخطأ الخام (قد يحمل PII) → الآن معرّفات آمنة فقط |
+| Monitoring | `AIUsageLog` + تحليلات AI | **خطأ F-004 الحقيقي**: السكيمة كانت `costUsd NOT NULL DEFAULT 0` (الادعاء nullable غير مطبق — `null` كان سيفشل بصمت عبر catch) → الآن `Float?` بلا default؛ حقول `personaId/personaVersion/fallbackUsed/handoffReason` |
+| UI | صفحات ai-settings/personas/knowledge/playground/analytics-ai | صفحة `/ai/studio` (حالات: غير مهيأ/مهيأ/يعمل/يعمل محليًا/فشل/يحتاج مفتاح/متوقف/منشور) + حقول endpoint/بديل + إصدارات في Personas + مهمة/مسودة في Playground |
+
+### الملفات والمخططات
+
+- **ترحيل** `20261010095845_p6_ai_studio` (dev فقط): `AISettings.customBaseUrl/fallbackProvider/fallbackModel` + `Persona.version` + جدول `PersonaVersion` + `AIUsageLog.personaId/personaVersion/fallbackUsed/handoffReason` + `costUsd` nullable.
+- **جديدة**: `ai/persona-versions.ts` · `api/ai/status/route.ts` · `api/ai/providers/test/route.ts` · `api/personas/[id]/versions/route.ts` · `.../[version]/publish` · `.../[version]/rollback` · `api/channels/by-id/[id]/persona/route.ts` · `(dashboard)/ai/studio/page.tsx` · `tests/p6-ai-studio.test.ts` (34).
+- **معدلة**: `ai/{router,provider,channel-persona,playground-service}` · `ai/stages/{gating,extraction,response,state}` · `api/{ai/settings,ai/playground/.../messages}` · `channels/connect` (عرض `aiPersonaId`) · `(dashboard)/{nav-items,settings/ai,personas,ai/playground}` · `app-sidebar` (أيقونة) · `tests/helpers/inmemory-db` · `analytics/service` (بلا تغيير — كانت null-safe أصلًا).
+
+### الاختبارات (34 جديدة، `tests/p6-ai-studio.test.ts`)
+
+التوجيه لكل مهمة (.override/ENV/افتراضي) · التوافق (تضمين≠رد≠رؤية) · فعالية اختيار المزود + fail-closed + حقن الاختبار + internal مستقل · البديل (عند الفشل فقط، بلا بديل→فشل صريح، الدائم لا يلمس البديل) · خط الأنابيب: فشل أولي+بديل→RESPONDED بالنموذج البديل والبوابة سليمة على المحاولتين · مسودة/نشر/رجوع/عزل إصدارات · أولوية القناة + version · usage يحمل persona/fallback · مسودات Playground بلا مساس بالحي + مهمة SUMMARY تستخدم نموذجها + رفض الأجنبي · RAG حقيقي (استرجاع معلومة، عزل مساحات، رفض الأجيال، حذف وتنظيف، FAILED الصريح) · فحص PII-free + مفاتيح خارج النتائج · تكلفة null/حقيقية + فشل السجل لا يكسر النجاح · تثبيت صلاحيات كل مسارات P6 · انحدار Messenger أخضر.
+
+### أدلة التنفيذ الفعلي
+
+- **إعدادات النماذج**: `getWorkspaceProvider` مستدعى في `runGating` و`sendPlaygroundMessage` (ليس عرضًا) — مثبت باختبار خط الأنابيب (النموذج البديل هو ما ولّد الرد وسُجل).
+- **عزل Playground**: لقطة 9 جداول إنتاج قبل/بعد متطابقة + رفض `deleteFacebook`/إرسال حقيقي سابقًا + مسودات لا تكتب `Persona` (مثبت بالنص الحي قبل/بعد).
+- **RAG حقيقي**: `createKnowledgeDocument → runJobs → searchKnowledge` بمضمّن Hash ومخزن InMemory عبر نفس دوال الإنتاج، والضرب المتقاطع للمساحات يعيد صفرًا للمصدر الأجنبي.
+- **Privacy Gate**: كل `sendProtected*` (استخراج/رد/إعادة/ملعب/اقتراح/تضمين) + فحص PII على مدخلات البديل المسجلة + `probeProviderEndpoint` يرسل `ping` فقط.
+
+### الحالات
+
+| البند | الحالة |
+|---|---|
+| كل بنود P6 محليًا | VERIFIED_LOCAL (632/632 + 4 بوابات) |
+| ترحيل `p6_ai_studio` على dev | VERIFIED_LOCAL (مطبق + مولّد العميل) |
+| اتصال OpenAI/OpenRouter/داخلي حي | BLOCKED (يحتاج مفاتيح/endpoint من المالك — زر "اختبار الاتصال" جاهز في الاستوديو) |
+| Meta/OMS/staging/E2E | BLOCKED (كما في P5، بلا تغيير) |
+
+### قرار P6
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P7.** ملاحظة الأرقام العارية بلا سياق (P1.1) والعقد الخارجي (P2) تبقيان في المخاطر.

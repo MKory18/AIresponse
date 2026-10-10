@@ -1,10 +1,11 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { createWorkspaceSchema } from "@/modules/auth/schemas";
 import { setSessionCookie } from "@/modules/auth/session";
-import { createWorkspaceForUser, listWorkspacesForUser } from "@/modules/workspaces/service";
+import { createWorkspaceForUser, listWorkspacesForUser, updateWorkspaceDetails } from "@/modules/workspaces/service";
 import { switchWorkspaceSchema } from "@/modules/auth/schemas";
 import { prisma } from "@/core/db/prisma";
 import { AuthorizationError } from "@/core/errors";
+import { z } from "zod";
 
 export const GET = createHandler({}, async ({ auth }) => {
   const workspaces = await listWorkspacesForUser(auth!.userId);
@@ -31,5 +32,23 @@ export const PATCH = createHandler(
     }
     await setSessionCookie({ userId: auth!.userId, workspaceId: body.workspaceId });
     return ok({ ok: true, activeWorkspaceId: body.workspaceId });
+  }
+);
+
+const updateWorkspaceSchema = z.object({
+  name: z.string().trim().min(2).max(100).optional(),
+  timezone: z.string().trim().min(1).max(64).optional(),
+});
+
+/** Rename / re-timezone the CURRENT workspace (workspace.manage). */
+export const PUT = createHandler(
+  { body: updateWorkspaceSchema, permission: "workspace.manage" },
+  async ({ auth, body, req }) => {
+    const workspace = await updateWorkspaceDetails(
+      prisma,
+      { userId: auth!.userId, workspaceId: auth!.workspaceId, ip: req.headers.get("x-forwarded-for") ?? undefined },
+      body
+    );
+    return ok({ workspace });
   }
 );

@@ -13,6 +13,12 @@ export const conversationListQuerySchema = listQuerySchema.extend({
     .string()
     .optional()
     .transform((v) => v === "true" || v === "1"),
+  // P4 server-side filters (all optional; invalid values rejected, never ignored silently).
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+  assignee: z.string().max(64).optional(),
+  channelType: z.enum(["FACEBOOK", "INSTAGRAM", "WHATSAPP", "TELEGRAM", "WEB"]).optional(),
+  dateFrom: z.string().datetime({ offset: true }).optional(),
+  dateTo: z.string().datetime({ offset: true }).optional(),
 });
 
 export const updateCustomerSchema = z
@@ -62,4 +68,8 @@ export const assignSchema = z.object({
 
 export const readSchema = z.object({
   isRead: z.boolean().default(true),
+});
+
+export const noteSchema = z.object({
+  text: z.string().trim().min(1).max(4000),
 });

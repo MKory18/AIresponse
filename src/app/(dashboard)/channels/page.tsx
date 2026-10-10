@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Facebook, PlugZap, Unplug } from "lucide-react";
+import { MultiChannelSection } from "./multi-channel-section";
 import { t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -191,6 +192,7 @@ export default function ChannelsPage() {
       </GlassCard>
 
       {loading && <Skeleton className="h-36 rounded-2xl" />}
+      <MultiChannelSection />
       {connections.map((c) => (
         <GlassCard key={c.channelId} className="p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">

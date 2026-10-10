@@ -1,5 +1,6 @@
 import { childLogger } from "@/core/logger";
 import { processPendingJobs, type JobHandler } from "@/modules/jobs/service";
+import { handleChannelInbound } from "@/modules/channels/inbound-job";
 import { getEmbeddingProvider, getCurrentEmbeddingIdentity } from "@/modules/knowledge/embeddings";
 import { classifySentiment } from "@/modules/feedback/service";
 
@@ -218,16 +219,25 @@ async function handleGenerateSummary(db: HandlerDb, payload: Record<string, unkn
     .map((m) => `${m.direction === "INBOUND" ? "العميل" : "المتجر"}: ${m.text ?? "[وسائط]"}`)
     .join("\n");
 
+  // P1 privacy gate: the transcript carries raw customer turns — the
+  // external SUMMARY model receives tokens only; the stored summary is
+  // restored locally (internal DB content, never re-sent).
+  const { sendProtectedStructured } = await import("@/modules/ai/privacy-gate");
+  const summaryCustomer = (await db.customer.findUnique({
+    where: { id: conversation.customerId },
+    select: { name: true, phone: true, email: true, address: true },
+  }).catch(() => null)) as { name?: string | null; phone?: string | null; email?: string | null; address?: string | null } | null;
+
   try {
     const res = await withRetry(() =>
-      provider.generateStructured({
+      sendProtectedStructured(provider, {
         system: `${coreSystemRules()}\n\n${summaryInstruction()}`,
         user: wrapUntrustedCustomerContent(transcript, []),
         model: cfg.model,
         temperature: 0.2,
         maxTokens: cfg.maxTokens,
         validate: (raw) => validateStructured(summaryResultSchema, raw),
-      })
+      }, { pii: summaryCustomer ?? {}, purpose: "SUMMARY" })
     );
     await db.conversation.update({ where: { id: conversationId }, data: { summary: res.value.summary } });
     await logUsage(db, {
@@ -401,6 +411,7 @@ export function getJobHandlers(): Record<string, JobHandler> {
     process_ai_message: (payload, jobId) => handleProcessAIMessage(getDb(), payload, currentWorkspaceId(jobId)),
     generate_summary: (payload) => handleGenerateSummary(getDb(), payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(getDb(), payload),
+    process_channel_inbound: (payload) => handleChannelInbound(getDb(), payload),
     evaluate_automation: (payload) => handleEvaluateAutomation(getDb(), payload),
     process_due_followups: () => handleProcessDueFollowUps(getDb()),
     aggregate_workspace_analytics: (payload) => handleAggregateAnalytics(getDb(), payload),

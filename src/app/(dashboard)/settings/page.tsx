@@ -1,11 +1,12 @@
 ﻿import Link from "next/link";
-import { ArrowLeft, Bot, Settings as SettingsIcon } from "lucide-react";
+import { ArrowLeft, Bot, Settings as SettingsIcon, Users } from "lucide-react";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { t } from "@/lib/i18n";
 
 export default function SettingsPage() {
   const sections = [
     { href: "/settings/ai", title: "إعدادات AI", desc: "المزود، النماذج، حرارة التوليد، حدود الثقة، والتشغيل/الإيقاف.", icon: Bot },
+    { href: "/settings/team", title: "الفريق والصلاحيات", desc: "الأعضاء، الدعوات، الأدوار، التعليق، وإعدادات مساحة العمل.", icon: Users },
   ];
   return (
     <div className="page-wrap">
@@ -30,7 +31,7 @@ export default function SettingsPage() {
       </div>
       <GlassCard level="glass-subtle" className="flex items-start gap-2.5 p-4 text-sm leading-relaxed text-ink-muted">
         <SettingsIcon size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
-        إعدادات مساحة العمل والفريق والأمان ستُستكمل في المراحل القادمة.
+        إعدادات الأمان المتقدمة ستُستكمل في المراحل القادمة.
       </GlassCard>
     </div>
   );

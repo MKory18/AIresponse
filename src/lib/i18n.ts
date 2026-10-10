@@ -23,6 +23,7 @@ export const t = {
     handoffs: "التسليم للموظفين",
     analytics: "التحليلات",
     settings: "الإعدادات",
+    team: "الفريق",
   },
   common: {
     send: "إرسال",

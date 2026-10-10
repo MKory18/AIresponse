@@ -14,6 +14,12 @@ export const GET = createHandler(
       q: query.q,
       cursor: query.cursor,
       limit: query.limit,
+      priority: query.priority,
+      assignee: query.assignee,
+      actorUserId: auth!.userId,
+      channelType: query.channelType,
+      dateFrom: query.dateFrom,
+      dateTo: query.dateTo,
     });
     return ok(result);
   }

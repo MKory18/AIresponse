@@ -4,13 +4,17 @@ import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 
 const settingsSchema = z.object({
-  provider: z.enum(["mock", "openai", "openrouter"]).optional(),
+  provider: z.enum(["mock", "openai", "openrouter", "internal"]).optional(),
   classificationModel: z.string().trim().max(120).nullable().optional(),
   extractionModel: z.string().trim().max(120).nullable().optional(),
   responseModel: z.string().trim().max(120).nullable().optional(),
   visionModel: z.string().trim().max(120).nullable().optional(),
   summaryModel: z.string().trim().max(120).nullable().optional(),
   embeddingModel: z.string().trim().max(120).nullable().optional(),
+  // P6: self-hosted OpenAI-compatible endpoint + explicit fallback.
+  customBaseUrl: z.string().trim().max(500).url("عنوان الاتصال يجب أن يكون رابطًا صالحًا").nullable().optional(),
+  fallbackProvider: z.enum(["mock", "openai", "openrouter", "internal"]).nullable().optional(),
+  fallbackModel: z.string().trim().max(120).nullable().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(50).max(4000).optional(),
   confidenceExecute: z.number().min(0).max(1).optional(),

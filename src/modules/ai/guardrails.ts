@@ -1,4 +1,5 @@
 ﻿import { looksLikeInjection } from "./intent";
+import { findPhoneCandidates } from "./privacy-gate";
 import type { AIContext } from "./context-builder";
 
 export interface GuardrailResult {
@@ -28,9 +29,20 @@ export function validateResponse(params: {
   context?: AIContext | null;
   prohibitedPhrases?: string[];
   allowFeedbackQuote?: boolean;
+  /**
+   * P1: trusted contact strings (customer phone etc., any digit shape).
+   * When provided (non-empty), phone-like runs that match NONE of them are
+   * rejected as UNVERIFIED_CONTACT — the model must never invent contact
+   * details. Omitted/empty = rule skipped (legacy behavior preserved).
+   */
+  trustedContacts?: string[];
+  /**
+   * P1.1: trusted non-contact numbers (prices, totals) exempt from the rule.
+   */
+  allowedNumbers?: Array<string | number>;
 }): GuardrailResult {
   const violations: string[] = [];
-  const { response, context, prohibitedPhrases = [], allowFeedbackQuote = false } = params;
+  const { response, context, prohibitedPhrases = [], allowFeedbackQuote = false, trustedContacts = [], allowedNumbers = [] } = params;
 
   // 0. Empty responses must never be sent.
   if (!response || !response.trim()) {
@@ -100,6 +112,31 @@ export function validateResponse(params: {
     violations.push("TOO_LONG");
   }
 
+  // 8. P1.1: no invented contact details. Any phone-like run must match a
+  // trusted contact or an allowlisted number (normalized across
+  // Arabic-Indic/Persian digits). Same candidate policy as the gate's
+  // reply-side scrub (strict bare runs, order-context exemption).
+  if (trustedContacts.length > 0 || allowedNumbers.length > 0) {
+    const allowed = new Set<string>();
+    for (const c of trustedContacts) {
+      const d = normalizeNumber(c).replace(/[^0-9]/g, "");
+      if (d.length >= 7) allowed.add(d);
+      if (c.trim()) allowed.add(c.trim());
+    }
+    for (const n of allowedNumbers) {
+      const d = normalizeNumber(String(n)).replace(/[^0-9]/g, "");
+      if (d.length >= 7) allowed.add(d);
+      if (String(n).trim()) allowed.add(String(n).trim());
+    }
+    for (const cand of findPhoneCandidates(response, { strictBare: true })) {
+      const d = normalizeNumber(cand).replace(/[^0-9]/g, "");
+      if (!allowed.has(d) && !allowed.has(cand.trim())) {
+        violations.push("UNVERIFIED_CONTACT");
+        break;
+      }
+    }
+  }
+
   const valid = violations.length === 0;
   return {
     valid,
@@ -109,8 +146,11 @@ export function validateResponse(params: {
 }
 
 function normalizeNumber(s: string): string {
-  // Convert Arabic-Indic digits and strip separators for comparison.
+  // Convert Arabic-Indic + Persian digits and strip separators for comparison.
   const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
-  const converted = s.replace(/[٠-٩]/g, (d) => String(arabicDigits.indexOf(d)));
+  const persianDigits = "۰۱۲۳۴۵۶۷۸۹";
+  const converted = s
+    .replace(/[٠-٩]/g, (d) => String(arabicDigits.indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String(persianDigits.indexOf(d)));
   return converted.replace(/[.,،٬\s]/g, "");
 }

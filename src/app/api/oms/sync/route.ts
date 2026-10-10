@@ -12,10 +12,10 @@ export const POST = createHandler(
   { body: syncSchema, permission: "products.write" },
   async ({ auth, body }) => {
     const ctx = { userId: auth!.userId, workspaceId: auth!.workspaceId };
-    const productsSynced = await syncProductsFromOms(prisma, ctx);
-    const customersUpdated = body.phones
+    const products = await syncProductsFromOms(prisma, ctx);
+    const customers = body.phones
       ? await syncCustomersFromOms(prisma, ctx, body.phones)
-      : 0;
-    return ok({ productsSynced, customersUpdated });
+      : { updated: 0, skipped: 0 };
+    return ok({ products, customers });
   }
 );

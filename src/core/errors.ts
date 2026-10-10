@@ -69,7 +69,7 @@ export class DatabaseError extends AppError {
 }
 
 export class EncryptionError extends AppError {
-  constructor(message = "Encryption operation failed") {
-    super(message, 500, "ENCRYPTION_ERROR");
+  constructor(message = "Encryption operation failed", details?: unknown) {
+    super(message, 500, "ENCRYPTION_ERROR", details);
   }
 }

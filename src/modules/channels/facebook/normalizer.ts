@@ -23,7 +23,7 @@ export function verifyWebhookChallenge(params: URLSearchParams): { ok: true; cha
   return { ok: false };
 }
 
-interface MetaWebhookPayload {
+export interface MetaWebhookPayload {
   object?: string;
   entry?: {
     id?: string;

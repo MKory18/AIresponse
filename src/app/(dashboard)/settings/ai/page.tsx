@@ -16,6 +16,10 @@ type Settings = {
   responseModel: string | null;
   visionModel: string | null;
   summaryModel: string | null;
+  embeddingModel: string | null;
+  customBaseUrl: string | null;
+  fallbackProvider: string | null;
+  fallbackModel: string | null;
   temperature: number;
   maxTokens: number;
   confidenceExecute: number;
@@ -51,6 +55,10 @@ export default function AISettingsPage() {
         responseModel: form.get("responseModel") || null,
         visionModel: form.get("visionModel") || null,
         summaryModel: form.get("summaryModel") || null,
+        embeddingModel: form.get("embeddingModel") || null,
+        customBaseUrl: form.get("customBaseUrl") || null,
+        fallbackProvider: form.get("fallbackProvider") || null,
+        fallbackModel: form.get("fallbackModel") || null,
         temperature: num("temperature"),
         maxTokens: num("maxTokens"),
         confidenceExecute: num("confidenceExecute"),
@@ -106,7 +114,7 @@ export default function AISettingsPage() {
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="المزود">
             <Select name="provider" defaultValue={settings.provider}>
-              {["mock", "openai", "openrouter"].map((p) => (
+              {["mock", "openai", "openrouter", "internal"].map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
             </Select>
@@ -117,11 +125,26 @@ export default function AISettingsPage() {
             ["responseModel", "نموذج الرد (الأقوى)"],
             ["visionModel", "نموذج الرؤية"],
             ["summaryModel", "نموذج التلخيص (رخيص)"],
+            ["embeddingModel", "نموذج التضمينات"],
           ].map(([key, fieldLabel]) => (
             <Field key={key} label={fieldLabel}>
               <Input name={key} defaultValue={(settings as never as Record<string, string | null>)[key] ?? ""} dir="ltr" className="num" />
             </Field>
           ))}
+          <Field label="عنوان النموذج الداخلي (OpenAI-compatible، اختياري)">
+            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://…" />
+          </Field>
+          <Field label="مزود البديل (عند الفشل فقط)">
+            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>
+              <option value="">بلا بديل</option>
+              {["mock", "openai", "openrouter", "internal"].map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="نموذج البديل">
+            <Input name="fallbackModel" defaultValue={settings.fallbackModel ?? ""} dir="ltr" className="num" />
+          </Field>
         </div>
       </GlassCard>
 

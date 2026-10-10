@@ -35,6 +35,14 @@ export interface AIResponse {
 
 export interface AIProvider {
   readonly name: string;
+  /**
+   * Connection delivery class (P1 privacy gate). Declared by construction —
+   * never inferred from the name:
+   * - "external": traffic leaves our infrastructure (masking REQUIRED).
+   * - "internal": self-hosted endpoint on our infrastructure (B3 policy).
+   * - "local": in-process mock/test double (nothing leaves the process).
+   */
+  readonly delivery: "external" | "internal" | "local";
   generateText(req: TextRequest): Promise<AIResponse>;
   generateStructured<T>(req: StructuredRequest<T>): Promise<AIResponse & { value: T }>;
   generateVision?(req: VisionRequest): Promise<AIResponse>;
@@ -46,15 +54,30 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 /** Shared OpenAI-compatible implementation for OpenAI & OpenRouter. */
 export class OpenAICompatibleProvider implements AIProvider {
   readonly name: string;
+  readonly delivery: "external" | "internal" | "local";
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly defaultModel: string;
 
-  constructor(opts: { name: string; apiKey: string; baseUrl: string; defaultModel: string }) {
+  constructor(opts: { name: string; apiKey: string; baseUrl: string; defaultModel: string; delivery?: "external" | "internal" }) {
     this.name = opts.name;
+    this.delivery = opts.delivery ?? "external";
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl;
     this.defaultModel = opts.defaultModel;
+  }
+
+  /** P6 studio: safe connection metadata (never the key itself). */
+  get endpointUrl(): string {
+    return this.baseUrl;
+  }
+
+  get hasCredentials(): boolean {
+    return this.apiKey.trim().length > 0;
+  }
+
+  get defaultModelName(): string {
+    return this.defaultModel;
   }
 
   private async chat(body: Record<string, unknown>): Promise<AIResponse> {
@@ -227,6 +250,7 @@ const globalForAI = globalThis as typeof globalThis & { __acreMockAI?: MockAIPro
  */
 export class MockAIProvider implements AIProvider {
   readonly name = "mock";
+  readonly delivery = "local" as const;
   public intentHandler?: (user: string) => { intent: string; confidence: number; entities?: Record<string, unknown>; memories?: unknown[] };
   public responseHandler?: (user: string, system: string) => string;
 
@@ -365,4 +389,74 @@ export function resolveAIProvider(opts: {
 /** Test/dev helper: force the mock provider for the current process. */
 export function setMockAIProvider(mock: MockAIProvider | undefined) {
   globalForAI.__acreMockAI = mock;
+}
+
+/** P6: injected test double (if any) — workspace resolution must honor it. */
+export function getInjectedMockProvider(): MockAIProvider | undefined {
+  return globalForAI.__acreMockAI;
+}
+
+// ── P6: connection testing (studio "اختبار الاتصال") ─────────────────────
+// Sends NO customer data: the live probe is a synthetic "ping" (max 5
+// tokens). Returns a machine-readable status for the studio UI:
+// "working" | "failed" | "needs_key" | "unconfigured" | "local". Failure
+// causes are operator-safe (status codes, timeouts) — keys are never echoed
+// in results, logs, or errors.
+
+export type ProviderTestStatus = "working" | "failed" | "needs_key" | "unconfigured" | "local";
+
+export interface ProviderTestResult {
+  provider: string;
+  status: ProviderTestStatus;
+  latencyMs: number;
+  detail: string;
+}
+
+/** Local classification only (no network) — safe for unit tests. */
+export async function testProviderConnection(
+  provider: AIProvider
+): Promise<ProviderTestResult> {
+  const started = Date.now();
+  if (provider.delivery === "local") {
+    return { provider: provider.name, status: "local", latencyMs: Date.now() - started, detail: "LOCAL_MOCK_OK" };
+  }
+  if (!(provider instanceof OpenAICompatibleProvider)) {
+    return { provider: provider.name, status: "failed", latencyMs: Date.now() - started, detail: "UNKNOWN_PROVIDER_CLASS" };
+  }
+  if (!provider.hasCredentials || provider.endpointUrl.trim().length === 0) {
+    return { provider: provider.name, status: "needs_key", latencyMs: Date.now() - started, detail: "API_KEY_OR_ENDPOINT_MISSING" };
+  }
+  // Reachability requires a live HTTP probe (server-side route below).
+  return { provider: provider.name, status: "failed", latencyMs: Date.now() - started, detail: "PROBE_REQUIRED" };
+}
+
+/**
+ * P6: live endpoint probe — server-side only. Sends a synthetic PII-free
+ * "ping" (max 5 tokens, no customer data). The caller supplies the key from
+ * server ENV; this function never includes it in results or errors.
+ */
+export async function probeProviderEndpoint(
+  endpointUrl: string,
+  apiKey: string,
+  model: string,
+  opts?: { fetchFn?: typeof fetch; timeoutMs?: number }
+): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
+  const started = Date.now();
+  const fetchFn = opts?.fetchFn ?? fetch;
+  const timeoutMs = opts?.timeoutMs ?? 8000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchFn(endpointUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 5 }),
+      signal: controller.signal,
+    });
+    return { ok: res.ok, latencyMs: Date.now() - started, detail: `HTTP_${res.status}` };
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - started, detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+  } finally {
+    clearTimeout(timer);
+  }
 }

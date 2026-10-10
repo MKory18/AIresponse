@@ -7,7 +7,7 @@ import { label, t } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { Input, Select } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
 import { ConversationItem, ConversationListEmpty, ConversationListSkeleton } from "./conversation-item";
@@ -18,10 +18,12 @@ import {
   avatarOf,
   displayNameOf,
   pageNameOf,
+  type AssignmentActivity,
   type ConversationListItem,
   type CustomerDetail,
   type DraftInfo,
   type MessageItem,
+  type OpenHandoff,
 } from "./types";
 
 const FILTERS = [
@@ -34,6 +36,28 @@ const FILTERS = [
 
 type FilterKey = (typeof FILTERS)[number]["key"];
 
+const HANDOFF_REASONS: Record<string, string> = {
+  CUSTOMER_REQUEST: "طلب العميل",
+  COMPLAINT: "شكوى",
+  LOW_CONFIDENCE: "ثقة منخفضة",
+  AI_FAILURE: "تعطل الذكاء",
+  ORDER_BLOCKED: "طلب محظور",
+  PAYMENT_ISSUE: "مشكلة دفع",
+  INJECTION_DETECTED: "محاولة حقن",
+  REPEATED_FAILURE: "فشل متكرر",
+  MANUAL: "يدوي",
+};
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  "conversation.assigned": "إسناد",
+  "conversation.unassigned": "إلغاء إسناد",
+  "conversation.takeover": "استلام الموظف",
+  "conversation.released_to_ai": "إعادة للذكاء",
+  "conversation.review_requested": "طلب مراجعة",
+  "conversation.ai_failed": "تعطل الذكاء",
+  "note.created": "ملاحظة داخلية",
+};
+
 export default function Inbox() {
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -41,6 +65,15 @@ export default function Inbox() {
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
+  // P4 server-side filters (empty = all).
+  const [statusSel, setStatusSel] = useState("");
+  const [prioritySel, setPrioritySel] = useState("");
+  const [assigneeSel, setAssigneeSel] = useState("");
+  const [channelSel, setChannelSel] = useState("");
+  const [openHandoff, setOpenHandoff] = useState<OpenHandoff>(null);
+  const [activity, setActivity] = useState<AssignmentActivity[]>([]);
+  const [composerTab, setComposerTab] = useState<"reply" | "note">("reply");
+  const [noteBusy, setNoteBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -71,6 +104,10 @@ export default function Inbox() {
       const params = new URLSearchParams();
       if (query) params.set("q", query);
       if (filter === "unread") params.set("unreadOnly", "true");
+      if (statusSel) params.set("status", statusSel);
+      if (prioritySel) params.set("priority", prioritySel);
+      if (assigneeSel) params.set("assignee", assigneeSel);
+      if (channelSel) params.set("channelType", channelSel);
       if (opts?.cursor) params.set("cursor", opts.cursor);
       const res = await fetch(`/api/conversations?${params}`, { signal: opts?.signal });
       if (!res.ok) {
@@ -90,7 +127,7 @@ export default function Inbox() {
       });
       setCursor(data.nextCursor);
     },
-    [query, filter]
+    [query, filter, statusSel, prioritySel, assigneeSel, channelSel]
   );
 
   // Initial load + filter changes (debounced)
@@ -129,6 +166,8 @@ export default function Inbox() {
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
+    setOpenHandoff(null);
+    setActivity([]);
     (async () => {
       const [msgRes, custRes] = await Promise.all([
         fetch(`/api/conversations/${selectedId}/messages`),
@@ -137,8 +176,15 @@ export default function Inbox() {
       if (cancelled) return;
       if (msgRes.ok) setMessages(((await msgRes.json()) as { items: MessageItem[] }).items);
       if (custRes.ok) {
-        const conv = (await custRes.json()) as { customerId: string };
+        const conv = (await custRes.json()) as {
+          customerId: string;
+          openHandoff?: OpenHandoff;
+          assignmentHistory?: AssignmentActivity[];
+        };
+        setOpenHandoff(conv.openHandoff ?? null);
+        setActivity(conv.assignmentHistory ?? []);
         const customerRes = await fetch(`/api/customers/${conv.customerId}`);
+        if (cancelled) return;
         if (customerRes.ok) setCustomer((await customerRes.json()) as CustomerDetail);
         loadDraft(selectedId);
       }
@@ -221,6 +267,29 @@ export default function Inbox() {
     }
   }
 
+  async function sendNote() {
+    if (!selectedId || !draft.trim()) return;
+    const text = draft.trim();
+    setNoteBusy(true);
+    try {
+      // Team-only endpoint: the row is flagged isNote and can never enter
+      // ChannelSender (no send, no retry, no sweep — enforced server-side).
+      const res = await fetch(`/api/conversations/${selectedId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { note: MessageItem };
+      setMessages((prev) => [...prev, { ...data.note, isNote: true }]);
+      setDraft("");
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
   async function removeConversation() {
     if (!selectedId) return;
     setDeleting(true);
@@ -276,7 +345,7 @@ export default function Inbox() {
   }
 
   const unreadTotal = conversations.reduce((a, c) => a + c.unreadCount, 0);
-  const isFiltered = Boolean(query) || filter !== "all";
+  const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || prioritySel || assigneeSel || channelSel);
   const aiMode = selected?.aiState !== "HUMAN_ACTIVE";
 
   // Pick up ?q= from the topbar search.
@@ -327,6 +396,35 @@ export default function Inbox() {
                 )}
               </button>
             ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Select value={statusSel} onChange={(e) => setStatusSel(e.target.value)} aria-label="الحالة" className="h-9 text-xs">
+              <option value="">كل الحالات</option>
+              <option value="OPEN">مفتوحة</option>
+              <option value="PENDING">معلقة</option>
+              <option value="RESOLVED">محلولة</option>
+              <option value="CLOSED">مغلقة</option>
+            </Select>
+            <Select value={prioritySel} onChange={(e) => setPrioritySel(e.target.value)} aria-label="الأولوية" className="h-9 text-xs">
+              <option value="">كل الأولويات</option>
+              <option value="URGENT">عاجلة</option>
+              <option value="HIGH">عالية</option>
+              <option value="NORMAL">عادية</option>
+              <option value="LOW">منخفضة</option>
+            </Select>
+            <Select value={assigneeSel} onChange={(e) => setAssigneeSel(e.target.value)} aria-label="الإسناد" className="h-9 text-xs">
+              <option value="">كل الموظفين</option>
+              <option value="me">مُسندة إليّ</option>
+              <option value="none">غير مُسندة</option>
+            </Select>
+            <Select value={channelSel} onChange={(e) => setChannelSel(e.target.value)} aria-label="القناة" className="h-9 text-xs">
+              <option value="">كل القنوات</option>
+              {Object.entries(CHANNEL_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
         <div className="flex-1 space-y-1 overflow-y-auto p-2" role="listbox" aria-label={t.inbox.title}>
@@ -440,6 +538,30 @@ export default function Inbox() {
               </div>
             </header>
 
+            {openHandoff && (
+              <div className="border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-400/20 dark:text-amber-300 sm:px-4">
+                <span className="font-bold">بانتظار موظف: </span>
+                {HANDOFF_REASONS[openHandoff.reason] ?? openHandoff.reason}
+                <span className="text-amber-700/80 dark:text-amber-400/80"> · {openHandoff.status === "CLAIMED" ? "مُستلمة" : "مفتوحة"}</span>
+              </div>
+            )}
+            {activity.length > 0 && (
+              <details className="border-b border-line/60 px-3 py-1.5 text-[11px] text-ink-subtle sm:px-4">
+                <summary className="cursor-pointer font-semibold">سجل المحادثة ({activity.length})</summary>
+                <ul className="mt-1.5 space-y-1">
+                  {activity.map((a) => (
+                    <li key={a.id} className="flex items-center justify-between gap-2">
+                      <span>
+                        {ACTIVITY_LABELS[a.action] ?? a.action}
+                        {a.actorName ? ` · ${a.actorName}` : ""}
+                      </span>
+                      <span className="num shrink-0">{new Date(a.createdAt).toLocaleDateString("ar")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
             <div className="flex-1 space-y-2 overflow-y-auto px-3 py-4 sm:px-5">
               {messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
@@ -466,6 +588,31 @@ export default function Inbox() {
             </div>
 
             <footer className="border-t border-line/60 bg-surface-2/60 p-3 backdrop-blur-xl dark:bg-white/[0.02]">
+              <div className="mb-1.5 flex gap-1" role="tablist" aria-label="نوع الرسالة">
+                <button
+                  role="tab"
+                  aria-selected={composerTab === "reply"}
+                  onClick={() => setComposerTab("reply")}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
+                    composerTab === "reply" ? "bg-gradient-to-b from-brand-400 to-brand-600 text-white shadow-xs" : "text-ink-muted hover:bg-surface-3 hover:text-ink"
+                  )}
+                >
+                  رد للعميل
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={composerTab === "note"}
+                  onClick={() => setComposerTab("note")}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
+                    composerTab === "note" ? "bg-amber-500 text-white shadow-xs" : "text-ink-muted hover:bg-surface-3 hover:text-ink"
+                  )}
+                  title="ملاحظة داخلية للفريق — لا تُرسل للعميل أبدًا"
+                >
+                  ملاحظة داخلية
+                </button>
+              </div>
               <div className="glass-subtle flex items-end gap-1.5 rounded-2xl p-1.5">
                 <div className="flex gap-0.5 pb-0.5">
                   <button
@@ -491,23 +638,24 @@ export default function Inbox() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      void send();
+                      if (composerTab === "note") void sendNote();
+                      else void send();
                     }
                   }}
                   rows={1}
-                  placeholder={t.inbox.composerPlaceholder}
-                  aria-label={t.inbox.replyManually}
+                  placeholder={composerTab === "note" ? "ملاحظة للفريق فقط — لن يراها العميل…" : t.inbox.composerPlaceholder}
+                  aria-label={composerTab === "note" ? "ملاحظة داخلية" : t.inbox.replyManually}
                   className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-subtle"
                 />
                 <Button
-                  onClick={() => void send()}
-                  disabled={sending || !draft.trim()}
-                  loading={sending}
+                  onClick={() => (composerTab === "note" ? void sendNote() : void send())}
+                  disabled={sending || noteBusy || !draft.trim()}
+                  loading={sending || noteBusy}
                   size="icon"
-                  aria-label={t.common.send}
+                  aria-label={composerTab === "note" ? "إضافة ملاحظة" : t.common.send}
                   className="h-10 w-10 shrink-0 rounded-xl"
                 >
-                  {!sending && <Send size={16} className="-scale-x-100" />}
+                  {!(sending || noteBusy) && <Send size={16} className="-scale-x-100" />}
                 </Button>
               </div>
               <p className="mt-1.5 px-1 text-[10px] text-ink-subtle">Enter {t.common.send} · Shift+Enter {t.inbox.newLine}</p>

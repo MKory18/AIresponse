@@ -1,6 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import { childLogger } from "@/core/logger";
-import { AIProviderError, type AIProvider } from "./provider";
+import {
+  AIProviderError,
+  MockAIProvider,
+  OpenAICompatibleProvider,
+  getInjectedMockProvider,
+  resolveAIProvider,
+  type AIProvider,
+} from "./provider";
 
 const log = childLogger("ai-router");
 
@@ -11,6 +18,11 @@ export interface AISettingsLike {
   visionModel: string | null;
   summaryModel: string | null;
   embeddingModel: string | null;
+  // P6: optional self-hosted endpoint + explicit fallback.
+  customBaseUrl?: string | null;
+  fallbackProvider?: string | null;
+  fallbackModel?: string | null;
+  provider?: string | null;
   temperature: number;
   maxTokens: number;
   confidenceExecute: number;
@@ -20,7 +32,9 @@ export interface AISettingsLike {
   autoRespond: boolean;
 }
 
-export type AiTask = "CLASSIFICATION" | "EXTRACTION" | "RESPONSE" | "VISION" | "SUMMARY";
+export type AiTask = "CLASSIFICATION" | "EXTRACTION" | "RESPONSE" | "VISION" | "SUMMARY" | "EMBEDDING" | "RETRIEVAL";
+
+export const AI_TASKS: AiTask[] = ["CLASSIFICATION", "EXTRACTION", "RESPONSE", "VISION", "SUMMARY", "EMBEDDING", "RETRIEVAL"];
 
 export const DEFAULT_MODELS: Record<AiTask, string> = {
   CLASSIFICATION: "gpt-4o-mini",
@@ -28,6 +42,8 @@ export const DEFAULT_MODELS: Record<AiTask, string> = {
   RESPONSE: "gpt-4o",
   VISION: "gpt-4o-mini",
   SUMMARY: "gpt-4o-mini",
+  EMBEDDING: "text-embedding-3-small",
+  RETRIEVAL: "text-embedding-3-small",
 };
 
 /** Rough per-model cost per 1K tokens (USD) — estimates only, for usage logs. */
@@ -55,6 +71,7 @@ export function resolveModel(
     responseModel: string | null;
     visionModel: string | null;
     summaryModel: string | null;
+    embeddingModel?: string | null;
     temperature: number;
     maxTokens: number;
   } | null,
@@ -66,6 +83,8 @@ export function resolveModel(
     RESPONSE: process.env.RESPONSE_MODEL,
     VISION: process.env.VISION_MODEL,
     SUMMARY: process.env.SUMMARY_MODEL,
+    EMBEDDING: process.env.EMBEDDING_MODEL,
+    RETRIEVAL: process.env.EMBEDDING_MODEL,
   };
   const settingsModels: Record<AiTask, string | null> = {
     CLASSIFICATION: settings?.classificationModel ?? null,
@@ -73,6 +92,8 @@ export function resolveModel(
     RESPONSE: settings?.responseModel ?? null,
     VISION: settings?.visionModel ?? null,
     SUMMARY: settings?.summaryModel ?? null,
+    EMBEDDING: settings?.embeddingModel ?? null,
+    RETRIEVAL: settings?.embeddingModel ?? null,
   };
   // Temperature strategy: extraction/classification want determinism.
   const temperature =
@@ -113,6 +134,11 @@ export interface UsageRecord {
   intent?: string | null;
   confidence?: number | null;
   promptVersion?: string | null;
+  // P6: published persona instructions that drove this call.
+  personaId?: string | null;
+  personaVersion?: number | null;
+  fallbackUsed?: boolean;
+  handoffReason?: string | null;
   promptTokens: number;
   completionTokens: number;
   latencyMs: number;
@@ -135,6 +161,10 @@ export async function logUsage(db: any, rec: UsageRecord): Promise<void> {
         intent: rec.intent ?? null,
         confidence: rec.confidence ?? null,
         promptVersion: rec.promptVersion ?? null,
+        personaId: rec.personaId ?? null,
+        personaVersion: rec.personaVersion ?? null,
+        fallbackUsed: rec.fallbackUsed ?? false,
+        handoffReason: rec.handoffReason ?? null,
         promptTokens: rec.promptTokens,
         completionTokens: rec.completionTokens,
         costUsd: estimateCost(rec.model, rec.promptTokens, rec.completionTokens),
@@ -144,8 +174,15 @@ export async function logUsage(db: any, rec: UsageRecord): Promise<void> {
         error: rec.error ?? null,
       },
     });
-  } catch (err) {
-    log.error({ err }, "ai_usage_log_failed");
+  } catch {
+    // P6: the failure cause is deliberately NOT logged — error objects from
+    // storage layers may embed customer data (PII), and usage telemetry must
+    // never become a PII sink. The call itself already succeeded; only safe
+    // identifiers (workspace/purpose) are recorded.
+    log.error(
+      { workspaceId: rec.workspaceId, purpose: rec.purpose, model: rec.model },
+      "ai_usage_log_failed"
+    );
   }
   // Usage metering (fire-and-forget; incrementUsage is failure-isolated).
   try {
@@ -202,4 +239,150 @@ export async function withRetry<T>(
 
 export function isProviderAvailable(provider: AIProvider): boolean {
   return provider.name !== "mock" || Boolean(process.env.ALLOW_MOCK_AI);
+}
+
+// ── P6: task/model compatibility ──────────────────────────────────────────
+// Models are NOT interchangeable: an embedding model cannot generate replies
+// and a chat model cannot produce vectors. This check is advisory data for
+// the studio UI and pre-flight validation — the pipeline itself always calls
+// resolveModel per task, so a misconfigured name fails fast at the provider
+// with a visible error instead of silently degrading.
+
+const EMBEDDING_HINT = /embed/i;
+const VISION_HINT = /vision|gpt-4o|claude-3|gemini.*vision/i;
+
+export function validateTaskModel(
+  task: AiTask,
+  model: string
+): { compatible: boolean; reason: string } {
+  const m = model.trim();
+  if (!m) return { compatible: false, reason: "EMPTY_MODEL" };
+  if (task === "EMBEDDING" || task === "RETRIEVAL") {
+    if (EMBEDDING_HINT.test(m) || m.startsWith("hash-")) {
+      return { compatible: true, reason: "OK" };
+    }
+    return { compatible: false, reason: "MODEL_NOT_EMBEDDING_CAPABLE" };
+  }
+  if (task === "VISION") {
+    if (EMBEDDING_HINT.test(m)) {
+      return { compatible: false, reason: "MODEL_NOT_VISION_CAPABLE" };
+    }
+    return { compatible: true, reason: "OK" };
+  }
+  // Chat tasks: embedding-only models are rejected; anything else passes
+  // (provider-side errors stay visible via AI_FAILED, never hidden).
+  if (EMBEDDING_HINT.test(m)) {
+    return { compatible: false, reason: "MODEL_NOT_CHAT_CAPABLE" };
+  }
+  return { compatible: true, reason: "OK" };
+}
+
+// ── P6: workspace-aware provider resolution ───────────────────────────────
+// Makes the AISettings.provider choice EFFECTIVE (previously the settings
+// page offered mock/openai/openrouter but getAIProvider only read ENV, so
+// the UI selection did nothing). Workspace choice wins when its key is
+// present; otherwise ENV is the fallback; otherwise fail-closed. A workspace
+// customBaseUrl builds an INTERNAL OpenAI-compatible provider (delivery
+// "internal", tested independently — never claimed internal by name alone).
+
+export function getWorkspaceProvider(
+  settings: {
+    provider?: string | null;
+    customBaseUrl?: string | null;
+    responseModel?: string | null;
+  } | null,
+  env?: {
+    aiProvider?: string;
+    openaiKey?: string;
+    openrouterKey?: string;
+    responseModel?: string;
+    nodeEnv?: string;
+    allowMockAi?: string;
+  }
+): AIProvider {
+  const injected = getInjectedMockProvider();
+  if (injected) return injected;
+  const e = env ?? {
+    aiProvider: process.env.AI_PROVIDER,
+    openaiKey: process.env.OPENAI_API_KEY,
+    openrouterKey: process.env.OPENROUTER_API_KEY,
+    responseModel: process.env.RESPONSE_MODEL,
+    nodeEnv: process.env.NODE_ENV,
+    allowMockAi: process.env.ALLOW_MOCK_AI,
+  };
+  // Precedence (P6): an explicit workspace choice of a REAL provider
+  // (openai/openrouter/internal) is effective and fail-closed on a missing
+  // key. A workspace "mock"/unset DEFERS to ENV — so a misconfigured ENV
+  // still fail-closes exactly as before (no behavior change for existing
+  // deployments), while a workspace can still opt into a real provider whose
+  // key exists even when ENV names no provider.
+  const wsChoice = settings?.provider ?? null;
+  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal";
+  const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? null;
+  const keyFor = (p: string | null | undefined) =>
+    p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : undefined;
+  // Self-hosted endpoint: explicit opt-in per workspace. Delivery is declared
+  // "internal" at construction (privacy-gate trusts the flag, not the name).
+  const base = settings?.customBaseUrl?.trim();
+  if (base && (choice === "openai" || choice === "openrouter" || choice === "internal")) {
+    const key = keyFor(choice) ?? "internal-endpoint";
+    return new OpenAICompatibleProvider({
+      name: "internal",
+      apiKey: key,
+      baseUrl: base,
+      defaultModel: settings?.responseModel ?? e.responseModel ?? "gpt-4o-mini",
+      delivery: "internal",
+    });
+  }
+  if ((choice === "openai" || choice === "openrouter") && keyFor(choice)) {
+    const isOpenai = choice === "openai";
+    return new OpenAICompatibleProvider({
+      name: choice,
+      apiKey: keyFor(choice)!,
+      baseUrl: isOpenai ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions",
+      defaultModel: settings?.responseModel ?? e.responseModel ?? (isOpenai ? "gpt-4o-mini" : "openai/gpt-4o-mini"),
+    });
+  }
+  if (choice === "mock") {
+    const allowed =
+      e.nodeEnv === "test" ||
+      ["1", "true", "yes"].includes((e.allowMockAi ?? "").toLowerCase()) ||
+      (e.nodeEnv !== "production" && !e.aiProvider);
+    if (allowed) return new MockAIProvider();
+  }
+  // Fall back to the global ENV resolution (preserves legacy behavior and
+  // keeps every existing test green); it fail-closes when unconfigured.
+  return resolveAIProvider({
+    aiProvider: e.aiProvider,
+    openaiKey: e.openaiKey,
+    openrouterKey: e.openrouterKey,
+    responseModel: e.responseModel,
+    nodeEnv: e.nodeEnv,
+    allowMockAi: e.allowMockAi,
+  });
+}
+
+// ── P6: configured fallback (failover only, never policy bypass) ──────────
+// Both primary and fallback calls MUST already be privacy-gated by the
+// caller (sendProtected*). This helper only decides WHEN a second attempt is
+// allowed: a configured fallbackModel + a retryable primary failure.
+
+export function getFallbackModel(settings: AISettingsLike | null): string | null {
+  const m = settings?.fallbackModel?.trim();
+  return m ? m : null;
+}
+
+export async function executeWithFallback<T>(
+  primary: () => Promise<T>,
+  opts: { fallbackModel: string | null; runFallback: (model: string) => Promise<T> }
+): Promise<{ result: T; fallbackUsed: boolean }> {
+  try {
+    return { result: await primary(), fallbackUsed: false };
+  } catch (err) {
+    if (!opts.fallbackModel) throw err;
+    // Permanent configuration errors are never retried on a second model —
+    // surface them immediately (operator-visible, no hammering).
+    if (err instanceof AIProviderError && !err.retryable) throw err;
+    return { result: await opts.runFallback(opts.fallbackModel), fallbackUsed: true };
+  }
 }
