@@ -19,7 +19,7 @@ const redactPaths = [
 export const logger = pino({
   level: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === "production" ? "info" : "debug"),
   redact: { paths: redactPaths, censor: REDACTED },
-  base: { service: "ai-commerce-response-engine" },
+  base: { service: "zaki-response" },
 });
 
 export function childLogger(scope: string, bindings: Record<string, unknown> = {}) {

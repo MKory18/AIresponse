@@ -322,10 +322,25 @@ export function getAIProvider(): AIProvider {
     aiProvider: env.AI_PROVIDER,
     openaiKey: env.OPENAI_API_KEY,
     openrouterKey: env.OPENROUTER_API_KEY,
+    hermesBaseUrl: env.HERMES_BASE_URL,
+    hermesKey: env.HERMES_API_KEY,
+    hermesModel: env.HERMES_MODEL,
     responseModel: env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: env.ALLOW_MOCK_AI,
   });
+}
+
+/**
+ * Normalizes a Hermes gateway base URL into a full chat-completions endpoint.
+ * Accepts any of: http://host:8642, http://host:8642/v1,
+ * http://host:8642/v1/chat/completions (trailing slashes tolerated).
+ */
+export function normalizeHermesEndpoint(baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  if (/\/chat\/completions$/.test(base)) return base;
+  if (/\/v1$/.test(base)) return `${base}/chat/completions`;
+  return `${base}/v1/chat/completions`;
 }
 
 /**
@@ -343,6 +358,9 @@ export function resolveAIProvider(opts: {
   aiProvider?: string;
   openaiKey?: string;
   openrouterKey?: string;
+  hermesBaseUrl?: string;
+  hermesKey?: string;
+  hermesModel?: string;
   responseModel?: string;
   nodeEnv?: string;
   allowMockAi?: string;
@@ -362,6 +380,23 @@ export function resolveAIProvider(opts: {
       apiKey: opts.openrouterKey,
       baseUrl: OPENROUTER_URL,
       defaultModel: opts.responseModel || "openai/gpt-4o-mini",
+    });
+  }
+  // Hermes Agent — OpenAI-compatible gateway (delivery "external" so the
+  // privacy gate keeps masking PII: Hermes turns may invoke external tools).
+  if (opts.aiProvider === "hermes") {
+    const base = opts.hermesBaseUrl?.trim();
+    const key = opts.hermesKey?.trim();
+    if (!base || !key) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: AI_PROVIDER="hermes" is configured but HERMES_BASE_URL or HERMES_API_KEY is missing. Set both (HERMES_BASE_URL like http://127.0.0.1:8642/v1, HERMES_API_KEY = Hermes API_SERVER_KEY). Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
+    return new OpenAICompatibleProvider({
+      name: "hermes",
+      apiKey: key,
+      baseUrl: normalizeHermesEndpoint(base),
+      defaultModel: opts.hermesModel?.trim() || opts.responseModel || "hermes-agent",
     });
   }
   if (opts.aiProvider === "openai" || opts.aiProvider === "openrouter") {

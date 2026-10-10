@@ -192,6 +192,12 @@ async function handleProcessMedia(db: HandlerDb, payload: Record<string, unknown
 
 /** process_ai_message: runs the AI orchestrator for one inbound message. */
 async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string }> {
+  // Fail loudly instead of silently no-oping: an empty workspace context made
+  // gating return SKIPPED, the job complete DONE, and the orphan sweeper
+  // re-enqueue the same message forever (silent hot loop with zero logs).
+  if (!workspaceId) {
+    return { success: false, error: "MISSING_WORKSPACE_CONTEXT" };
+  }
   const { processAIMessage } = await import("@/modules/ai/orchestrator");
   const vectorStore = await buildWorkspaceVectorStore(db, workspaceId);
   const result = await processAIMessage(db, {
@@ -492,7 +498,8 @@ export function getJobHandlers(): Record<string, JobHandler> {
     process_knowledge_document: (payload) => handleProcessDocument(getDb(), payload),
     analyze_feedback: (payload) => handleAnalyzeFeedback(getDb(), payload),
     process_media: (payload) => handleProcessMedia(getDb(), payload),
-    process_ai_message: (payload, jobId) => handleProcessAIMessage(getDb(), payload, currentWorkspaceId(jobId)),
+    process_ai_message: (payload, jobId, workspaceId) =>
+      handleProcessAIMessage(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),
     generate_summary: (payload) => handleGenerateSummary(getDb(), payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(getDb(), payload),
     process_channel_inbound: (payload) => handleChannelInbound(getDb(), payload),

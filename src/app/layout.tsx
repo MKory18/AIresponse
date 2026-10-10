@@ -11,8 +11,8 @@ const arabic = IBM_Plex_Sans_Arabic({
 });
 
 export const metadata: Metadata = {
-  title: "AIresponse",
-  description: "منصة المحادثات والمبيعات بالذكاء الاصطناعي",
+  title: "Zaki response",
+  description: "Zaki response — منصة المحادثات والمبيعات بالذكاء الاصطناعي",
 };
 
 // Applies the saved theme before first paint to avoid a flash.

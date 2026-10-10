@@ -6,13 +6,14 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, Users, Package, ShoppingBag, Images,
   MessageCircle, BookOpen, UserRound, FlaskConical, Radio, Workflow, Clock,
-  Hand, ChartNoAxesCombined, Settings, LogOut, X, MessageSquareText,
+  Hand, ChartNoAxesCombined, Settings, LogOut, X,
   ChevronsRight, ChevronsLeft, Bell, SlidersHorizontal, GitBranch, Megaphone,
 } from "lucide-react";
 import type { LucideProps } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { Avatar } from "./ui/avatar";
+import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./ui/theme-toggle";
 
 export interface NavEntry {
@@ -67,18 +68,18 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
       className={cn(
-        "group relative mb-0.5 flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-150",
+        "group relative mb-1 flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-150",
         active
-          ? "bg-gradient-to-l from-brand-500/15 to-brand-500/5 font-semibold text-brand-700 shadow-glow dark:text-brand-300"
-          : "text-ink-muted hover:bg-surface-3/80 hover:text-ink",
+          ? "bg-gradient-to-l from-brand-600 via-brand-500 to-sky-500 font-semibold text-white shadow-[0_6px_16px_-6px_rgb(37_99_235/0.7),inset_0_1px_0_rgb(255_255_255/0.25)]"
+          : "text-ink-muted hover:bg-brand-500/[0.07] hover:text-brand-700 dark:hover:text-brand-200",
         collapsed && "justify-center px-0"
       )}
     >
       <span
         aria-hidden
         className={cn(
-          "absolute inset-y-1.5 start-0 w-1 rounded-full bg-gradient-to-b from-brand-400 to-brand-600 transition-all",
-          active ? "opacity-100" : "opacity-0 group-hover:opacity-30"
+          "absolute inset-y-1.5 start-0 w-1 rounded-full bg-white/70 transition-all",
+          active ? "opacity-100" : "opacity-0"
         )}
       />
       <Icon
@@ -86,12 +87,15 @@ function NavLink({
         strokeWidth={active ? 2.25 : 2}
         className={cn(
           "shrink-0 transition-colors",
-          active ? "text-brand-600 dark:text-brand-400" : "text-ink-subtle group-hover:text-ink-muted"
+          active ? "text-white" : "text-ink-subtle group-hover:text-brand-500"
         )}
       />
       {!collapsed && <span className="min-w-0 flex-1 truncate">{label}</span>}
       {!collapsed && badge && (
-        <span className="num flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[10px] font-bold text-white">
+        <span className={cn(
+          "num flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold",
+          active ? "bg-white/25 text-white" : "bg-brand-500 text-white"
+        )}>
           {badge}
         </span>
       )}
@@ -186,12 +190,12 @@ export function Sidebar({
 
   const brand = (coll: boolean) => (
     <div className={cn("flex items-center gap-2.5 border-b border-line/70 px-4 py-4", coll && "justify-center px-2")}>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
-        <MessageSquareText size={17} />
-      </span>
+      <BrandLogo size="md" />
       {!coll && (
         <div className="min-w-0">
-          <p className="text-sm font-bold leading-5 text-ink">{t.app.name}</p>
+          <p className="text-sm font-bold leading-5 text-ink">
+            Zaki <span className="bg-gradient-to-l from-brand-600 to-sky-500 bg-clip-text text-transparent">response</span>
+          </p>
           {workspaceName && <p className="truncate text-[11px] text-ink-muted">{workspaceName}</p>}
         </div>
       )}

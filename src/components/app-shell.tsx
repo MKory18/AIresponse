@@ -66,7 +66,7 @@ export function AppShell({
 
       {/* Main column offset for the fixed sidebar on desktop (RTL sidebar on the right) */}
       <div className={cn("flex min-h-screen flex-col transition-all duration-200", narrow ? "lg:ps-[76px]" : "lg:ps-64")}>
-        <header className="glass-strong sticky top-0 z-20 border-b border-line/60">
+        <header className="glass-strong sticky top-0 z-20 border-b border-line/60 shadow-[0_1px_0_rgb(37_99_235/0.08)]">
           <div className="flex h-16 items-center gap-3 px-4 lg:px-6">
             <button
               onClick={() => setOpen(true)}

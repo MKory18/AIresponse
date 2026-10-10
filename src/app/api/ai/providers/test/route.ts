@@ -2,13 +2,13 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
-import { probeProviderEndpoint } from "@/modules/ai/provider";
+import { normalizeHermesEndpoint, probeProviderEndpoint } from "@/modules/ai/provider";
 import { resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
-  provider: z.enum(["openai", "openrouter", "internal", "mock"]).optional(),
+  provider: z.enum(["openai", "openrouter", "internal", "hermes", "mock"]).optional(),
 });
 
 /**
@@ -33,6 +33,41 @@ export const POST = createHandler(
 
     if (choice === "mock") {
       return ok({ provider: "mock", status: "local", latencyMs: 0, detail: "LOCAL_MOCK_OK" });
+    }
+
+    // Hermes Agent gateway (OpenAI-compatible). Endpoint prefers a public
+    // workspace override (SSRF-guarded like internal), else server ENV
+    // HERMES_BASE_URL (deployer-trusted — localhost/LAN gateways allowed).
+    // Key always comes from server ENV, never the client.
+    if (choice === "hermes") {
+      const override = (settings.customBaseUrl as string | null)?.trim();
+      let endpoint: string | null = null;
+      if (override) {
+        const guard = await assertEndpointResolvesPublic(override);
+        if (!guard.ok) {
+          return ok({ provider: "hermes", status: "failed", latencyMs: 0, detail: `SSRF_REJECTED_${guard.reason}` });
+        }
+        endpoint = normalizeHermesEndpoint(override);
+      } else if (env.HERMES_BASE_URL?.trim()) {
+        endpoint = normalizeHermesEndpoint(env.HERMES_BASE_URL.trim());
+      }
+      const key = env.HERMES_API_KEY?.trim();
+      if (!endpoint) {
+        return ok({ provider: "hermes", status: "unconfigured", latencyMs: 0, detail: "ENDPOINT_NOT_CONFIGURED" });
+      }
+      if (!key) {
+        return ok({ provider: "hermes", status: "needs_key", latencyMs: 0, detail: "API_KEY_MISSING" });
+      }
+      const model = (settings.responseModel as string | null) ?? env.HERMES_MODEL ?? env.RESPONSE_MODEL ?? "hermes-agent";
+      const probe = await probeProviderEndpoint(endpoint, key, model);
+      return ok({
+        provider: "hermes",
+        status: probe.ok ? "working" : "failed",
+        latencyMs: probe.latencyMs,
+        detail: probe.detail,
+        endpoint,
+        model,
+      });
     }
 
     const key = choice === "openai" ? env.OPENAI_API_KEY : choice === "openrouter" ? env.OPENROUTER_API_KEY : undefined;

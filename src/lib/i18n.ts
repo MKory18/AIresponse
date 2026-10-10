@@ -4,7 +4,7 @@
  */
 
 export const t = {
-  app: { name: "AIresponse", tagline: "محرك المحادثات والمبيعات بالذكاء الاصطناعي" },
+  app: { name: "Zaki response", tagline: "محرك المحادثات والمبيعات بالذكاء الاصطناعي" },
   nav: {
     dashboard: "لوحة التحكم",
     inbox: "صندوق المحادثات",

@@ -344,7 +344,7 @@ export default function ProductDetailPage() {
           >
             <GlassCard className="grid grid-cols-1 gap-3 p-4 sm:p-5 md:grid-cols-2">
               <h2 className="flex items-center gap-2 text-sm font-bold text-ink md:col-span-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
                   <FileText size={15} />
                 </span>
                 الفوائد والاستخدام والملاحظات

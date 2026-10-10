@@ -48,14 +48,13 @@ function Section({ title, icon, link, children }: { title: string; icon: React.R
   );
 }
 
-function MiniStat({ label, value, tone }: { label: string; value: string | number; tone?: "brand" | "emerald" | "amber" | "sky" | "red" | "violet" }) {
+function MiniStat({ label, value, tone }: { label: string; value: string | number; tone?: "brand" | "emerald" | "amber" | "sky" | "red" }) {
   const tones: Record<string, string> = {
     brand: "text-brand-600 dark:text-brand-300",
     emerald: "text-emerald-600 dark:text-emerald-300",
     amber: "text-amber-600 dark:text-amber-300",
     sky: "text-sky-600 dark:text-sky-300",
     red: "text-red-600 dark:text-red-300",
-    violet: "text-violet-600 dark:text-violet-300",
   };
   return (
     <div className="glass-subtle rounded-xl px-3.5 py-3 transition-all duration-200 hover:-translate-y-0.5">
@@ -100,14 +99,18 @@ export default function DashboardPage() {
   return (
     <div className="page-wrap">
       {/* Hero */}
-      <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 sm:px-6">
+      <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 ring-1 ring-inset ring-brand-500/15 sm:px-6">
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-1 bg-gradient-to-l from-brand-600 via-sky-400 to-brand-600"
+        />
         <div
           aria-hidden
           className="pointer-events-none absolute -start-20 -top-24 h-64 w-64 rounded-full bg-brand-500/15 blur-3xl dark:bg-brand-500/20"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute -bottom-28 end-10 h-56 w-56 rounded-full bg-violet-500/10 blur-3xl"
+          className="pointer-events-none absolute -bottom-28 end-10 h-56 w-56 rounded-full bg-sky-400/15 blur-3xl"
         />
         <div className="relative flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -157,9 +160,9 @@ export default function DashboardPage() {
             <StatCard label={t.dashboard.conversations} value={formatNumber(data.conversations.total)} tone="brand" icon={<MessagesSquare size={18} />} />
             <StatCard label={t.dashboard.orders} value={formatNumber(data.orders.created)} tone="sky" icon={<Receipt size={18} />} />
             {/* P10 — عملاء جدد حقيقيون (كانت تستنسخ عدد المحادثات — placeholder) */}
-            <StatCard label={`${t.dashboard.customers} (جدد)`} value={formatNumber(data.customers.newInRange)} tone="violet" icon={<Users size={18} />} />
+            <StatCard label={`${t.dashboard.customers} (جدد)`} value={formatNumber(data.customers.newInRange)} tone="sky" icon={<Users size={18} />} />
             <StatCard label={t.dashboard.conversion} value={conversion === null ? "—" : `${conversion}%`} tone="emerald" icon={<TrendingUp size={18} />} />
-            <StatCard label={t.dashboard.aiMessages} value={formatNumber(data.ai.calls)} tone="violet" icon={<Bot size={18} />} />
+            <StatCard label={t.dashboard.aiMessages} value={formatNumber(data.ai.calls)} tone="sky" icon={<Bot size={18} />} />
             <StatCard label={t.dashboard.needsHuman} value={formatNumber(data.handoffs.open)} tone="amber" icon={<Hand size={18} />} />
           </div>
 
@@ -173,12 +176,12 @@ export default function DashboardPage() {
           <Section title="المحادثات" icon={<MessagesSquare size={15} />} link="/conversations">
             <MiniStat label="محادثات جديدة" value={formatNumber(data.conversations.total)} tone="brand" />
             <MiniStat label="نشطة" value={formatNumber(data.conversations.active)} tone="sky" />
-            <MiniStat label="رسائل واردة" value={formatNumber(data.messages.inbound)} tone="violet" />
+            <MiniStat label="رسائل واردة" value={formatNumber(data.messages.inbound)} tone="sky" />
             <MiniStat label="رسائل صادرة" value={formatNumber(data.messages.outbound)} tone="emerald" />
           </Section>
 
           <Section title="الذكاء الاصطناعي" icon={<Bot size={15} />} link="/ai/playground">
-            <MiniStat label="استدعاءات AI" value={formatNumber(data.ai.calls)} tone="violet" />
+            <MiniStat label="استدعاءات AI" value={formatNumber(data.ai.calls)} tone="sky" />
             <MiniStat label="استدعاءات فاشلة" value={formatNumber(data.ai.failed)} tone="red" />
             <MiniStat label="Tokens" value={formatNumber(data.ai.tokens)} tone="brand" />
             {/* null = لا تسعير معروف — تُعرض "غير متاح" لا صفر */}

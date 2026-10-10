@@ -6,7 +6,7 @@ import { validateEndpointUrl, assertEndpointResolvesPublic } from "@/modules/ai/
 import { AppError } from "@/core/errors";
 
 const settingsSchema = z.object({
-  provider: z.enum(["mock", "openai", "openrouter", "internal"]).optional(),
+  provider: z.enum(["mock", "openai", "openrouter", "internal", "hermes"]).optional(),
   classificationModel: z.string().trim().max(120).nullable().optional(),
   extractionModel: z.string().trim().max(120).nullable().optional(),
   responseModel: z.string().trim().max(120).nullable().optional(),
@@ -15,7 +15,7 @@ const settingsSchema = z.object({
   embeddingModel: z.string().trim().max(120).nullable().optional(),
   // P6: self-hosted OpenAI-compatible endpoint + explicit fallback.
   customBaseUrl: z.string().trim().max(500).url("عنوان الاتصال يجب أن يكون رابطًا صالحًا").nullable().optional(),
-  fallbackProvider: z.enum(["mock", "openai", "openrouter", "internal"]).nullable().optional(),
+  fallbackProvider: z.enum(["mock", "openai", "openrouter", "internal", "hermes"]).nullable().optional(),
   fallbackModel: z.string().trim().max(120).nullable().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(50).max(4000).optional(),

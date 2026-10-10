@@ -73,7 +73,11 @@ export interface JobResult {
   error?: string;
 }
 
-export type JobHandler = (payload: Record<string, unknown>, jobId: string) => Promise<JobResult>;
+export type JobHandler = (
+  payload: Record<string, unknown>,
+  jobId: string,
+  workspaceId: string
+) => Promise<JobResult>;
 
 /**
  * Processes pending jobs (oldest first). Each job is claimed atomically-ish by
@@ -223,6 +227,32 @@ export async function recoverOrphanedInboundMessages(
       stateByMessage.set(l.messageId, entry);
     }
 
+    // Failure accounting must ALSO cover failures that never wrote an
+    // AIUsageLog row — provider configuration errors (missing key, bad base
+    // URL) and connection failures throw before usage logging, so the usage
+    // log's lastFailureAt goes stale and the backoff below expires forever.
+    // Without this, a permanently-failing message is re-enqueued on EVERY
+    // sweep cycle (hot loop: re-enqueue → fail fast → FAILED (terminal,
+    // attempts exhausted) → sweep re-enqueues again → repeat ~1×/s).
+    // Terminal FAILED jobs carry the deterministic key `ai:<messageId>`, so
+    // their finishedAt is a reliable failure signal for every failure mode.
+    const failedJobs = await db.backgroundJob.findMany({
+      where: {
+        type: "process_ai_message",
+        status: "FAILED",
+        idempotencyKey: { in: messageIds.map((id) => `ai:${id}`) },
+      },
+      select: { idempotencyKey: true, finishedAt: true },
+    });
+    for (const fj of failedJobs) {
+      if (!fj.idempotencyKey) continue;
+      const mid = fj.idempotencyKey.slice("ai:".length);
+      const entry = stateByMessage.get(mid) ?? { decided: false, failCount: 0, lastFailureAt: 0 };
+      entry.failCount += 1;
+      entry.lastFailureAt = Math.max(entry.lastFailureAt, fj.finishedAt ? new Date(fj.finishedAt).getTime() : 0);
+      stateByMessage.set(mid, entry);
+    }
+
     for (const m of candidates) {
       if (recovered >= limit) break;
       const conv = convById.get(m.conversationId) as
@@ -303,7 +333,13 @@ export async function processPendingJobs(
       if (!handler) {
         result = { success: false, error: `No handler registered for job type ${job.type}` };
       } else {
-        result = await handler(job.payload as Record<string, unknown>, job.id);
+        // The claimed row's workspaceId is the authoritative tenant context.
+        // Passing it explicitly prevents the "same-cycle recovery" trap: jobs
+        // created by the recovery sweeps DURING this cycle are not in the
+        // pre-claimed pending snapshot (runJobs' jobWorkspaces map), which
+        // used to resolve to "" and make workspace-scoped handlers silently
+        // no-op (SKIPPED → DONE → sweeper re-enqueues → hot loop).
+        result = await handler(job.payload as Record<string, unknown>, job.id, job.workspaceId);
       }
     } catch (err) {
       result = { success: false, error: err instanceof Error ? err.message : String(err) };

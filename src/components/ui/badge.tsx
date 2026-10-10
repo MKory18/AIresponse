@@ -40,7 +40,7 @@ const TONES: Record<string, string> = {
   COD: "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
   AI_ACTIVE: "bg-brand-500/10 text-brand-700 ring-brand-500/25 dark:text-brand-300",
   AI_PAUSED: "bg-amber-500/10 text-amber-700 ring-amber-500/25 dark:text-amber-300",
-  HUMAN_ACTIVE: "bg-violet-500/10 text-violet-700 ring-violet-500/25 dark:text-violet-300",
+  HUMAN_ACTIVE: "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
 };
 
 function toneOf(tone?: string) {

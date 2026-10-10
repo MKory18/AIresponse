@@ -238,7 +238,7 @@ export default function PersonasPage() {
             <div key={p.id} className="space-y-2.5">
               <GlassCard className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
               <div className="flex min-w-0 items-start gap-2.5">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/20 to-brand-500/20 text-brand-600 dark:text-brand-300">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/20 to-brand-500/20 text-brand-600 dark:text-brand-300">
                   <UserRound size={18} />
                 </span>
                 <div className="min-w-0">
@@ -302,9 +302,9 @@ export default function PersonasPage() {
         </GlassCard>
       )}
 
-      <GlassCard className="border-violet-500/20 p-4 sm:p-5">
+      <GlassCard className="border-sky-500/20 p-4 sm:p-5">
         <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
             <Play size={14} />
           </span>
           معاينة الرد (تجربة آمنة — لا يُرسل أي شيء للفيسبوك)
@@ -313,7 +313,7 @@ export default function PersonasPage() {
           {!previewing && <Play size={13} />}
           {previewing ? "جارٍ التوليد…" : "تشغيل المعاينة على سؤال «بكم المنتج؟»"}
         </Button>
-        {preview && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-violet-500/10 p-3.5 text-sm leading-relaxed text-violet-900 ring-1 ring-inset ring-violet-500/20 dark:text-violet-200">{preview}</p>}
+        {preview && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-sky-500/10 p-3.5 text-sm leading-relaxed text-sky-900 ring-1 ring-inset ring-sky-500/20 dark:text-sky-200">{preview}</p>}
       </GlassCard>
 
       <Dialog open={showForm} onClose={() => setShowForm(false)} title={editing ? t.common.edit : "شخصية جديدة"}>

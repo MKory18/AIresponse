@@ -78,7 +78,7 @@ export default function AIAnalyticsPage() {
     <div className="page-wrap">
       <PageHeader title="استخدام AI" description="آخر 30 يومًا — الاستدعاءات والنماذج والتكلفة." />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="استدعاءات" value={formatNumber(data.calls)} tone="violet" icon={<Bot size={18} />} />
+        <StatCard label="استدعاءات" value={formatNumber(data.calls)} tone="sky" icon={<Bot size={18} />} />
         <StatCard label="ناجحة" value={formatNumber(data.successful)} tone="emerald" />
         <StatCard label="فاشلة" value={formatNumber(data.failed)} tone="red" />
         <StatCard label="متوسط الاستجابة" value={data.avgLatencyMs === null ? "—" : `${formatNumber(data.avgLatencyMs)}ms`} tone="sky" icon={<Timer size={18} />} />

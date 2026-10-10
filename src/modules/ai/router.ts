@@ -5,6 +5,7 @@ import {
   MockAIProvider,
   OpenAICompatibleProvider,
   getInjectedMockProvider,
+  normalizeHermesEndpoint,
   resolveAIProvider,
   type AIProvider,
 } from "./provider";
@@ -295,6 +296,9 @@ export function getWorkspaceProvider(
     aiProvider?: string;
     openaiKey?: string;
     openrouterKey?: string;
+    hermesBaseUrl?: string;
+    hermesKey?: string;
+    hermesModel?: string;
     responseModel?: string;
     nodeEnv?: string;
     allowMockAi?: string;
@@ -306,21 +310,45 @@ export function getWorkspaceProvider(
     aiProvider: process.env.AI_PROVIDER,
     openaiKey: process.env.OPENAI_API_KEY,
     openrouterKey: process.env.OPENROUTER_API_KEY,
+    hermesBaseUrl: process.env.HERMES_BASE_URL,
+    hermesKey: process.env.HERMES_API_KEY,
+    hermesModel: process.env.HERMES_MODEL,
     responseModel: process.env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: process.env.ALLOW_MOCK_AI,
   };
   // Precedence (P6): an explicit workspace choice of a REAL provider
-  // (openai/openrouter/internal) is effective and fail-closed on a missing
-  // key. A workspace "mock"/unset DEFERS to ENV — so a misconfigured ENV
-  // still fail-closes exactly as before (no behavior change for existing
+  // (openai/openrouter/internal/hermes) is effective and fail-closed on a
+  // missing key. A workspace "mock"/unset DEFERS to ENV — so a misconfigured
+  // ENV still fail-closes exactly as before (no behavior change for existing
   // deployments), while a workspace can still opt into a real provider whose
   // key exists even when ENV names no provider.
   const wsChoice = settings?.provider ?? null;
-  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal";
+  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "hermes";
   const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? null;
   const keyFor = (p: string | null | undefined) =>
-    p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : undefined;
+    p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : p === "hermes" ? e.hermesKey : undefined;
+  // Hermes Agent (OpenAI-compatible gateway). Endpoint comes from server ENV
+  // (HERMES_BASE_URL — localhost/LAN allowed, it is deployer-trusted, not a
+  // workspace-user URL, so the SSRF guard for customBaseUrl does not apply).
+  // A workspace customBaseUrl may still override it for public Hermes
+  // endpoints (then the save/probe SSRF guard applies as usual).
+  if (choice === "hermes") {
+    const override = settings?.customBaseUrl?.trim();
+    const base = override || e.hermesBaseUrl?.trim();
+    const key = e.hermesKey?.trim();
+    if (!base || !key) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: provider "hermes" needs HERMES_BASE_URL + HERMES_API_KEY in server env${override ? "" : " (or a public customBaseUrl on the workspace)"}. Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
+    return new OpenAICompatibleProvider({
+      name: "hermes",
+      apiKey: key,
+      baseUrl: normalizeHermesEndpoint(base),
+      defaultModel: settings?.responseModel ?? e.hermesModel ?? e.responseModel ?? "hermes-agent",
+    });
+  }
   // Self-hosted endpoint: explicit opt-in per workspace. Delivery is declared
   // "internal" at construction (privacy-gate trusts the flag, not the name).
   const base = settings?.customBaseUrl?.trim();
@@ -356,6 +384,9 @@ export function getWorkspaceProvider(
     aiProvider: e.aiProvider,
     openaiKey: e.openaiKey,
     openrouterKey: e.openrouterKey,
+    hermesBaseUrl: e.hermesBaseUrl,
+    hermesKey: e.hermesKey,
+    hermesModel: e.hermesModel,
     responseModel: e.responseModel,
     nodeEnv: e.nodeEnv,
     allowMockAi: e.allowMockAi,

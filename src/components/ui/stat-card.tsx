@@ -13,7 +13,7 @@ export function StatCard({
   label: string;
   value: string | number | null | undefined;
   icon?: React.ReactNode;
-  tone?: "brand" | "emerald" | "amber" | "sky" | "red" | "violet";
+  tone?: "brand" | "emerald" | "amber" | "sky" | "red";
   trend?: { dir: "up" | "down" | "flat"; text: string };
   hint?: string;
   className?: string;
@@ -24,7 +24,6 @@ export function StatCard({
     amber: "from-amber-500/15 to-amber-500/5 text-amber-600 dark:text-amber-300",
     sky: "from-sky-500/15 to-sky-500/5 text-sky-600 dark:text-sky-300",
     red: "from-red-500/15 to-red-500/5 text-red-600 dark:text-red-300",
-    violet: "from-violet-500/15 to-violet-500/5 text-violet-600 dark:text-violet-300",
   };
   const TrendIcon = trend?.dir === "up" ? TrendingUp : trend?.dir === "down" ? TrendingDown : Minus;
   return (

@@ -14,7 +14,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-b from-brand-400 to-brand-600 text-white shadow-[0_1px_2px_rgb(29_85_209/0.4),inset_0_1px_0_rgb(255_255_255/0.25)] hover:brightness-110 active:brightness-95 disabled:opacity-50 disabled:saturate-50",
+    "bg-gradient-to-b from-sky-400 via-brand-500 to-brand-600 text-white shadow-[0_8px_20px_-8px_rgb(37_99_235/0.8),inset_0_1px_0_rgb(255_255_255/0.3)] hover:brightness-110 hover:shadow-[0_10px_26px_-8px_rgb(37_99_235/0.9)] active:brightness-95 disabled:opacity-50 disabled:saturate-50",
   secondary:
     "glass-subtle text-ink hover:border-brand-300 hover:text-brand-700 active:scale-[0.98] disabled:opacity-50 dark:hover:text-brand-300",
   ghost: "text-ink-muted hover:bg-surface-3 hover:text-ink active:scale-[0.98] disabled:opacity-50",

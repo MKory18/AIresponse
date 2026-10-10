@@ -2,55 +2,55 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ═══════════ AIresponse Design Tokens ═══════════ */
+/* ═══════════ Zaki response Design Tokens — white & blue ═══════════ */
 :root {
   color-scheme: light;
-  --background: 246 248 252;
+  --background: 239 246 255;
   --surface: 255 255 255;
-  --surface-glass: 255 255 255 / 0.72;
+  --surface-glass: 255 255 255 / 0.78;
   --surface-elevated: 255 255 255;
-  --surface-muted: 241 245 249;
-  --border: 226 232 240;
-  --border-glass: 255 255 255 / 0.6;
-  --text: 15 23 42;
-  --text-muted: 100 116 139;
-  --text-subtle: 148 163 184;
-  --brand: 47 111 235;
-  --brand-strong: 29 85 209;
+  --surface-muted: 232 242 255;
+  --border: 208 226 250;
+  --border-glass: 255 255 255 / 0.7;
+  --text: 12 28 58;
+  --text-muted: 71 100 140;
+  --text-subtle: 130 155 190;
+  --brand: 37 99 235;
+  --brand-strong: 29 78 216;
   --success: 16 163 110;
   --warning: 217 119 6;
   --danger: 220 38 38;
   --info: 2 132 199;
-  --line: 226 232 240;
-  --surface-1: 246 248 252;
+  --line: 208 226 250;
+  --surface-1: 239 246 255;
   --surface-2: 255 255 255;
-  --surface-3: 241 245 249;
-  --app-glow-1: 47 111 235 / 0.08;
-  --app-glow-2: 139 92 246 / 0.07;
-  --glass-shadow: 0 1px 2px rgb(16 24 40 / 0.05), 0 8px 24px -12px rgb(16 24 40 / 0.12);
+  --surface-3: 232 242 255;
+  --app-glow-1: 37 99 235 / 0.12;
+  --app-glow-2: 56 189 248 / 0.12;
+  --glass-shadow: 0 1px 2px rgb(23 55 120 / 0.06), 0 10px 28px -14px rgb(37 99 235 / 0.22);
 }
 
 .dark {
   color-scheme: dark;
-  --background: 7 10 17;
-  --surface: 15 19 29;
-  --surface-glass: 17 22 34 / 0.72;
-  --surface-elevated: 22 28 42;
-  --surface-muted: 26 31 42;
-  --border: 39 45 60;
-  --border-glass: 255 255 255 / 0.08;
-  --text: 226 232 240;
-  --text-muted: 148 163 184;
-  --text-subtle: 100 116 139;
-  --brand: 88 153 241;
-  --brand-strong: 139 189 248;
-  --line: 39 45 60;
-  --surface-1: 7 10 17;
-  --surface-2: 15 19 29;
-  --surface-3: 26 31 42;
-  --app-glow-1: 47 111 235 / 0.16;
-  --app-glow-2: 139 92 246 / 0.12;
-  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -12px rgb(0 0 0 / 0.5);
+  --background: 5 11 26;
+  --surface: 10 20 42;
+  --surface-glass: 12 24 48 / 0.78;
+  --surface-elevated: 17 31 60;
+  --surface-muted: 17 31 60;
+  --border: 32 56 100;
+  --border-glass: 147 197 253 / 0.12;
+  --text: 225 238 255;
+  --text-muted: 148 175 215;
+  --text-subtle: 105 135 180;
+  --brand: 96 165 250;
+  --brand-strong: 147 197 253;
+  --line: 32 56 100;
+  --surface-1: 5 11 26;
+  --surface-2: 10 20 42;
+  --surface-3: 17 31 60;
+  --app-glow-1: 37 99 235 / 0.22;
+  --app-glow-2: 56 189 248 / 0.14;
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 14px 36px -12px rgb(2 8 30 / 0.7);
 }
 
 html {
@@ -137,7 +137,7 @@ body {
     @apply rounded-2xl rounded-ss-md border border-line bg-surface-2 px-3.5 py-2 text-[13px] leading-6 text-ink shadow-xs;
   }
   .bubble-out {
-    @apply rounded-2xl rounded-se-md bg-brand-500 px-3.5 py-2 text-[13px] leading-6 text-white shadow-xs;
+    @apply rounded-2xl rounded-se-md bg-gradient-to-b from-brand-400 to-brand-600 px-3.5 py-2 text-[13px] leading-6 text-white shadow-xs;
   }
   .bubble-sys {
     @apply mx-auto rounded-full border border-line bg-surface-3/80 px-3 py-1 text-[11px] text-ink-muted;

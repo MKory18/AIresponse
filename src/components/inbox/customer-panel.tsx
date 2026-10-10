@@ -121,11 +121,11 @@ export function CustomerPanel({
       {orderDraft && <OrderDraftCard draft={orderDraft} />}
 
       {/* AI summary */}
-      <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-500/10 to-violet-500/5 p-3.5 dark:border-violet-400/20">
-        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-violet-700 dark:text-violet-300">
+      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-b from-sky-500/10 to-sky-500/5 p-3.5 dark:border-sky-400/20">
+        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-300">
           <Sparkles aria-hidden size={13} /> {t.inbox.aiSummary}
         </p>
-        <p className="text-[11px] leading-relaxed text-violet-900/80 dark:text-violet-200/80">
+        <p className="text-[11px] leading-relaxed text-sky-900/80 dark:text-sky-200/80">
           {customer.aiSummary ?? t.inbox.aiSummaryEmpty}
         </p>
       </div>

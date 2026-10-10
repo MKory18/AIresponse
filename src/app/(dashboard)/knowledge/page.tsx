@@ -390,7 +390,7 @@ export default function KnowledgePage() {
       {/* FAQs */}
       <GlassCard className="space-y-3 p-4 sm:p-5">
         <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
             <MessageCircleQuestion size={15} />
           </span>
           الأسئلة الشائعة العامة

@@ -11,6 +11,7 @@ import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { dispatchOutbound, recoverStuckOutboundMessages } from "@/modules/channels/outbound";
 import { recoverOrphanedInboundMessages, recoverStaleJobs } from "@/modules/jobs/service";
+import { runJobs } from "@/modules/jobs/handlers";
 import { processIncomingMessage } from "@/modules/conversations/service";
 import { processAIMessage } from "@/modules/ai/orchestrator";
 import {
@@ -348,6 +349,56 @@ describe("orphan sweeper (never silent)", () => {
       data: { createdAt: new Date(Date.now() - 10 * 60_000) },
     } as never);
     expect((await recoverOrphanedInboundMessages(db as never)).recovered).toBe(1);
+  });
+
+  it("P12 regression: terminal FAILED jobs (no usage log) hold backoff — no hot loop", async () => {
+    const orphan = await orphanMessage("config failure orphan");
+    // The job ran, exhausted its attempts and FAILED. The failure threw before
+    // any AIUsageLog row was written (provider config/unreachability path), so
+    // usage-log accounting alone sees failCount=0 and the sweeper used to
+    // re-enqueue this message on EVERY cycle (~1 re-enqueue/s, forever).
+    await db.backgroundJob.create({
+      data: {
+        type: "process_ai_message", workspaceId: WS_A,
+        payload: { conversationId: orphan.conversationId, messageId: orphan.id },
+        status: "FAILED", idempotencyKey: `ai:${orphan.id}`,
+        finishedAt: new Date(Date.now() - 5_000),
+      },
+    } as never);
+    // Terminal failure seconds ago → inside backoff → skipped.
+    expect((await recoverOrphanedInboundMessages(db as never)).recovered).toBe(0);
+    // Age the terminal failure beyond backoff (30s base) → eligible again.
+    const row = (db._stores.backgroundJob as any[]).find(
+      (j) => j.idempotencyKey === `ai:${orphan.id}`
+    );
+    await db.backgroundJob.update({
+      where: { id: row.id },
+      data: { finishedAt: new Date(Date.now() - 10 * 60_000) },
+    } as never);
+    expect((await recoverOrphanedInboundMessages(db as never)).recovered).toBe(1);
+  });
+
+  it("P12 regression: jobs created by in-cycle recovery get real workspace context (no silent DONE)", async () => {
+    const ch = await seedPage();
+    fbSuccess();
+    mockAI();
+    const r = await seedInbound("psid-ws-ctx", "شو المواصفات؟", ch.id, "wsctx");
+    // Simulate the enqueue loss: drop the auto-created job → the message is a
+    // sweeper orphan with NO job row.
+    const autoJob = aiJobs()[0];
+    await db.backgroundJob.delete({ where: { id: autoJob.id } } as never);
+    // One worker cycle = recovery sweep (creates the job NOW) + processing.
+    // Before the fix, the freshly-created job was not in the pre-claimed
+    // workspace snapshot → handler received workspaceId="" → gating returned
+    // SKIPPED → job DONE with zero logs → sweeper re-enqueued forever.
+    const out = await runJobs(db as never, { limit: 10, workerId: "test-ws-ctx" });
+    expect(out.processed).toBe(1);
+    expect(out.failed).toBe(0);
+    // The pipeline RAN: a SUCCESS decision exists for the message.
+    const decided = (db._stores.aIUsageLog as any[]).filter(
+      (u) => u.messageId === r.messageId && (u.status === "SUCCESS" || u.status === "HANDOFF")
+    );
+    expect(decided.length).toBeGreaterThan(0);
   });
 
   it("never touches decided messages or human-track conversations", async () => {

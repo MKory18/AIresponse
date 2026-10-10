@@ -1,4 +1,4 @@
-# AI Commerce Response Engine
+# Zaki response
 
 منصة SaaS متعددة المستأجرين (Multi-Tenant) تجمع بين: AI Sales Agent (فيسبوك ميسنجر فقط) + Customer Support Inbox + CRM + Product Knowledge Base (RAG) + Order Intelligence + Automation/Follow-ups + Analytics.
 
