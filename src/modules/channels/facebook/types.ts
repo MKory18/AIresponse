@@ -18,6 +18,8 @@ export interface NormalizedInboundMessage {
   timestamp: Date;
   provider: string;
   rawEventId: string;
+  /** P8 — مصدر إحالة موثوق من Meta (referral/postback ref) إن وُجد. */
+  adRef?: string | null;
 }
 
 export interface FacebookPageRef {

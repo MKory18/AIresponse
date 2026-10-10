@@ -70,7 +70,8 @@ async function buildContext(db: DbClient, event: AutomationEvent): Promise<Recor
  * - Idempotency: AutomationExecution unique (automationId, triggerEventId).
  */
 export async function evaluateEvent(db: DbClient, event: AutomationEvent): Promise<{ executed: number; skipped: number; failed: number }> {
-  if (event.depth ?? 0 > MAX_EXECUTION_DEPTH) return { executed: 0, skipped: 0, failed: 0 };
+  // P7 fix: the first check was `event.depth ?? 0 > MAX` — precedence bug
+  // (falsy 0 would bind `??` to the comparison). One correct guard now.
   if ((event.depth ?? 0) > MAX_EXECUTION_DEPTH) return { executed: 0, skipped: 0, failed: 0 };
 
   const trigger = eventToTrigger(event.name);

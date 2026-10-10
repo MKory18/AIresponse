@@ -90,7 +90,8 @@ describe("P5 adapter contract — capabilities are explicit, mock never silent",
     expect(CHANNEL_CAPABILITIES.FACEBOOK.supportsPrivateCommentReply).toBe(true);
     expect(CHANNEL_CAPABILITIES.INSTAGRAM.supportsComments).toBe(true);
     expect(CHANNEL_CAPABILITIES.TELEGRAM.supportsComments).toBe(false);
-    expect(CHANNEL_CAPABILITIES.WHATSAPP.supportsTemplates).toBe(false);
+    // P9: approved-template sending is the official WhatsApp marketing path.
+    expect(CHANNEL_CAPABILITIES.WHATSAPP.supportsTemplates).toBe(true);
     expect(CHANNEL_CAPABILITIES.TIKTOK.supportsMedia).toBe(false);
   });
 

@@ -14,6 +14,7 @@ import { prisma } from "../src/core/db/prisma";
 import { runJobs } from "../src/modules/jobs/handlers";
 import { processDueFollowUps } from "../src/modules/automation/followup-service";
 import { registerAutomationBridge } from "../src/modules/automation/engine";
+import { registerWorkflowBridge } from "../src/modules/automation/workflow-bridge";
 import { childLogger } from "../src/core/logger";
 
 const log = childLogger("worker");
@@ -81,6 +82,7 @@ async function cycle(): Promise<void> {
 async function main(): Promise<void> {
   log.info({ workerId: WORKER_ID, pollIntervalMs: POLL_INTERVAL_MS }, "worker_started");
   registerAutomationBridge(prisma);
+  registerWorkflowBridge(prisma);
 
   while (!stopping) {
     currentCycle = cycle();

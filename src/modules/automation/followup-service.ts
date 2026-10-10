@@ -171,6 +171,35 @@ export async function executeFollowUp(db: Db, f: ClaimedFollowUp): Promise<"SENT
   }
 }
 
+/**
+ * P7: cancel all SCHEDULED follow-ups for a customer (optionally by type).
+ * Used by the CANCEL_FOLLOW_UPS workflow action ("customer replied" flows).
+ * Workspace-scoped; returns the count actually cancelled.
+ */
+export async function cancelFollowUpsFor(
+  db: Db,
+  workspaceId: string,
+  customerId: string,
+  type: string | null
+): Promise<number> {
+  const where: Record<string, unknown> = { workspaceId, customerId, status: "SCHEDULED" };
+  if (type) where.type = type;
+  const res = await db.followUp.updateMany({
+    where: where as never,
+    data: { status: "CANCELLED", cancelledAt: new Date() },
+  });
+  if (res.count > 0) {
+    await recordAudit(db, {
+      workspaceId,
+      action: "followup.bulk_cancelled",
+      entityType: "Customer",
+      entityId: customerId,
+      metadata: { count: res.count, type: type ?? null },
+    });
+  }
+  return res.count;
+}
+
 /** Scheduler entry: claim + execute due follow-ups (called by the worker/cron). */
 export async function processDueFollowUps(db: Db, limit = 10) {
   const claimed = await claimDueFollowUps(db, limit);

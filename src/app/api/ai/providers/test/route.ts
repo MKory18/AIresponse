@@ -4,6 +4,7 @@ import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
 import { probeProviderEndpoint } from "@/modules/ai/provider";
 import { resolveModel } from "@/modules/ai/router";
+import { assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
@@ -41,6 +42,13 @@ export const POST = createHandler(
       const base = (settings.customBaseUrl as string | null)?.trim();
       if (!base) {
         return ok({ provider: "internal", status: "unconfigured", latencyMs: 0, detail: "ENDPOINT_NOT_CONFIGURED" });
+      }
+      // P7 SSRF guard: every probe re-validates the stored URL (defense in
+      // depth — validation also runs at save time). Fail-closed with a safe
+      // reason; the URL itself is never echoed into the error.
+      const guard = await assertEndpointResolvesPublic(base);
+      if (!guard.ok) {
+        return ok({ provider: "internal", status: "failed", latencyMs: 0, detail: `SSRF_REJECTED_${guard.reason}` });
       }
       endpoint = base;
       model = resolveModel(settings as never, "RESPONSE").model;

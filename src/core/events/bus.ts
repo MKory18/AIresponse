@@ -45,6 +45,24 @@ export interface DomainEvent<T = Record<string, unknown>> {
   workspaceId: string;
   payload: T;
   occurredAt: Date;
+  /**
+   * P7: deterministic trigger identity (e.g. "MessageReceived:msg-c1").
+   * Durable automation/workflow bridges use it as their idempotency key so a
+   * redelivered/replayed event can never start a second execution. Events
+   * published without one get a NON-deterministic id explicitly marked
+   * "volatile" — the bridge must then derive determinism from the payload.
+   */
+  eventId?: string;
+}
+
+/** Derives a stable trigger id from a payload (used when eventId is absent). */
+export function deriveEventId(event: Pick<DomainEvent, "name" | "workspaceId" | "payload">): string {
+  const p = event.payload as Record<string, unknown>;
+  const anchor =
+    p.messageId ?? p.orderId ?? p.conversationId ?? p.customerId ?? p.mediaId ?? p.feedbackId ?? p.documentId ?? p.draftId;
+  if (typeof anchor === "string" && anchor) return `${event.name}:${anchor}`;
+  // Explicitly volatile: only safe for events whose handlers are idempotent.
+  return `${event.name}:volatile:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 }
 
 type EventHandler = (event: DomainEvent) => void | Promise<void>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Bot, Check, ChevronDown, Facebook, Paperclip, Search, Send, Smile, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, Facebook, Lightbulb, Paperclip, Search, Send, Smile, Sparkles, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { label, t } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
@@ -84,6 +84,9 @@ export default function Inbox() {
   const [deleting, setDeleting] = useState(false);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
   const [actingTakeover, setActingTakeover] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [coachData, setCoachData] = useState<any>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const toast = useToast();
 
@@ -344,6 +347,22 @@ export default function Inbox() {
     }
   }
 
+  // P8 — مساعد البيع: اقتراحات داخلية فقط، لا يُرسل شيء تلقائيًا.
+  async function loadCoach(conversationId: string) {
+    setCoachLoading(true);
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/coach`, { method: "POST" });
+      if (res.ok) {
+        const json = await res.json();
+        setCoachData(json.data ?? null);
+      } else {
+        setCoachData(null);
+      }
+    } finally {
+      setCoachLoading(false);
+    }
+  }
+
   const unreadTotal = conversations.reduce((a, c) => a + c.unreadCount, 0);
   const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || prioritySel || assigneeSel || channelSel);
   const aiMode = selected?.aiState !== "HUMAN_ACTIVE";
@@ -524,6 +543,16 @@ export default function Inbox() {
                     <Bot size={13} /> {t.inbox.backToAi}
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setCoachOpen(true);
+                    if (selectedId && !coachData) void loadCoach(selectedId);
+                  }}
+                >
+                  <Lightbulb size={13} /> مساعد البيع
+                </Button>
                 <Button size="sm" variant="success" onClick={resolve}>
                   <Check size={13} /> {t.inbox.resolve}
                 </Button>
@@ -673,6 +702,75 @@ export default function Inbox() {
         />
       </aside>
 
+      {coachOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
+          <div className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-base font-bold text-ink">
+                <Lightbulb size={16} className="text-amber-500" /> مساعد البيع
+              </h2>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => selectedId && void loadCoach(selectedId)}
+                disabled={coachLoading}
+              >
+                تحديث
+              </Button>
+            </div>
+            <p className="mt-1 text-[11px] text-ink-subtle">اقتراحات داخلية فقط — لا يُرسل شيء للعميل تلقائيًا.</p>
+            {coachLoading ? (
+              <div className="mt-4 space-y-2">
+                <Skeleton className="h-12 w-full rounded-xl" />
+                <Skeleton className="h-12 w-full rounded-xl" />
+              </div>
+            ) : !coachData ? (
+              <p className="mt-4 text-sm text-ink-muted">لا توجد اقتراحات الآن.</p>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {(coachData.suggestions ?? []).map(
+                  (
+                    s: any,
+                    i: number
+                  ) => (
+                    <div key={i} className="rounded-xl border border-line/60 bg-surface-2/50 p-3">
+                      <p className="text-[11px] font-bold text-brand-600 dark:text-brand-300">
+                        {s.kind === "OBJECTION" ? "معالجة اعتراض" : s.kind === "DISCOUNT" ? "خصم" : s.kind === "CROSS_SELL" ? "بيع مُكمِّل" : s.kind === "OFFER" ? "عرض" : "تلميح رد"}
+                        {s.reason ? ` · ${s.reason}` : ""}
+                      </p>
+                      {s.draftText ? (
+                        <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{s.draftText}</p>
+                      ) : null}
+                      {s.draftText ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="mt-2"
+                          onClick={() => {
+                            setComposerTab("reply");
+                            setDraft(s.draftText);
+                            setCoachOpen(false);
+                          }}
+                        >
+                          إدراج في المحرر
+                        </Button>
+                      ) : null}
+                    </div>
+                  )
+                )}
+                {coachData.noOfferReason ? (
+                  <p className="text-[11px] text-ink-subtle">لا يوجد عرض: {coachData.noOfferReason}</p>
+                ) : null}
+              </div>
+            )}
+            <div className="mt-4 flex justify-start">
+              <Button size="sm" variant="secondary" onClick={() => setCoachOpen(false)}>
+                إغلاق
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmTakeover && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" dir="rtl">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900">

@@ -63,12 +63,14 @@ export class WhatsAppClient {
     };
     if (json.error || !res.ok) {
       const code = json.error?.code ?? res.status;
-      // Outside-window freeform (131047 family) and validation errors are
-      // definitive for this payload (a template would be a different call).
-      const permanent = (code >= 400 && code < 500 && code !== 429) || code === 131047;
+      // Graph API subcodes (≥100000, e.g. 131047 outside-window / 132000 template
+      // validation) are definitive rejections for this payload → PERMANENT.
+      // HTTP-level 429/5xx and Meta rate-limit subcode 130429 → TRANSIENT.
+      const transient =
+        code === 429 || code === 130429 || (code >= 500 && code < 100000);
       throw new WhatsAppApiError(
         json.error?.message ?? `WhatsApp error ${code}`,
-        code === 429 || code >= 500 ? "TRANSIENT" : permanent ? "PERMANENT" : "TRANSIENT",
+        transient ? "TRANSIENT" : "PERMANENT",
         code,
         res.status
       );
@@ -81,6 +83,32 @@ export class WhatsAppClient {
       to,
       type: "text",
       text: { body: text, preview_url: false },
+    });
+    return { messageId: json.messages?.[0]?.id ?? "" };
+  }
+
+  /**
+   * P9 — إرسال قالب معتمد عبر WhatsApp Business Platform (المسار الرسمي
+   * للتسويق): body = { type:"template", template:{ name, language, components } }.
+   * اعتماد القالب في Meta نفسه يُدار من واجهة المالك — هنا إرسال فقط.
+   */
+  async sendTemplate(
+    token: string,
+    phoneNumberId: string,
+    to: string,
+    template: { name: string; language: string; variables?: Record<string, string> }
+  ): Promise<{ messageId: string }> {
+    const bodyParams: Array<{ type: string; text: string }> = (template.variables ? Object.keys(template.variables) : [])
+      .sort((a, b) => Number(a) - Number(b))
+      .map((k) => ({ type: "text", text: template.variables![k] }));
+    const json = await this.call<{ messages?: { id?: string }[] }>(phoneNumberId, token, {
+      to,
+      type: "template",
+      template: {
+        name: template.name,
+        language: { code: template.language },
+        ...(bodyParams.length ? { components: [{ type: "body", parameters: bodyParams }] } : {}),
+      },
     });
     return { messageId: json.messages?.[0]?.id ?? "" };
   }

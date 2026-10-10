@@ -49,20 +49,28 @@ function matchesWhere(row: Row, where: Row | undefined): boolean {
           : actual === expected;
         if (!equal) return false;
       }
-    } else if (cond && typeof cond === "object" && "some" in (cond as Row)) {
+    } else if (cond && typeof cond === "object" && !Array.isArray(cond) && ("hasSome" in cond || "hasEvery" in cond)) {
+      const arr: any[] = Array.isArray(row[key]) ? row[key] : [];
+      if ("hasSome" in cond && !arr.some((v) => (cond as Row).hasSome.includes(v))) return false;
+      if ("hasEvery" in cond && !arr.every((v) => (cond as Row).hasEvery.includes(v))) return false;
+    } else if (cond && typeof cond === "object" && ("some" in (cond as Row) || "none" in (cond as Row))) {
       const related: Row[] = row[key] ?? [];
-      if (!related.some((r) => matchesWhere(r, (cond as Row).some))) return false;
+      if ("some" in (cond as Row) && !related.some((r) => matchesWhere(r, (cond as Row).some))) return false;
+      if ("none" in (cond as Row) && related.some((r) => matchesWhere(r, (cond as Row).none))) return false;
     } else if (cond && typeof cond === "object" && !Array.isArray(cond) && !(cond instanceof Date)) {
       const ops = new Set(["contains", "not", "in", "notIn", "gt", "gte", "lt", "lte", "equals", "mode"]);
       if (Object.keys(cond as Row).every((k) => ops.has(k))) {
         if (!matchesCondition(row[key], cond)) return false;
       } else {
-        // Nested relation filter (e.g. identities: { is: {...} })
+        // Nested relation filter (e.g. channel: { type: {...} })
         let matched = true;
+        const base = row[key];
         for (const [sub, subCond] of Object.entries(cond as Row)) {
           if (sub === "some") {
             const related: Row[] = row[key] ?? [];
             if (!related.some((r) => matchesWhere(r, subCond as Row))) matched = false;
+          } else if (base && typeof base === "object" && !Array.isArray(base)) {
+            if (!matchesWhere(base, { [sub]: subCond })) matched = false;
           } else if (!matchesCondition(row[sub], subCond)) {
             matched = false;
           }
@@ -107,6 +115,25 @@ function sortRows(rows: Row[], orderBy: Row[] | Row | undefined): Row[] {
 
 const cloneRow = (r: Row): Row => JSON.parse(JSON.stringify(r));
 
+// Relation attachment for where-filter evaluation (Prisma relation filters).
+let allStores: Record<string, Row[]> | null = null;
+const RELATIONS: Record<string, Record<string, string>> = {
+  customer: { orders: "order", conversations: "conversation" },
+  conversation: { channel: "channel" },
+};
+function attachRelations(name: string, row: Row) {
+  const rel = RELATIONS[name];
+  if (!rel || !allStores) return;
+  for (const key of Object.keys(rel)) {
+    if (row[key] !== undefined) continue;
+    if (key === "channel") {
+      row[key] = (allStores.channel ?? []).find((c: Row) => c.id === row.channelId) ?? null;
+    } else {
+      row[key] = (allStores[rel[key]] ?? []).filter((r: Row) => r.customerId === row.id);
+    }
+  }
+}
+
 function simulateInclude(row: Row, args: any): Row {
   const out = cloneRow(row);
   const inc = args?.include ?? args?.with;
@@ -129,9 +156,10 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         return row ? simulateInclude(row, args) : null;
       }
       const row = store.find((r) => matchesWhere(r, where));
-      return row ? simulateInclude(row, args) : null;
+      return row ? (store.forEach((r) => attachRelations(name, r)), simulateInclude(row, args)) : null;
     },
     async findFirst(args: any) {
+      store.forEach((r) => attachRelations(name, r));
       const row = store.find((r) => matchesWhere(r, args.where));
       return row ? simulateInclude(row, args) : null;
     },
@@ -141,6 +169,7 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
       return row;
     },
     async findMany(args: any = {}) {
+      store.forEach((r) => attachRelations(name, r));
       let rows = store.filter((r) => matchesWhere(r, args.where));
       rows = sortRows(rows, args.orderBy);
       if (args.cursor?.id) {
@@ -157,6 +186,31 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         ...defaults,
         ...args.data,
       };
+      // Enforce unique constraints the real DB enforces (subset used by tests):
+      // automationId_triggerEventId / automationId_version / personaId_version /
+      // customerId_type_key / idempotencyKey / workspaceId+phone.
+      // NOTE: backgroundJob is handled by its own PARTIAL unique simulation
+      // below (active-only) — do NOT add it here as a global unique.
+      const uniqMap: Record<string, (r: Row, w: Row) => boolean> = {
+        automationExecution: (r, w) => r.automationId === w.automationId && r.triggerEventId === w.triggerEventId,
+        automationVersion: (r, w) => r.automationId === w.automationId && r.version === w.version,
+        personaVersion: (r, w) => r.personaId === w.personaId && r.version === w.version,
+        customerMemory: (r, w) => r.customerId === w.customerId && r.type === w.type && r.key === w.key,
+        followUp: (r, w) => r.idempotencyKey !== undefined && r.idempotencyKey === w.idempotencyKey,
+        // Postgres unique semantics: multiple NULLs are distinct.
+        customer: (r, w) => w.phone != null && r.workspaceId === w.workspaceId && r.phone === w.phone,
+        campaignContentVersion: (r, w) => r.campaignId === w.campaignId && r.version === w.version,
+        campaignRecipient: (r, w) => r.campaignId === w.campaignId && r.customerId === w.customerId,
+      };
+      const uniq = uniqMap[name];
+      if (uniq) {
+        const dup = store.find((r) => uniq(r, args.data ?? {}));
+        if (dup) {
+          const err = new Error(`Unique constraint failed on ${name}`) as Error & { code?: string };
+          err.code = "P2002";
+          throw err;
+        }
+      }
       // simulate nested create (e.g. customer.create with identities.create)
       for (const [k, v] of Object.entries(row)) {
         if (v && typeof v === "object" && "create" in (v as Row)) {
@@ -236,8 +290,17 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
     },
     async createMany(args: any) {
       const data = Array.isArray(args.data) ? args.data : [args.data];
+      const uniqMap: Record<string, (r: Row, w: Row) => boolean> = {
+        campaignContentVersion: (r, w) => r.campaignId === w.campaignId && r.version === w.version,
+        campaignRecipient: (r, w) => r.campaignId === w.campaignId && r.customerId === w.customerId,
+      };
+      const uniq = uniqMap[name];
       let count = 0;
       for (const d of data) {
+        if (uniq && args.skipDuplicates) {
+          const dup = store.find((r) => uniq(r, d as Row));
+          if (dup) continue;
+        }
         store.push({
           id: `c-${name}-${store.length + 1}-${Math.random().toString(36).slice(2, 8)}`,
           createdAt: new Date(),
@@ -283,6 +346,7 @@ export function createFakeDb() {
   const deliveryRuleRows: Row[] = [];
   const humanHandoffRows: Row[] = [];
   const automationRows: Row[] = [];
+  const automationVersionRows: Row[] = [];
   const automationExecutionRows: Row[] = [];
   const userRows: Row[] = [];
   const followUpRows: Row[] = [];
@@ -290,6 +354,13 @@ export function createFakeDb() {
   const dailyAnalyticsRows: Row[] = [];
   const playgroundSessionRows: Row[] = [];
   const playgroundMessageRows: Row[] = [];
+  const salesEventRows: Row[] = [];
+  const discountApprovalRows: Row[] = [];
+  const audienceSegmentRows: Row[] = [];
+  const campaignRows: Row[] = [];
+  const campaignContentVersionRows: Row[] = [];
+  const campaignRecipientRows: Row[] = [];
+  const campaignEventRows: Row[] = [];
   const workspaceRows: Row[] = [];
 
   const db = {
@@ -297,20 +368,23 @@ export function createFakeDb() {
       customer, conversation, message, channelIdentity, channel, workspaceMember,
       auditLog, product, productVariant, productMedia, mediaAsset, feedback,
       order: orderRows, orderItem: orderItemRows, orderDraft: orderDraftRows, deliveryRule: deliveryRuleRows,
-      channelAccount: channelAccountRows, webhookEvent: webhookEventRows, humanHandoff: humanHandoffRows, automation: automationRows, automationExecution: automationExecutionRows, user: userRows, followUp: followUpRows, workspaceUsage: workspaceUsageRows, dailyWorkspaceAnalytics: dailyAnalyticsRows,
+      channelAccount: channelAccountRows, webhookEvent: webhookEventRows, humanHandoff: humanHandoffRows, automation: automationRows, automationVersion: automationVersionRows, automationExecution: automationExecutionRows, user: userRows, followUp: followUpRows, workspaceUsage: workspaceUsageRows, dailyWorkspaceAnalytics: dailyAnalyticsRows,
       knowledgeDocument, knowledgeChunk, faq, backgroundJob,
       aISettings, persona, personaVersion, customerMemory, knowledgeCitation, aIUsageLog,
       playgroundSession: playgroundSessionRows, playgroundMessage: playgroundMessageRows,
+      salesEvent: salesEventRows, discountApproval: discountApprovalRows,
+      audienceSegment: audienceSegmentRows, campaign: campaignRows,
+      campaignContentVersion: campaignContentVersionRows, campaignRecipient: campaignRecipientRows,
+      campaignEvent: campaignEventRows,
       workspace: workspaceRows,
     },
-    customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0 }),
+    customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     message: makeModel("message", message, { deliveryStatus: "PENDING", isNote: false, metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channelIdentity: makeModel("channelIdentity", channelIdentity, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channel: makeModel("channel", channel, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     workspaceMember: makeModel("workspaceMember", workspaceMember, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     auditLog: makeModel("auditLog", auditLog, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    order: makeModel("order", [], { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     product: makeModel("product", product, { currency: "USD", stockStatus: "IN_STOCK", stockQty: 0, tags: [], benefits: [], objections: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     productVariant: makeModel("productVariant", productVariant, { stockStatus: "IN_STOCK", stockQty: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     productMedia: makeModel("productMedia", productMedia, { sortOrder: 0, isPrimary: false, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -327,8 +401,9 @@ export function createFakeDb() {
     knowledgeCitation: makeModel("knowledgeCitation", knowledgeCitation, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channelAccount: makeModel("channelAccount", channelAccountRows, { provider: "FACEBOOK", connectedAt: new Date(), tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     humanHandoff: makeModel("humanHandoff", humanHandoffRows, { priority: "NORMAL", status: "OPEN", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    automation: makeModel("automation", automationRows, { priority: 0, isEnabled: true, conditions: {}, actions: [], tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    automationExecution: makeModel("automationExecution", automationExecutionRows, { status: "RUNNING", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    automation: makeModel("automation", automationRows, { priority: 0, isEnabled: true, conditions: {}, actions: [], status: "PUBLISHED", version: 1, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    automationVersion: makeModel("automationVersion", automationVersionRows, { priority: 0, conditions: {}, actions: [], tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    automationExecution: makeModel("automationExecution", automationExecutionRows, { status: "RUNNING", stepIndex: 0, attempts: 0, stepLog: [], metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     user: makeModel("user", userRows, { availability: "AVAILABLE", isSuperAdmin: false, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     followUp: makeModel("followUp", followUpRows, { status: "SCHEDULED", attempts: 0, type: "GENERIC", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     workspaceUsage: makeModel("workspaceUsage", workspaceUsageRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -341,6 +416,13 @@ export function createFakeDb() {
     orderItem: makeModel("orderItem", orderItemRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     orderDraft: makeModel("orderDraft", orderDraftRows, { state: "COLLECTING", missingFields: [], phone: null, productId: null, quantity: null, rawAddress: null, province: null, customerName: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     deliveryRule: makeModel("deliveryRule", deliveryRuleRows, { fee: 0, isAvailable: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    salesEvent: makeModel("salesEvent", salesEventRows, { payload: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    audienceSegment: makeModel("audienceSegment", audienceSegmentRows, { description: null, isActive: true, tags: [], isArchived: false, isApproved: false, deletedAt: null }),
+    campaign: makeModel("campaign", campaignRows, { description: null, channelId: null, scheduledAt: null, timezone: "UTC", endsAt: null, ratePerMinute: 30, windowStartAt: null, sentInWindow: 0, contentVersionId: null, approvedBy: null, approvedAt: null, approvalAudienceHash: null, startedAt: null, completedAt: null, cancelledAt: null, cancelReason: null, failReason: null, lastTickSeq: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    campaignContentVersion: makeModel("campaignContentVersion", campaignContentVersionRows, { templateName: null, templateLanguage: null, templateVariables: {}, status: "DRAFT", approvedBy: null, approvedAt: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    campaignRecipient: makeModel("campaignRecipient", campaignRecipientRows, { conversationId: null, excludeReason: null, messageId: null, attempts: 0, lastError: null, errorCategory: null, sentAt: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    campaignEvent: makeModel("campaignEvent", campaignEventRows, { actorUserId: null, reason: null, count: 0, payload: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    discountApproval: makeModel("discountApproval", discountApprovalRows, { status: "PENDING", currency: "USD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     workspace: makeModel("workspace", workspaceRows, { plan: "FREE", timezone: "UTC", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
   };
 
@@ -644,5 +726,6 @@ export function createFakeDb() {
     return result;
   };
 
+  allStores = db._stores;
   return db;
 }

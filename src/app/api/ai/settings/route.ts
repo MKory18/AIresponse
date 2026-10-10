@@ -2,6 +2,8 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
+import { validateEndpointUrl, assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
+import { AppError } from "@/core/errors";
 
 const settingsSchema = z.object({
   provider: z.enum(["mock", "openai", "openrouter", "internal"]).optional(),
@@ -40,6 +42,19 @@ export const GET = createHandler(
 export const PATCH = createHandler(
   { body: settingsSchema, permission: "ai.configure" },
   async ({ auth, body }) => {
+    // P7 SSRF guard (fail-closed): an operator-supplied model endpoint must
+    // not target loopback/LAN/metadata addresses. Sync checks always; DNS
+    // re-check when a new endpoint is being stored.
+    if (body.customBaseUrl !== undefined && body.customBaseUrl !== null) {
+      const sync = validateEndpointUrl(body.customBaseUrl);
+      if (!sync.ok) {
+        throw new AppError(`عنوان الاتصال مرفوض (${sync.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
+      }
+      const dns = await assertEndpointResolvesPublic(body.customBaseUrl);
+      if (!dns.ok) {
+        throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
+      }
+    }
     const settings = await prisma.aISettings.upsert({
       where: { workspaceId: auth!.workspaceId },
       create: { workspaceId: auth!.workspaceId, ...body },

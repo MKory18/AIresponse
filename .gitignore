@@ -11,3 +11,4 @@ coverage
 *.tsbuildinfo
 .tmp-prod-safety-*
 .tmp-*
+.playwright-mcp/

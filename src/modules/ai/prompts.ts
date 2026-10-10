@@ -117,6 +117,13 @@ export function trustedDataPrompt(data: {
   memory?: { type: string; content: string }[];
   summary?: string | null;
   orderSummary?: string | null;
+  sales?: {
+    primary: { name: string; quantity: number; unitPrice: string; subtotal: string } | null;
+    offer: { title: string; quantity: number; price: string; saving: string } | null;
+    crossSell: { name: string; price: string }[];
+    objection: string | null;
+    noOfferReason: string | null;
+  };
   customer?: { name: string | null; page: string | null };
 }): string {
   const blocks: string[] = [];
@@ -185,6 +192,21 @@ export function trustedDataPrompt(data: {
   }
   if (data.orderSummary) {
     blocks.push(`ملخص الطلب (بيانات رسمية — استخدم هذه الأرقام حرفيًا ولا تحسب شيئًا بنفسك):\n${data.orderSummary}`);
+  }
+  // P8 — خطة البيع: أرقام محسوبة من قاعدة البيانات. النموذج يصيغ لغتها فقط
+  // ولا يُسمح له باختراع أي رقم أو عرض غير مذكور هنا. سعر الجملة لا يدخل
+  // هذه الكتلة أبدًا (يُرفض في طبقة الخدمات قبلها).
+  if (data.sales) {
+    const s = data.sales;
+    const lines: (string | null)[] = [
+      s.primary ? `المنتج الأساسي: ${s.primary.name} — الكمية ${s.primary.quantity} — السعر ${s.primary.unitPrice} — الإجمالي ${s.primary.subtotal}` : null,
+      s.offer ? `عرض مؤهل (قدّمه إن كان مناسبًا، ولا تخترع غيره): ${s.offer.title} — ${s.offer.quantity} وحدة بسعر ${s.offer.price} (توفير ${s.offer.saving})` : null,
+      ...s.crossSell.map((c, i) => `منتج مكمل ${i + 1} (اختياري، اقتراح واحد كافٍ): ${c.name} — السعر ${c.price}`),
+      s.objection ? `اعتراض العميل المرصود: ${s.objection} — عالجه بلباقة دون ادعاءات طبية أو ضمانات أو شهادات مخترعة.` : null,
+      !s.offer && s.noOfferReason ? `لا يوجد عرض مؤهل الآن (${s.noOfferReason}) — لا تذكر أي عرض أو توفير.` : null,
+      "ممنوع: اختراع سعر/عرض/خصم/توفير، ادعاء ندرة أو استعجال، اختراع شهادات أو تقييمات، كشف أي أسعار داخلية.",
+    ];
+    blocks.push(["خطة البيع (بيانات رسمية — استخدم أرقامها حرفيًا):", ...lines.filter(Boolean)].join("\n"));
   }
   return blocks.join("\n\n") || "لا توجد بيانات موثوقة إضافية.";
 }

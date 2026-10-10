@@ -6,6 +6,76 @@ import { classifySentiment } from "@/modules/feedback/service";
 
 const log = childLogger("jobs");
 
+/**
+ * P7 — Workflow job handlers:
+ * - run_workflow_event: evaluate published workflows for one trusted event
+ *   (idempotent via AutomationExecution unique (automationId, triggerEventId)).
+ * - resume_workflow_executions: WAITING runs past their resumeAt get one
+ *   re-enqueued (deterministic key) — durable timers without in-memory state.
+ */
+async function handleRunWorkflowEvent(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { evaluateWorkflowEvent } = await import("@/modules/automation/workflow-engine");
+  const result = await evaluateWorkflowEvent(db as never, {
+    name: String(payload.eventName ?? ""),
+    workspaceId: String(payload.workspaceId ?? ""),
+    payload: (payload.payload as Record<string, unknown>) ?? {},
+    eventId: String(payload.eventId ?? ""),
+  });
+  void result;
+  return { success: true };
+}
+
+const WF_RESUME_JOB_MAX = 100;
+
+async function handleResumeWorkflowExecutions(db: HandlerDb): Promise<{ success: boolean; error?: string }> {
+  const due = await (db as never as {
+    automationExecution: {
+      findMany: (a: unknown) => Promise<Array<Record<string, unknown>>>;
+      findUnique: (a: unknown) => Promise<Record<string, unknown> | null>;
+      update: (a: unknown) => Promise<unknown>;
+    };
+    automation: { findUnique: (a: unknown) => Promise<Record<string, unknown> | null> };
+    automationVersion: { findUnique: (a: unknown) => Promise<Record<string, unknown> | null> };
+  }).automationExecution.findMany({
+    where: { status: "WAITING" },
+    take: WF_RESUME_JOB_MAX,
+    orderBy: { startedAt: "asc" },
+    select: { id: true, automationId: true, triggerEventId: true, workspaceId: true, metadata: true },
+  });
+  const now = Date.now();
+  let resumed = 0;
+  for (const ex of due) {
+    const at = (ex.metadata as { resumeAt?: string } | null)?.resumeAt;
+    if (!at || new Date(at).getTime() > now) continue;
+    // Re-enqueue with the DETERMINISTIC trigger key — the evaluation re-runs
+    // idempotently and resumes the frozen snapshot at its cursor.
+    const wf = await (db as never as { automation: { findUnique: (a: unknown) => Promise<Record<string, unknown> | null> } }).automation.findUnique({ where: { id: String(ex.automationId) } });
+    if (!wf || wf.status !== "PUBLISHED" || wf.isEnabled !== true) {
+      // Unpublished/paused mid-WAIT → cancel safely (no further steps).
+      await (db as never as { automationExecution: { update: (a: unknown) => Promise<unknown> } }).automationExecution.update({
+        where: { id: String(ex.id) },
+        data: { status: "CANCELLED", error: "WORKFLOW_CANCELLED:UNPUBLISHED_DURING_WAIT", errorCategory: "CANCELLED", completedAt: new Date() },
+      });
+      continue;
+    }
+    const { enqueueJob } = await import("@/modules/jobs/service");
+    const res = await enqueueJob(db as never, {
+      workspaceId: String(ex.workspaceId),
+      type: "run_workflow_event",
+      payload: {
+        eventName: "WorkflowResumed",
+        workspaceId: ex.workspaceId,
+        eventId: String(ex.triggerEventId),
+        payload: { resumeExecutionId: ex.id },
+      },
+      idempotencyKey: `wf-resume:${ex.id}:${ex.stepIndex}`,
+    }).catch(() => null);
+    if (res && !res.deduplicated) resumed += 1;
+  }
+  if (resumed > 0) log.info({ resumed }, "workflow_resumes_enqueued");
+  return { success: true };
+}
+
 type HandlerDb = Parameters<typeof processPendingJobs>[0];
 
 /**
@@ -403,6 +473,20 @@ async function handleAggregateAnalytics(db: HandlerDb, payload: Record<string, u
   return { success: true };
 }
 
+/** run_campaign: P9 — بوابة البدء + لقطة المستلمين (durable, idempotent). */
+async function handleRunCampaign(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { startCampaignRun } = await import("@/modules/campaigns/campaign-runner");
+  const result = await startCampaignRun(db as never, String(payload.campaignId ?? ""));
+  return { success: true, ...(result.started ? {} : { error: result.reason }) };
+}
+
+/** campaign_tick: P9 — دفعة bounded مع إيقاف/إلغاء فوري وحد معدل durable. */
+async function handleCampaignTick(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { campaignTick } = await import("@/modules/campaigns/campaign-runner");
+  await campaignTick(db as never, String(payload.campaignId ?? ""), Number(payload.seq ?? 1));
+  return { success: true };
+}
+
 export function getJobHandlers(): Record<string, JobHandler> {
   return {
     process_knowledge_document: (payload) => handleProcessDocument(getDb(), payload),
@@ -415,6 +499,10 @@ export function getJobHandlers(): Record<string, JobHandler> {
     evaluate_automation: (payload) => handleEvaluateAutomation(getDb(), payload),
     process_due_followups: () => handleProcessDueFollowUps(getDb()),
     aggregate_workspace_analytics: (payload) => handleAggregateAnalytics(getDb(), payload),
+    run_workflow_event: (payload) => handleRunWorkflowEvent(getDb(), payload),
+    resume_workflow_executions: () => handleResumeWorkflowExecutions(getDb()),
+    run_campaign: (payload) => handleRunCampaign(getDb(), payload),
+    campaign_tick: (payload) => handleCampaignTick(getDb(), payload),
   };
 }
 

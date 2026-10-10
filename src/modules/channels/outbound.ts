@@ -43,6 +43,11 @@ export interface DispatchOutboundParams {
   senderId?: string;
   /** Optional media asset ID to attach (image/video/audio/file). */
   mediaId?: string | null;
+  /**
+   * P9 — قالب معتمد (WhatsApp Business Platform فقط): المسار الرسمي
+   * الوحيد للتسويق خارج نافذة 24h. القنوات الأخرى ترفضه صراحة.
+   */
+  template?: { name: string; language: string; variables?: Record<string, string> } | null;
 }
 
 export interface DispatchOutboundResult {
@@ -87,6 +92,7 @@ export function checkChannelPolicy(
     lastCustomerMessageAt?: Date | string | null;
     tokenValid?: boolean;
     tiktokApproved?: boolean;
+    template?: { name: string; language: string } | null;
   }
 ): { allowed: true } | { allowed: false; reason: string } {
   switch (channelType) {
@@ -107,6 +113,7 @@ export function checkChannelPolicy(
         channelStatus: args.channelStatus,
         tokenValid: args.tokenValid ?? false,
         lastCustomerMessageAt: args.lastCustomerMessageAt,
+        template: args.template ?? null,
       });
       return d.allowed ? { allowed: true } : { allowed: false, reason: d.reason };
     }
@@ -616,6 +623,8 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
     lastCustomerMessageAt: s.conversation.lastCustomerMessageAt ?? undefined,
     tokenValid: true,
     tiktokApproved: (s.account.metadata as { ttAccessApproved?: boolean } | null | undefined)?.ttAccessApproved ?? false,
+    // القالب يمر للسياسة: خارج نافذة واتساب، القالب المعتمد هو المسار المسموح
+    template: s.params.template ?? null,
   });
   if (!verdict.allowed) {
     await markFailed(db, s.messageId, `POLICY_${verdict.reason}`, "تعذر الإرسال حسب سياسة المنصة");
@@ -644,7 +653,21 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
     let firstMid: string | undefined;
     let secondMid: string | undefined;
     let code: string | undefined;
-    if (s.attachment && s.params.text?.trim()) {
+    if (s.params.template && s.channel.type === "WHATSAPP") {
+      // P9 — مسار القالب المعتمد (WhatsApp Business Platform) فقط.
+      if (s.attachment) throw new AppError("لا يجوز دمج الوسائط مع القالب", 422, "TEMPLATE_MEDIA_UNSUPPORTED");
+      const tplAdapter = adapter as unknown as {
+        sendTemplateMessage?: (ref: string, t: { name: string; language: string; variables?: Record<string, string> }) => Promise<{ externalMessageId: string; raw?: Record<string, unknown> }>;
+      };
+      if (typeof tplAdapter.sendTemplateMessage !== "function") {
+        throw new AppError("القناة لا تدعم إرسال القوالب", 501, "CHANNEL_FEATURE_UNSUPPORTED");
+      }
+      const single = await tplAdapter.sendTemplateMessage(s.recipientId, s.params.template);
+      firstMid = single.externalMessageId;
+      code = codeOf(single);
+    } else if (s.params.template) {
+      throw new AppError("القناة لا تدعم إرسال القوالب", 501, "CHANNEL_FEATURE_UNSUPPORTED");
+    } else if (s.attachment && s.params.text?.trim()) {
       if (s.priorPart1) {
         firstMid = s.priorPart1;
       } else {
@@ -787,7 +810,11 @@ function resolveChannelSender(
       }
       const phoneNumberId = ctx.externalId;
       const client = getWhatsAppClient();
-      const sender = async (to: string, p: { text?: string; media?: { kind: "image" | "video" | "audio" | "document"; url: string; caption?: string } }) => {
+      const sender = async (to: string, p: { text?: string; media?: { kind: "image" | "video" | "audio" | "document"; url: string; caption?: string }; template?: { name: string; language: string; variables?: Record<string, string> } }) => {
+        if (p.template) {
+          const r = await client.sendTemplate(ctx.token, phoneNumberId, to, p.template);
+          return { messageId: r.messageId };
+        }
         const r = p.media
           ? await client.sendMedia(ctx.token, phoneNumberId, to, p.media.kind, p.media.url, p.media.caption)
           : await client.sendText(ctx.token, phoneNumberId, to, p.text ?? "");

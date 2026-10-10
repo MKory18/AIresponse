@@ -7,7 +7,7 @@ import {
   LayoutDashboard, MessageSquare, Users, Package, ShoppingBag, Images,
   MessageCircle, BookOpen, UserRound, FlaskConical, Radio, Workflow, Clock,
   Hand, ChartNoAxesCombined, Settings, LogOut, X, MessageSquareText,
-  ChevronsRight, ChevronsLeft, Bell, SlidersHorizontal,
+  ChevronsRight, ChevronsLeft, Bell, SlidersHorizontal, GitBranch, Megaphone,
 } from "lucide-react";
 import type { LucideProps } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -39,6 +39,8 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   FlaskConical,
   Radio,
   Workflow,
+  GitBranch,
+  Megaphone,
   Clock,
   Hand,
   BarChart3: ChartNoAxesCombined,

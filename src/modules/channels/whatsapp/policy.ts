@@ -13,6 +13,8 @@ export interface WhatsAppPolicyContext {
   tokenValid: boolean;
   lastCustomerMessageAt?: Date | string | null;
   now?: number;
+  /** P9: قالب مسجّل معتمد — المسار الرسمي الوحيد للتسويق خارج النافذة. */
+  template?: { name: string; language: string } | null;
 }
 
 export type WhatsAppPolicyDecision =
@@ -24,6 +26,8 @@ export function canSendWhatsApp(ctx: WhatsAppPolicyContext): WhatsAppPolicyDecis
   if (!ctx.tokenValid) return { allowed: false, reason: "TOKEN_INVALID" };
   const last = ctx.lastCustomerMessageAt ? new Date(ctx.lastCustomerMessageAt).getTime() : NaN;
   if (!Number.isFinite(last) || (ctx.now ?? Date.now()) - last > WHATSAPP_WINDOW_MS) {
+    // خارج النافذة: القالب المعتمد المسجّل فقط — لا نص حر تسويقي أبدًا.
+    if (ctx.template?.name && ctx.template.language) return { allowed: true };
     return { allowed: false, reason: "WINDOW_CLOSED_TEMPLATE_REQUIRED" };
   }
   return { allowed: true };

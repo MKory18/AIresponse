@@ -17,6 +17,12 @@ export const JOB_TYPES = [
   "evaluate_automation",
   "process_due_followups",
   "aggregate_workspace_analytics",
+  // P7 — Workflow engine (durable triggers + WAIT resumption).
+  "run_workflow_event",
+  "resume_workflow_executions",
+  // P9 — Campaigns (durable start + bounded ticks).
+  "run_campaign",
+  "campaign_tick",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

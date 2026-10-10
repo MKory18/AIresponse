@@ -7,6 +7,7 @@
  * citations, memory persistence, summary scheduling.
  */
 import { childLogger } from "@/core/logger";
+import { recordSalesEvent } from "@/modules/sales/metrics";
 import { AIProviderError } from "../provider";
 import { withRetry, logUsage, getFallbackModel, executeWithFallback } from "../router";
 import {
@@ -79,6 +80,19 @@ export async function runResponse(
       if (digits.length >= 7) allowedNumbers.push(m[0].trim());
     }
   }
+  // P8 — أرقام خطة البيع (من DB حصرًا) مسموح بها في الرد؛ أي رقم آخر
+  // اخترعه النموذج ترفضه الـ guardrails. سعر الجملة لا يدخل هنا أبدًا.
+  const salesPlan = ext.salesPlan ?? null;
+  if (salesPlan) {
+    if (salesPlan.primary) {
+      allowedNumbers.push(salesPlan.primary.unitPrice, salesPlan.primary.subtotal, salesPlan.primary.quantity);
+    }
+    if (salesPlan.upsell) {
+      allowedNumbers.push(salesPlan.upsell.price, salesPlan.upsell.saving, salesPlan.upsell.quantity);
+    }
+    for (const c of salesPlan.crossSell) allowedNumbers.push(c.unitPrice);
+    if (salesPlan.discount) allowedNumbers.push(salesPlan.discount.discountedPrice, salesPlan.discount.amount);
+  }
 
   // 10. Response generation (validated by guardrails; regenerate once, then safe fallback).
   const system = [
@@ -110,6 +124,19 @@ export async function runResponse(
       })),
       summary: conversation.summary,
       orderSummary: orderResult?.summaryText ?? null,
+      sales: salesPlan
+        ? {
+            primary: salesPlan.primary
+              ? { name: salesPlan.primary.name, quantity: salesPlan.primary.quantity, unitPrice: `${salesPlan.primary.unitPrice} ${salesPlan.primary.currency}`, subtotal: String(salesPlan.primary.subtotal) }
+              : null,
+            offer: salesPlan.upsell
+              ? { title: salesPlan.upsell.title, quantity: salesPlan.upsell.quantity, price: `${salesPlan.upsell.price} ${salesPlan.upsell.currency}`, saving: String(salesPlan.upsell.saving) }
+              : null,
+            crossSell: salesPlan.crossSell.map((c) => ({ name: c.name, price: `${c.unitPrice} ${c.currency}` })),
+            objection: salesPlan.objection?.topic ?? null,
+            noOfferReason: salesPlan.noOfferReason,
+          }
+        : undefined,
       customer: {
         name: (customer as { name?: string | null }).name ?? null,
         page: channelRow?.displayName ?? null,
@@ -330,6 +357,19 @@ export async function runResponse(
 
   // The reply is on its way (or was already sent): now record success,
   // citations, and memories.
+  // P8 — OFFER_SHOWN يُسجَّل فقط بعد وصول الرد فعليًا (اقتراح ≠ أُرسل).
+  if (salesPlan?.upsell && !params.dryRun) {
+    await recordSalesEvent(db, {
+      workspaceId: params.workspaceId,
+      type: "OFFER_SHOWN",
+      conversationId: conversation.id,
+      customerId: customer.id,
+      productId: salesPlan.upsell.productId,
+      sku: salesPlan.upsell.sku,
+      value: salesPlan.upsell.saving,
+      payload: { title: salesPlan.upsell.title, quantity: salesPlan.upsell.quantity, price: salesPlan.upsell.price },
+    }).catch(() => {});
+  }
   await logUsage(db, {
     workspaceId: params.workspaceId,
     conversationId: conversation.id,

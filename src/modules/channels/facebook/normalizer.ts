@@ -32,6 +32,9 @@ export interface MetaWebhookPayload {
       sender?: { id?: string };
       recipient?: { id?: string };
       timestamp?: number;
+      // P8 — بيانات إحالة موثوقة (messaging_referrals / postback ref).
+      referral?: { ref?: string; source?: string; type?: string };
+      postback?: { ref?: string; payload?: string };
       message?: {
         mid?: string;
         text?: string;
@@ -84,6 +87,9 @@ export function normalizeFacebookWebhook(
         externalCustomerId: event.sender.id,
         externalConversationId: event.sender.id, // Messenger: conversation == PSID per Page
         externalMessageId: msg.mid,
+        // P8 — بيانات إحالة موثوقة فقط: ref صريح من Meta يُمرر كما هو،
+        // وغيابه يعني "غير معروف" (لا تخمين من نص الرسالة أبدًا).
+        adRef: event.referral?.ref ?? event.postback?.ref ?? null,
         // Per-MESSAGE delivery identity: Meta batches multiple messages from
         // the same customer in one POST, so the POST-scoped rawEventId MUST
         // NOT be reused here — processIncomingMessage dedupes on

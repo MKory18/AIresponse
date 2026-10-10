@@ -85,6 +85,8 @@ export interface ExtractionReady {
   responseModelCfg: ReturnType<typeof resolveModel>;
   plan: ResponsePlan;
   extractionUser: string;
+  /** P8 — خطة بيع حتمية (أرقام من DB فقط)؛ اختيارية ولا تغير السلوك غيابًا. */
+  salesPlan?: import("@/modules/sales/plan-schemas").SalesPlan;
 }
 
 export type { Db };

@@ -114,9 +114,9 @@ export const CHANNEL_CAPABILITIES: Record<ChannelType, ChannelCapabilities> = {
     supportsComments: false,
     supportsPrivateCommentReply: false,
     supportsReadReceipts: false,
-    // Templates exist on the platform but sending them is not implemented in
-    // P5 — outside-window sends refuse with a clear policy error instead.
-    supportsTemplates: false,
+    // P9: template sending is implemented via the official Cloud API
+    // (approved templates only — the sole official marketing path).
+    supportsTemplates: true,
   },
   WEB: {
     supportsText: false,

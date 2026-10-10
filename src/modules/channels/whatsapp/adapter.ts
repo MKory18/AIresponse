@@ -17,7 +17,12 @@ export interface WhatsAppAdapterContext {
   /** Bound sender owning the system-user token. */
   sender?: (
     to: string,
-    payload: { text?: string; media?: { kind: "image" | "video" | "audio" | "document"; url: string; caption?: string } }
+    payload: {
+      text?: string;
+      media?: { kind: "image" | "video" | "audio" | "document"; url: string; caption?: string };
+      /** P9 — قالب معتمد (المسار الرسمي للتسويق خارج نافذة 24h). */
+      template?: { name: string; language: string; variables?: Record<string, string> };
+    }
   ) => Promise<{ messageId: string; code?: string }>;
 }
 
@@ -60,6 +65,15 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
 
   async sendText(conversationRef: string, text: string): Promise<ChannelSendResult> {
     const res = await this.requireSender()(conversationRef, { text });
+    return { externalMessageId: res.messageId, provider: this.provider, raw: { code: res.code } };
+  }
+
+  /** P9 — إرسال قالب معتمد عبر Cloud API (Official WhatsApp Business Platform). */
+  async sendTemplateMessage(
+    conversationRef: string,
+    template: { name: string; language: string; variables?: Record<string, string> }
+  ): Promise<ChannelSendResult> {
+    const res = await this.requireSender()(conversationRef, { template });
     return { externalMessageId: res.messageId, provider: this.provider, raw: { code: res.code } };
   }
 

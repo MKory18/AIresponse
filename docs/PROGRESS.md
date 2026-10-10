@@ -475,3 +475,144 @@
 ### قرار P6
 
 **مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P7.** ملاحظة الأرقام العارية بلا سياق (P1.1) والعقد الخارجي (P2) تبقيان في المخاطر.
+
+## P7 — محرك الأتمتة وسير العمل والمتابعات (10 تشرين الأول 2026)
+
+> الأساس: `main` على `2d76689` (P1–P6 مرفوعة). البوابات: **657/657 (47 ملفًا — الأساس 632 + 25 لـ P7)** ✅ · typecheck ✅ · lint ✅ · scan:secrets ✅ · build ✅ (91/91 صفحة + مسارات `/api/workflows*` وصفحة `/workflows`). ترحيل واحد مطبق على dev فقط (`20261010104800_p7_workflows`). **لم يُرفع إلى GitHub** (بحسب التعليمات). بلا اتصال إنتاجي، بلا رسائل حقيقية.
+
+### الموجود مقابل الناقص (مثبت بالكود)
+
+| الوحدة | الموجود (احتُفظ به) | الناقص (نُفّذ في P7) |
+|---|---|---|
+| محرك الأتمتة القديم (`automation/engine.ts`) | قاعدة واحدة تُقيَّم مباشرة عند الحدث، بلا تنفيذ قابل للاستئناف | سير عمل متعدد الخطوات: مؤشر تنفيذ دائم (stepIndex + stepLog)، تنفيذ مرة واحدة بالضبط، WAIT قابل للاستئناف، لقطة مجمدة للإصدار |
+| المخطط | `Automation` + `AutomationExecution` أساسي | `Automation.status/version/versionId/publishedBy/publishedAt` + جدول `AutomationVersion` (لقطة مجمدة، فريد automationId+version) + `WAITING/CANCELLED` + `stepLog/stepIndex/attempts/errorCategory` + فريد `(automationId, triggerEventId)` |
+| الأمان | — | مخطط Zod صارم (`.strict()`) بمجموعة مغلقة من المشغّلات/الشروط/الإجراءات — بلا كود مخزَّن، بلا eval؛ حراسة SSRF لـ `customBaseUrl` |
+| الواجهة | صفحة `/automation` (قواعد بسيطة) | صفحة `/workflows` (بناء مشغّل + شروط + خطوات مرتبة، محاكاة، نشر/إيقاف، سجل تنفيذات) |
+
+### البنية والملفات
+
+- **ترحيل** `20261010104800_p7_workflows` (dev فقط): كما في الجدول أعلاه.
+- **جديدة**: `automation/workflow-schemas.ts` (المجموعة المغلقة + تصنيف الأخطاء) · `automation/workflow-conditions.ts` (مقيِّم شروط مع أسباب آمنة) · `automation/workflow-engine.ts` (تشغيل/استئناف التنفيذ + بناء سياق مملوك + خرائط الأحداث) · `automation/workflow-bridge.ts` (جسر دائم EventBus→طابور `run_workflow_event` مع `idempotencyKey: wf-event:{ws}:{eventId}` ومنع الاستدارة) · `automation/workflow-service.ts` (نشر/إيقاف/رجوع append-only) · `ai/endpoint-guard.ts` (SSRF) · `api/workflows/route.ts` · `api/workflows/[id]/route.ts` · `api/workflows/[id]/preview/route.ts` · `(dashboard)/workflows/page.tsx` · `tests/p7-workflows.test.ts` (25).
+- **معدلة**: `prisma/schema.prisma` · `core/events/bus.ts` (+`eventId` حتمي) · `conversations/inbound.ts` (يضبط `payload.eventId = MessageReceived:{id}`) · `jobs/{service,handlers}.ts` (مهمتا `run_workflow_event` و`resume_workflow_executions`) · `scripts/worker.ts` (تسجيل الجسر) · `automation/{engine.ts (إصلاح أسبقية depth),followup-service.ts (+cancelFollowUpsFor)}` · `api/ai/{settings,providers/test}/route.ts` (حراسة SSRF على الحفظ والفحص) · `tests/helpers/inmemory-db.ts` (تطبيق قيود فريدة حقيقية P2002 + جدول automationVersion) · `tests/p5-sends.test.ts` (هاتف فريد لكل قناة — كان يخالف قيد `(workspaceId, phone)` الحقيقي) · `app-sidebar` + `nav-items.ts`.
+
+### الضمانات المثبتة (اختبارات)
+
+- **تنفيذ مرة واحدة بالضبط**: نفس الحدث ×100 → صف تنفيذ واحد؛ تزامن ×12 → صف واحد.
+- **إعادة الفلترة قبل الإرسال**: HUMAN_ACTIVE / محادثة RESOLVED|CLOSED / قناة غير موصولة / عميل محظور — لا صف رسالة OUTBOUND يُنشأ أصلًا؛ الفشل الدائم `WORKFLOW_POLICY:` بفئة PERMANENT.
+- **اللقطة المجمدة**: تعديل المسودة أثناء تنفيذ WAITING لا يغيّر سلوك الاستئناف (ينفَّذ من `AutomationVersion`).
+- **WAIT**: يوقف المؤشر عند الخطوة، `resumeAt` في metadata، إعادة التسليم قبل الموعد متخطاة، وبعد الموعد يستأنف من بعد WAIT بلا إعادة إرسال.
+- **المعاينة بلا كتابة**: لقطة `db._stores` متطابقة قبل/بعد + `mode: "PREVIEW"` + لا يلمس OMS إطلاقًا (لا Order/OrderDraft).
+- **العزل والأذونات**: أحداث مساحة أجنبية لا تشغل شيئًا (لا صفوف تنفيذ)؛ كل مسارات P6 مثبتة على `automation.read`/`automation.write`.
+- **SSRF**: `validateEndpointUrl` المتزامن على كل استخدام + DNS غير متزامن يجب أن يعيد عناوين Global Unicast (loopback/LAN/metadata/صيغ مشوّهة مرفوضة).
+
+### الحالات
+
+| البند | الحالة |
+|---|---|
+| كل بنود P7 محليًا | VERIFIED_LOCAL (657/657 + 4 بوابات) |
+| ترحيل `p7_workflows` على dev | VERIFIED_LOCAL (مطبق + مولّد العميل) |
+| تزامن عمال متعددين على Postgres حقيقي | CODE_COMPLETE (الفريد على مستوى القاعدة هو الضمان — التحقق متعدد العمال يحتاج staging: BLOCKED) |
+| Push إلى GitHub | BLOCKED بالتعليمات (بانتظار موافقة المالك) |
+| Meta/OMS/staging/E2E | BLOCKED (كما في P5/P6، بلا تغيير) |
+
+### قرار P7
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P8.**
+
+## P8 — محرك ذكاء البيع (10 تشرين الأول 2026)
+
+> الأساس: شجرة العمل المحلية فوق P7 (غير مرفوعة). البوابات: **693/693 (48 ملفًا — أساس P7 657 + 36 لـ P8)** ✅ · typecheck ✅ · lint ✅ · scan:secrets ✅ · build ✅ (مسارات `/api/conversations/[id]/coach` و`/api/discount-approvals*` ضمنها). ترحيل واحد مطبق على dev فقط (`20261010*_p8_sales_intelligence`). **لم يُرفع إلى GitHub** (بحسب التعليمات). بلا اتصال OMS حقيقي، بلا رسائل حقيقية.
+
+### الموجود مقابل الناقص (مثبت بالكود)
+
+| الوحدة | الموجود (احتُفظ به) | الناقص (نُفّذ في P8) |
+|---|---|---|
+| خطة البيع | `buildPlan` حتمي في مرحلة الاستخراج | `salesPlan` منتج أساسي + بيع إضافي (عرض OMS) + بيع مكمّل (complementarySkus ≤ 2) + اعتراض مصنّف — كل الأرقام من DB، مخطط Zod صارم، بلا eval |
+| عروض OMS | حقول `offers/wholesalePrice/discountCap` من المزامنة | فك ترميز آمن (الصفوف التالفة/المنتهية تُهمل)، التوفير يُعاد حسابه `unitPrice×qty − price` (> 0 وإلا يُهمل)، سقف إلحاق `MAX_OFFER_PRESSES=2` لكل محادثة+SKU، رفض العميل يوقف العرض نهائيًا |
+| الخصومات | — | سياسة خادمية: ضمن `discountCap` → مباشر بـ `orders.discount`؛ فوقه/بلا سقف → موافقة مشرف (`orders.discount.approve`) بسجل مثبت (سعر لحظة الاعتماد، بطلان عند تغير السعر/المنتهية/تبدل المنتج)، فصل واجبات (لا اعتماد ذاتي) |
+| سعر الجملة | حقل مخفي | لا يدخل أي Prompt ولا نص عميل إطلاقًا؛ ظهوره للموظف يتطلب `products.wholesale` + حارس إرسال نهائي `assertNoWholesaleLeak` |
+| Sales Coach | — | لوحة داخل صندوق الوارد (اقتراحات `internalOnly` فقط — لا إرسال تلقائي أبدًا؛ الإدراج في المحرر بفعل الموظف)، سبب صريح عند غياب البيانات |
+| العزو الإعلاني | `Order.adSource` موجود غير مستخدم | `Customer.adSource/adSourceAt` — لمسة أولى فقط من إحالة القناة الموثوقة (`referral.ref`/`postback.ref`)، لا استبدال أبدًا (حماية إعادة إرسال Webhook)، غياب الإحالة = غير معروف |
+| القياس | — | `SalesEvent` (9 أنواع) — فصل صارم: اقتراح ≠ أُرسل ≠ قَبِل ≠ طلب؛ `OFFER_SHOWN` بعد وصول الرد فقط؛ `OFFER_ACCEPTED` بطلب مؤكد بكمية ≥ كمية العرض؛ تحليلات بصيغ موثقة (`offerAcceptRate` = Accepted/Shown، null عند غياب العروض) |
+
+### البنية والملفات
+
+- **ترحيل** `p8_sales_intelligence` (dev فقط): `Customer.adSource/adSourceAt` + جدولا `DiscountApproval` و`SalesEvent` (مع فهارس).
+- **جديدة**: `modules/sales/{plan-schemas,plan-builder,metrics,pricing-policy,ad-source,coach}.ts` · `api/conversations/[id]/coach/route.ts` · `api/discount-approvals/route.ts` · `api/discount-approvals/[id]/route.ts` · لوحة المساعد في `components/inbox/inbox.tsx` · `tests/p8-sales.test.ts` (36).
+- **معدلة**: `modules/rbac/permissions.ts` (+`orders.discount`، +`orders.discount.approve`، +`products.wholesale` — MANAGER الثلاثة، SALES_AGENT الخصم فقط) · `ai/stages/{state,extraction,response}.ts` + `ai/prompts.ts` (بناء الخطة بعد الاستخراج، توسيع `allowedNumbers`، حجب خطة البيع في الـ Prompt مع سطر "ممنوع" — بلا سعر جملة، تسجيل `OFFER_SHOWN` بعد الإرسال الناجح) · `orders/order-service.ts` (وراثة `adSource` للطلب + أحداث `OFFER_ACCEPTED`/`CROSS_SELL_ADDED` best-effort) · `channels/facebook/{normalizer,types,adapter}.ts` (+`adRef` من referral/postback) · `conversations/inbound.ts` (استدعاء `recordAdSource` first-touch) · `tests/helpers/inmemory-db.ts` (جدولا `salesEvent` و`discountApproval`).
+
+### الضمانات المثبتة (اختبارات)
+
+- **حتمية الخطة**: كل رقم في `salesPlan` من DB (سعر/كمية/إجمالي/توفير)؛ صفوف العرض التالفة أو المنتهية أو بلا توفير حقيقي تُهمل ولا تُخترع؛ أسباب الغياب مجموعة مغلقة (`NO_PRODUCT`، `PRICE_UNAVAILABLE`، `PRODUCT_UNAVAILABLE`، `NO_VALID_OFFERS`، `OFFER_NOT_WORTHWHILE`، `OFFER_PRESSED_OUT`، `OFFER_DECLINED_BY_CUSTOMER`…).
+- **منع التسريب**: سعر الجملة غائب عن لوحة الموظف غير المخول وعن كل نصوص الاقتراح وعن رد الـ Pipeline الفعلي؛ الحارس النهائي يرمي عند ظهوره في نص عميل.
+- **الخصومات**: ضمن السقف/فوقه/بلا سقف/نسبة غير صالحة؛ لا اعتماد ذاتي؛ لا قرار مزدوج؛ الاستخدام يتحقق من المنتج والسعر والصلاحية (بطلان EXPIRED/PRICE_CHANGED/PRODUCT_MISMATCH/NOT_APPROVED).
+- **الـ Coach**: داخلي فقط (`internalOnly: true`) — صفر رسائل OUTBOUND، بلا إرسال تلقائي؛ بلا صلاحية الخصم حتى حساب التفاصيل ممنوع؛ بيانات ناقصة → سبب صريح لا تخمين.
+- **الـ Pipeline الكامل**: نية شراء + منتج بعرض → `OFFER_QUALIFIED` ثم `OFFER_SHOWN` بقيمة التوفير بعد وصول الرد؛ محادثة HUMAN_ACTIVE → تعطيل كامل وصفر أحداث بيع.
+- **العزو**: اللمسة الأولى تفوز، إعادة الإرسال لا تستبدل، بلا إحالة → null (غير معروف)؛ الـ Pipeline يلتقط `adRef` من بيانات القناة الموثوقة فقط.
+- **RBAC**: تثبيت الصلاحيات الثلاث على الأدوار (MANAGER/SALES_AGENT/VIEWER) مع بقاء ثابتة القراءة-فقط لـ VIEWER.
+
+### الحالات
+
+| البند | الحالة |
+|---|---|
+| كل بنود P8 محليًا | VERIFIED_LOCAL (693/693 + 4 بوابات) |
+| ترحيل `p8_sales_intelligence` على dev | VERIFIED_LOCAL (مطبق + مولّد العميل) |
+| عقد OMS الحقيقي (عروض/أسعار حية) | CODE_COMPLETE (العقد من مخطط OMS الموثق — التحقق مع OMS فعلي: BLOCKED) |
+| تحليلات على بيانات إنتاجية | CODE_COMPLETE (الصيغ موثقة وقابلة للحساب اليدوي — التجميع الليلي لاحقًا) |
+| Push إلى GitHub | BLOCKED بالتعليمات (بانتظار موافقة المالك — P7 وP8 معًا) |
+| Meta/OMS/staging/E2E | BLOCKED (كما في P5–P7، بلا تغيير) |
+
+### قرار P8
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P9.**
+
+## P9 — الحملات التسويقية وشرائح الجمهور (10 تشرين الأول 2026)
+
+> الأساس: شجرة العمل المحلية فوق P8 (غير مرفوعة). البوابات: **742/742 (49 ملفًا — أساس P8 693 + 49 لـ P9)** ✅ · typecheck ✅ · lint ✅ · scan:secrets ✅ · build ✅ (مسارات `/api/segments*` و`/api/campaigns*` وصفحة `/campaigns` ضمنها). ترحيل واحد مطبق على dev فقط (`20261010*_p9_campaigns`). **لم يُرفع إلى GitHub** (بحسب التعليمات). بلا رسائل حقيقية، بلا اعتماد قوالب Meta فعلي.
+
+### الموجود مقابل الناقص (مثبت بالكود)
+
+| الوحدة | الموجود (احتُفظ به) | الناقص (نُفّذ في P9) |
+|---|---|---|
+| شرائح الجمهور | لا شيء (greenfield) | `AudienceSegment` بمجموعة مغلقة من الشروط (10 حقول مسماة فقط — لا SQL ولا كود)، ديناميكية دائمًا، تقييم حتمي بحد 5000 مرشح، معاينة بأرقام من DB بلا بيانات شخصية |
+| الموافقة التسويقية | — | `Customer.marketingConsent` (UNKNOWN/OPTED_IN/OPTED_OUT) + `marketingOptOutAt` — الاستبعاد عند أي حساب أو إرسال |
+| قرار القناة | — | مجموعة مغلقة: WHATSAPP=TEMPLATE (القالب المعتمد إجباري — المسار الرسمي الوحيد)، TELEGRAM=DIRECT (مشتركو البوت)، FACEBOOK/INSTAGRAM/WEB→`CHANNEL_NOT_MARKETING_CAPABLE`، TIKTOK→`CHANNEL_ACCESS_NOT_APPROVED` (رفض، لا تقليد) |
+| دورة الحياة | — | DRAFT→VALIDATING→READY→SCHEDULED→RUNNING→PAUSED/CANCELLED/COMPLETED/FAILED عبر `canTransition` — لا حالات عامة |
+| الموافقة المثبتة | — | إصدارات محتوى append-only؛ الاعتماد يثبّت الإصدار + بصمة الجمهور `v1:{channel}:e{n}:x{n}` — أي تغيير محتوى أو جمهور بعد الاعتماد → `AUDIENCE_CHANGED` وإعادة التحقق |
+| الجدولة durable | طابور BackgroundJob من P6 | `run_campaign` بمفتاح `campaign:{id}:run` (idempotent) + سلسلة `campaign_tick:{seq}` (enqueue التالي قبل المعالجة — استئناف بعد crash) |
+| حد المعدل | — | نافذة دقيقة محفوظة على صف الحملة (`windowStartAt/sentInWindow`) — durable عبر إعادة التشغيل؛ دفعة ≤ 50؛ محاولات ≤ 5 لكل مستلم |
+| الإرسال | `dispatchOutbound` من P5 | كل إرسال عبر المسار القائم (idempotency + سياسات + تصنيف عابر/دائم) بمفتاح `campaign:{id}:{recipientRowId}` — إعادة المحاولة تستعيد القبول ولا تضاعف أبدًا |
+| إعادة التحقق | — | لقطة عند البدء + إعادة تحقق أهلية كاملة لكل مستلم لحظة الإرسال (قائمة سوداء/موافقة/قناة اتصال) — اللقطة القديمة لا ترسل أبدًا |
+| مسار WhatsApp | `WhatsAppClient` (P5) | `sendTemplate` (Cloud API type:"template") + `canSendWhatsApp` يسمح خارج نافذة 24h بالقالب المعتمد فقط؛ إصلاح تصنيف الأخطاء: أكواد Graph ≥100000 (131047/132000…) دائمة لم تعد "عابرة" |
+| اقتراح الذكاء | privacy-gate/guardrails (P1) | `suggestCampaignDraft` بلا أي بيانات عملاء (pii فارغ)، بلا أسعار مخترعة، قنوات مسموحة فقط، مراجعة بشرية إجبارية |
+| الواجهة | sidebar موجود | صفحة `/campaigns` (عربية RTL): إنشاء (حقول القالب لواتساب)، معاينة dry-run، أزرار دورة الحياة، سجل التنفيذ |
+
+### الضمانات المثبتة (اختبارات — 49)
+
+- **تعريف الشريحة**: مجموعة مغلقة — حقل/عملية/قيمة غير معروفة تُرفض؛ الإصدار وعدد الشروط محدودان.
+- **الأهلية**: القائمة السوداء ← الاستبعاد الصامت؛ إلغاء الموافقة/غيابها/غياب قناة الاتصال أسباب مغلقة؛ وجود رقم هاتف وحده لا يكفي (هوية على نوع قناة الحملة فقط)؛ عميل خارج المساحة = استبعاد صامت.
+- **التقييم**: توزيع الاستبعاد بالفئات المغلقة؛ عزل المساحات؛ شرط noReply (آخر رسالة موظف بعد آخر رسالة عميل) post-filter حتمي؛ حد المرشحين مثبت (take = 5001).
+- **القنوات**: قرار القناة حرفيًا لكل قناة؛ إنشاء حملة على قناة غير مسموحة يُرفض عند حدود المخطط (مجموعة مغلقة)؛ واتساب بلا قالب → `TEMPLATE_REQUIRED`.
+- **دورة الحياة**: جدولة قبل الاعتماد → `NOT_APPROVED`؛ إعادة الجدولة idempotent (مهمة واحدة)؛ تغير الجمهور بعد الاعتماد → `AUDIENCE_CHANGED` وإعادة VALIDATING؛ تعديل المحتوى append-only (نسخة جديدة، الموافقة تسقط)؛ الاعتماد يتطلب `campaigns.approve`؛ انتقالات غير مسموحة تُرفض والحالات النهائية لا تتحرك.
+- **بوابة البدء**: غير SCHEDULED → لا بدء؛ بلا اعتماد مثبت → FAILED+POLICY_BLOCKED؛ جمهور فارغ → `EMPTY_AUDIENCE`؛ البدء ينشئ لقطة PENDING ويشغّل tick:1؛ إعادة تسليم المهمة لا تضاعف اللقطة.
+- **الإرسال**: قالب معتمد عبر Cloud API (بنية body مثبتة)؛ المستلم SENT بمعرف رسالة؛ محادثات الحملة `camp-*` مع `HUMAN_ACTIVE` و`aiEnabled:false` (بلا AI تلقائي)؛ إعادة التحقق لحظة الإرسال (قائمة سوداء/إلغاء موافقة بعد اللقطة → EXCLUDED بلا إرسال)؛ الإلغاء بين اللقطة والتنفيذ → CANCELLED وصفر إرسال؛ الإيقاف الفوري بين مستلم وآخر؛ نافذة الدقيقة durable (ratePerMinute=1 → إرسال واحد لكل نافذة)؛ عابر → PENDING بحد محاولات، دائم (131047) → FAILED PERMANENT؛ مفتاح الإرسال ثابت لكل صف مستلم (لا إرسال مزدوج).
+- **Dry-run**: يكشف `NOT_APPROVED` قبل الاعتماد، لا يكتب شيئًا (بلا مستلمين وبلا مهام)؛ بعد الاعتماد → لا مشاكل والأعداد مطابقة.
+- **RBAC**: `campaigns.read/write/approve` — MANAGER الثلاثة، SALES_AGENT القراءة فقط، VIEWER القراءة.
+- **الذكاء**: صفر بيانات عملاء في الـ Prompt (اسم وهاتف عميل حقيقيان لا يظهران)؛ FACEBOOK مرفوض.
+- **runJobs**: run_campaign → بدء + لقطة؛ tick → إرسال ثم COMPLETED؛ إعادة تسليم run_campaign بعد الإكمال no-op.
+
+### الحالات
+
+| البند | الحالة |
+|---|---|
+| كل بنود P9 محليًا | VERIFIED_LOCAL (742/742) |
+| ترحيل `p9_campaigns` على dev | VERIFIED_LOCAL (مطبق + مولّد العميل) |
+| إرسال قالب عبر Meta فعليًا + حالة اعتماد القالب لدى Meta | CODE_COMPLETE (بنية Cloud API الموثقة؛ اعتماد القالب يُدار من واجهة المالك — التحقق الحي: BLOCKED) |
+| مشترکو بوت Telegram كجمهور DIRECT (تحقق الاشتراك الحي) | CODE_COMPLETE (بوابة الأهلية تنفذ هوية القناة؛ اختبار الإرسال الحي: BLOCKED) |
+| متعدد العمال على Postgres (scales/نافذة المعدل تحت التزامن) | BLOCKED (كما في P6–P8) |
+| Push إلى GitHub | BLOCKED بالتعليمات (بانتظار موافقة المالك — P7 وP8 وP9 معًا) |
+| Meta/OMS/staging/E2E | BLOCKED (كما في P5–P8، بلا تغيير) |
+
+### قرار P9
+
+**مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P10.**

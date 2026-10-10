@@ -70,6 +70,8 @@ model Workspace {
   orders                  Order[]
   followUps               FollowUp[]
   automations             Automation[]
+  audienceSegments        AudienceSegment[]
+  campaigns               Campaign[]
   auditLogs               AuditLog[]
   usage                   Usage[]
   aiUsageLogs             AIUsageLog[]
@@ -208,7 +210,16 @@ model Customer {
   // سيستم 7 — القائمة السوداء مصدرها الـ OMS
   isBlacklisted     Boolean        @default(false)
   blacklistSource   String?
+  // P8 — مصدر الإعلان (لمسة أولى فقط): يُكتب مرة واحدة من بيانات قناة موثوقة
+  // ولا يُستبدل ولا يُخمَّن أبدًا. null = مصدر غير معروف (بلا بيانات إحالة).
+  adSource          String?
+  adSourceAt        DateTime?
   lastContactAt     DateTime?
+  // P9 — موافقة التسويق: لا يُرسل شيء تسويقي إلا بموافقة صريحة (OPTED_IN).
+  // الافتراضي UNKNOWN = غير مؤهل؛ OPTED_OUT نهائي إلا بطلب صريح جديد مسجّل.
+  marketingConsent  MarketingConsent @default(UNKNOWN)
+  marketingOptOutAt DateTime?
+  marketingConsentAt DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -963,6 +974,72 @@ model DeliveryRule {
   @@index([workspaceId])
 }
 
+// ─────────────────────── Sales Intelligence (P8) ───────────────────────
+
+// طلب موافقة الخصم — سجل غير قابل للتلاعب: يُثبّت سعر المنتج وSKU لحظة
+// الطلب، ولا تصح الموافقة إذا تغيّر السعر أو المنتج بعد اعتمادها.
+model DiscountApproval {
+  id                   String                     @id @default(cuid())
+  workspaceId          String
+  conversationId       String?
+  orderId              String?
+  productId            String
+  sku                  String
+  productName          String
+  unitPriceAtApproval  Decimal                    @db.Decimal(12, 2)
+  currency             String                     @default("USD")
+  discountPercent      Decimal                    @db.Decimal(5, 2)
+  discountAmount       Decimal?                   @db.Decimal(12, 2)
+  reason               String?
+  status               DiscountApprovalStatus     @default(PENDING)
+  requestedBy          String
+  decidedBy            String?
+  decidedAt            DateTime?
+  expiresAt            DateTime?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
+}
+
+// أحداث البيع — مقياس منفصل عن الإنتاج الفعلي: اقتراح ≠ إرسال ≠ قبول ≠ طلب.
+model SalesEvent {
+  id            String           @id @default(cuid())
+  workspaceId   String
+  type          SalesEventType
+  conversationId String?
+  customerId    String?
+  orderId       String?
+  productId     String?
+  sku           String?
+  value         Float?
+  payload       Json             @default("{}")
+  createdAt     DateTime         @default(now())
+
+  @@index([workspaceId, type, createdAt])
+  @@index([conversationId])
+}
+
+enum DiscountApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  INVALIDATED
+}
+
+enum SalesEventType {
+  OFFER_QUALIFIED
+  OFFER_SHOWN
+  OFFER_ACCEPTED
+  CROSS_SELL_SHOWN
+  CROSS_SELL_ADDED
+  COACH_USED
+  DISCOUNT_REQUESTED
+  DISCOUNT_APPROVED
+  DISCOUNT_REJECTED
+}
+
 // ─────────────────────────── Automation ───────────────────────────
 
 model FollowUp {
@@ -1010,13 +1087,44 @@ model Automation {
   priority    Int      @default(0)
   isEnabled   Boolean  @default(true)
   createdBy   String?
+  // P7: workflow lifecycle — DRAFT (editable, never fires) / PUBLISHED
+  // (frozen snapshot drives execution) / PAUSED (kept but inert).
+  status      String   @default("PUBLISHED")
+  version     Int      @default(1)
+  publishedBy String?
+  publishedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions   AutomationVersion[]
   executions AutomationExecution[]
 
   @@index([workspaceId, isEnabled, trigger])
+  @@index([workspaceId, status])
+}
+
+// P7: immutable published snapshots. A RUNNING execution keeps its snapshot
+// id — editing the draft mid-flight can never change what an in-progress
+// run executes. Rollback = publish an older snapshot (append-only).
+model AutomationVersion {
+  id          String   @id @default(cuid())
+  workspaceId String
+  automationId String
+  version     Int
+  name        String
+  description String?
+  trigger     String
+  conditions  Json     @default("{}")
+  actions     Json     @default("[]")
+  priority    Int      @default(0)
+  publishedBy String?
+  createdAt   DateTime @default(now())
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, version])
+  @@index([workspaceId, automationId])
 }
 
 enum AutomationExecutionStatus {
@@ -1024,6 +1132,10 @@ enum AutomationExecutionStatus {
   COMPLETED
   SKIPPED
   FAILED
+  // P7: WAIT — paused at a WAIT step; WAITING is consumed by resumption.
+  WAITING
+  // P7: terminal cancellations (operator stop / workflow unpublished).
+  CANCELLED
 }
 
 model AutomationExecution {
@@ -1031,16 +1143,29 @@ model AutomationExecution {
   workspaceId    String
   automationId   String
   triggerEventId String
+  // P7: the frozen published snapshot this run executes.
+  versionId      String?
+  version        Int?
+  // P7: durable step cursor + idempotent per-step marker.
+  stepIndex      Int                       @default(0)
+  lastStepId     String?
   status         AutomationExecutionStatus @default(RUNNING)
   startedAt      DateTime                  @default(now())
   completedAt    DateTime?
   error          String?
+  // P7: classified failure (TRANSIENT/PERMANENT/CANCELLED) for retry policy.
+  errorCategory  String?
+  attempts       Int                       @default(0)
+  // P7: per-step trace, ids/counts/policy reasons only — never message
+  // bodies, secrets, or PII.
+  stepLog        Json                      @default("[]")
   metadata       Json                      @default("{}")
 
   automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
 
   @@unique([automationId, triggerEventId])
   @@index([workspaceId, startedAt])
+  @@index([status, stepIndex])
 }
 
 enum HandoffReason {
@@ -1267,4 +1392,187 @@ model SystemLog {
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, createdAt])
+}
+
+// ─────────────────────────── P9: Campaigns ───────────────────────────
+
+enum MarketingConsent {
+  UNKNOWN
+  OPTED_IN
+  OPTED_OUT
+}
+
+enum CampaignStatus {
+  DRAFT
+  VALIDATING
+  READY
+  SCHEDULED
+  RUNNING
+  PAUSED
+  CANCELLED
+  COMPLETED
+  FAILED
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  QUEUED
+  SENT
+  FAILED
+  EXCLUDED
+  CANCELLED
+}
+
+enum CampaignErrorCategory {
+  TRANSIENT
+  PERMANENT
+}
+
+enum CampaignEventType {
+  CREATED
+  VALIDATED
+  CONTENT_APPROVED
+  SCHEDULED
+  STARTED
+  PAUSED
+  RESUMED
+  CANCELLED
+  COMPLETED
+  FAILED
+  POLICY_BLOCKED
+  RECIPIENT_EXCLUDED
+  RECIPIENT_SENT
+  RECIPIENT_FAILED
+}
+
+/// شريحة جمهور — تعريف حتمي بمجموعة مغلقة من الفلاتر (لا SQL ولا كود).
+/// الشريحة ديناميكية دائمًا: الأعضاء يُعاد تقييمهم عند كل معاينة/حملة،
+/// ولقطة الثابتة للتنفيذ هي صفوف CampaignRecipient لحملة واحدة.
+model AudienceSegment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  /// تعريف مضمون السحب من segment-schemas.ts — يُتحقق منه Zod عند كل قراءة.
+  definition  Json
+  isActive    Boolean  @default(true)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace  Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaigns  Campaign[]
+
+  @@index([workspaceId, isActive])
+}
+
+model Campaign {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  segmentId       String
+  name            String
+  description     String?
+  channelType     ChannelType
+  channelId       String?
+  status          CampaignStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  timezone        String         @default("UTC")
+  endsAt          DateTime?
+  /// حد إرسال لكل دقيقة (حتمي، يُطبق في كل tick).
+  ratePerMinute   Int            @default(30)
+  /// نافذة الدقيقة الحالية للحد (كيف لا يعتمد على ذاكرة العامل).
+  windowStartAt   DateTime?
+  sentInWindow    Int            @default(0)
+  /// الإصدار المعتمد المثبّت (لقطة المحتوى).
+  contentVersionId String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  /// مفتاح قبول الموافقة: تجزئة الجمهور المتوقع + معرّف الإصدار — إعادة
+  /// التحقق عند النشر ترفض إذا تغير الجمهور بعد الموافقة.
+  approvalAudienceHash String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  failReason      String?
+  lastTickSeq     Int            @default(0)
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  workspace      Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  segment        AudienceSegment         @relation(fields: [segmentId], references: [id])
+  contentVersions CampaignContentVersion[]
+  recipients     CampaignRecipient[]
+  events         CampaignEvent[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, scheduledAt])
+}
+
+/// لقطة محتوى append-only: تعديل المسودة ينشئ إصدارًا جديدًا، والاعتماد
+/// يثبّت الإصدار المشار إليه في Campaign.contentVersionId.
+model CampaignContentVersion {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  campaignId    String
+  version       Int
+  text          String
+  /// لقناة تفرض قالبًا معتمدًا (WhatsApp): اسم القالب ولغته كما هو مسجّل
+  /// في Meta — اعتماد Meta نفسه يتحقق عبر واجهة المالك (BLOCKED محليًا).
+  templateName  String?
+  templateLanguage String?
+  templateVariables Json @default("{}")
+  status        String   @default("DRAFT")
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdBy     String
+  createdAt     DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, version])
+  @@index([workspaceId, campaignId])
+}
+
+/// لقطة المستلمين للحملة — صف لكل عميل مؤهل محسوب لحظة البدء، مع إعادة
+/// تحقق كاملة من الأهلية لحظة إرسال كل رسالة (قد تتغير الحالة بعد اللقطة).
+model CampaignRecipient {
+  id            String                  @id @default(cuid())
+  workspaceId   String
+  campaignId    String
+  customerId    String
+  conversationId String?
+  status        CampaignRecipientStatus @default(PENDING)
+  excludeReason String?
+  messageId     String?
+  attempts      Int                     @default(0)
+  lastError     String?
+  errorCategory CampaignErrorCategory?
+  sentAt        DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, customerId])
+  @@index([workspaceId, campaignId, status])
+  @@index([campaignId, status, updatedAt])
+}
+
+/// سجل أحداث الحملة (تدقيق + قياس) — بلا بيانات شخصية.
+model CampaignEvent {
+  id          String            @id @default(cuid())
+  workspaceId String
+  campaignId  String
+  type        CampaignEventType
+  actorUserId String?
+  reason      String?
+  count       Int               @default(0)
+  payload     Json              @default("{}")
+  createdAt   DateTime          @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, campaignId, type])
 }

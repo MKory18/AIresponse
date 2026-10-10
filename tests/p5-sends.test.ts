@@ -38,7 +38,7 @@ async function seedThread(opts: {
       metadata: (opts.metadata ?? {}) as never,
     },
   } as never);
-  const customer = (await db.customer.create({ data: { workspaceId: WS, phone: `p-${opts.identityId}` } } as never)) as any;
+  const customer = (await db.customer.create({ data: { workspaceId: WS, phone: `p-${opts.type}-${opts.identityId}` } } as never)) as any;
   await db.channelIdentity.create({
     data: { workspaceId: WS, customerId: customer.id, channelType: opts.type, channelExternalId: opts.identityId },
   } as never);

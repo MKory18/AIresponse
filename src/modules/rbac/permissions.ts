@@ -7,8 +7,11 @@ export const PERMISSIONS = [
   "conversations.delete",
   "orders.read",
   "orders.write",
+  "orders.discount",
+  "orders.discount.approve",
   "products.read",
   "products.write",
+  "products.wholesale",
   "media.read",
   "media.write",
   "feedback.read",
@@ -30,6 +33,10 @@ export const PERMISSIONS = [
   "handoffs.read",
   "handoffs.claim",
   "handoffs.resolve",
+  // P9 — الحملات التسويقية وشرائح الجمهور.
+  "campaigns.read",
+  "campaigns.write",
+  "campaigns.approve",
   "analytics.read",
   "usage.read",
   "users.manage",
@@ -84,6 +91,14 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "channels.send_human",
     "usage.read",
     "settings.manage",
+    // P8 — الخصم ضمن السقف + رؤية سعر الجملة + اعتماد فوق السقف (المدير فقط).
+    "orders.discount",
+    "products.wholesale",
+    "orders.discount.approve",
+    // P9 — الحملات: إنشاء/تحرير/جدولة + الاعتماد والنشر (المدير).
+    "campaigns.read",
+    "campaigns.write",
+    "campaigns.approve",
   ],
   SALES_AGENT: [
     ...SALES_SUPPORT,
@@ -92,6 +107,11 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "handoffs.read",
     "handoffs.claim",
     "handoffs.resolve",
+    // P8 — خصم ضمن السقف فقط. رؤية سعر الجملة والاعتماد فوق السقف ليست
+    // لهما (صلاحيتا MANAGER) — إنفاذ من الخادم، لا من الواجهة.
+    "orders.discount",
+    // P9 — قراءة الحملات فقط؛ الإنشاء/الاعتماد لصلاحيات أعلى.
+    "campaigns.read",
   ],
   SUPPORT_AGENT: SALES_SUPPORT.filter((p) => p !== "orders.write"),
   VIEWER: [
@@ -105,6 +125,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "personas.read",
     "channels.read",
     "automation.read",
+    "campaigns.read",
     "analytics.read",
   ],
 };

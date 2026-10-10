@@ -165,6 +165,54 @@ export async function createOrderFromDraft(
     data: { state: "CONVERTED", orderId: order.id, idempotencyKey },
   });
 
+  // P8 — مصدر الإعلان: الطلب يرث مصدر العميل الموثوق (لمسة أولى) إن وُجد،
+  // ولا يُخترع أبدًا. كما تُسجَّل نتيجة عروض البيع: قبول العرض (كمية الطلب
+  // ≥ كمية العرض المعروض لنفس SKU) وإضافة المنتج المكمل (طلِب المنتج الذي
+  // قُدِّم سابقًا كمكمل في هذه المحادثة). الفشل لا يكسر إنشاء الطلب أبدًا.
+  try {
+    const { recordSalesEvent } = await import("@/modules/sales/metrics");
+    if ((customer as { adSource?: string | null }).adSource) {
+      await db.order.update({ where: { id: order.id }, data: { adSource: (customer as { adSource?: string | null }).adSource! } as never });
+    }
+    const shownRows = await (db as unknown as {
+      salesEvent: { findMany: (a: unknown) => Promise<Array<Record<string, unknown>>> };
+    }).salesEvent.findMany({
+      where: { workspaceId: ctx.workspaceId, conversationId: draft.conversationId, sku: product.sku },
+    }).catch(() => [] as Array<Record<string, unknown>>);
+    if (shownRows.some((r) => r.type === "OFFER_SHOWN")) {
+      const offerQty = shownRows
+        .filter((r) => r.type === "OFFER_SHOWN")
+        .map((r) => Number((r.payload as { quantity?: number } | null)?.quantity ?? 0))
+        .reduce((a: number, b: number) => Math.max(a, b), 0);
+      if (!offerQty || draft.quantity! >= offerQty) {
+        await recordSalesEvent(db, {
+          workspaceId: ctx.workspaceId,
+          type: "OFFER_ACCEPTED",
+          conversationId: draft.conversationId,
+          customerId: draft.customerId,
+          orderId: order.id,
+          productId: product.id,
+          sku: product.sku,
+          value: breakdown.total,
+        });
+      }
+    }
+    if (shownRows.some((r) => r.type === "CROSS_SELL_SHOWN")) {
+      await recordSalesEvent(db, {
+        workspaceId: ctx.workspaceId,
+        type: "CROSS_SELL_ADDED",
+        conversationId: draft.conversationId,
+        customerId: draft.customerId,
+        orderId: order.id,
+        productId: product.id,
+        sku: product.sku,
+        value: breakdown.total,
+      });
+    }
+  } catch {
+    // sales hooks are best-effort — never break order creation
+  }
+
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,

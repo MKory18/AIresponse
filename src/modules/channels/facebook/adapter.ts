@@ -108,6 +108,8 @@ export class FacebookChannelAdapter implements ChannelAdapter {
           channelAccountId: m.channelAccountId,
           rawEventId: m.rawEventId,
           attachments: m.attachments ?? [],
+          // P8 — إحالة موثوقة صريحة فقط (قد تكون null = غير معروف).
+          adRef: m.adRef ?? null,
         },
         sentAt: m.timestamp,
       };

@@ -26,6 +26,7 @@ import { prisma } from "@/core/db/prisma";
 import { sendProtectedStructured, extractPhoneDeterministic } from "../privacy-gate";
 import { recordAudit } from "@/modules/audit/service";
 import { handleOrderIntent } from "@/modules/orders/intelligence";
+import { isBuyingContext } from "@/modules/sales/plan-builder";
 import type { Db } from "@/modules/customers/service";
 import type {
   AIExecutionResult,
@@ -227,6 +228,31 @@ export async function runExtraction(
   }
   void extractionOk;
 
+  // P8 — Sales Intelligence: خطة بيع حتمية من DB (أسعار/عروض/مكملات) عند
+  // سياق شراء. فشلها لا يكسر المسار أبدًا، وغيابها لا يغيّر السلوك القديم.
+  let salesPlan: import("@/modules/sales/plan-schemas").SalesPlan | undefined;
+  if (productId && isBuyingContext(extraction.intent, extraction.requestedAction)) {
+    try {
+      const fullProduct = await db.product.findUnique({ where: { id: productId } });
+      if (fullProduct && fullProduct.workspaceId === params.workspaceId) {
+        const { buildSalesPlan } = await import("@/modules/sales/plan-builder");
+        salesPlan = await buildSalesPlan(db, {
+          workspaceId: params.workspaceId,
+          intent: extraction.intent,
+          requestedAction: extraction.requestedAction,
+          product: fullProduct as unknown as Record<string, unknown>,
+          customerText,
+          customerId: customer.id,
+          conversationId: conversation.id,
+          quantity: extraction.entities.quantity ?? null,
+          recordEvents: !params.dryRun,
+        });
+      }
+    } catch (err) {
+      log.warn({ err: err instanceof Error ? err.message : "sales_plan_failed" }, "sales_plan_failed");
+    }
+  }
+
   if (orderResult?.needsHumanReview) {
     // Persist any extracted memories before handing off — never lose facts.
     if (extraction.memories.length && !params.dryRun) {
@@ -373,6 +399,7 @@ export async function runExtraction(
       responseModelCfg,
       plan,
       extractionUser,
+      salesPlan,
     },
   };
 }

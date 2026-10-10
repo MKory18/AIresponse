@@ -56,6 +56,14 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     metadata: input.metadata,
   });
 
+  // P8 — مصدر الإعلان: يُلتقط مرة واحدة فقط من إحالة موثوقة صريحة قادمة
+  // مع الرسالة (metadata.adRef)؛ غيابها = غير معروف، ولا يُستبدل المصدر
+  // الأصلي أبدًا (حماية من إعادة إرسال الـ Webhook). الفشل لا يوقف المسار.
+  if (input.metadata && typeof input.metadata.adRef === "string" && input.metadata.adRef) {
+    const { recordAdSource } = await import("@/modules/sales/ad-source");
+    await recordAdSource(db, { workspaceId: input.workspaceId, customerId, source: input.metadata.adRef }).catch(() => {});
+  }
+
   let conversation = await db.conversation.findUnique({
     where: {
       workspaceId_channelConversationId: {
@@ -246,7 +254,10 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     messageId: message.id,
     customerId,
     channelType: input.channelType,
-  };
+  } as Record<string, unknown>;
+  // P7: deterministic trigger id — workflow/automation bridges key idempotency
+  // on it, so webhook redelivery can never double-fire a workflow.
+  payload.eventId = `MessageReceived:${message.id}`;
   // Durability anchor: every accepted inbound is logged with ids only, so an
   // operator can always answer "where is this message right now".
   childLogger("pipeline").info(
