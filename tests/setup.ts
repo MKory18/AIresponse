@@ -26,6 +26,9 @@ for (const k of [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "GOOGLE_API_KEY",
+  "HERMES_BASE_URL",
+  "HERMES_API_KEY",
+  "HERMES_MODEL",
   "ALLOW_MOCK_AI",
   // Empty-string overrides (e.g. `META_REDIRECT_URI=` in a local .env) defeat
   // `?? default` fallbacks (`""` is not nullish) — proven by the facebook-oauth
