@@ -163,11 +163,11 @@ export default function AISettingsPage() {
               <Input name={key} defaultValue={(settings as never as Record<string, string | null>)[key] ?? ""} dir="ltr" className="num" />
             </Field>
           ))}
-          <Field label="عنوان النموذج الداخلي / Hermes العام (OpenAI-compatible، اختياري)">
-            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://… (لـ Hermes محلي استخدم متغيرات الخادم HERMES_* بدلاً من هنا)" />
+          <Field label="عنوان Hermes / النموذج الداخلي (OpenAI-compatible، اختياري)">
+            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://… (لـ Hermes محلي: فعّل HERMES_ALLOW_PRIVATE_NETWORK في الخادم)" />
           </Field>
           <p className="-mt-1 rounded-xl bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-700 ring-1 ring-inset ring-sky-500/25 dark:text-sky-300 md:col-span-2">
-            Hermes Agent: شغّل <span dir="ltr" className="num">hermes gateway</span> ثم ضع في الخادم <span dir="ltr" className="num">HERMES_BASE_URL=http://127.0.0.1:8642/v1</span> و <span dir="ltr" className="num">HERMES_API_KEY</span> (يساوي API_SERVER_KEY) واختر المزود <span dir="ltr" className="num">hermes</span> والنموذج <span dir="ltr" className="num">hermes-agent</span>. بعدها Hermes يستلم كل رسائل العملاء ويولّد الردود — مع بقاء حماية الأسعار والطلبات وتحويل الموظف (HUMAN_ACTIVE) كما هي.
+            Hermes Agent: شغّل <span dir="ltr" className="num">hermes gateway</span> ثم ضع في الخادم <span dir="ltr" className="num">HERMES_BASE_URL=http://127.0.0.1:8642/v1</span> و <span dir="ltr" className="num">HERMES_API_KEY</span> (يساوي API_SERVER_KEY) واختر المزود <span dir="ltr" className="num">hermes</span> والنموذج <span dir="ltr" className="num">hermes-agent</span>. لإدخال عنوان محلي/داخلي هنا مباشرة يجب تفعيل <span dir="ltr" className="num">HERMES_ALLOW_PRIVATE_NETWORK=true</span> في بيئة الخادم أولًا. بعدها Hermes يستلم كل رسائل العملاء ويولّد الردود — مع بقاء حماية الأسعار والطلبات وتحويل الموظف (HUMAN_ACTIVE) كما هي.
           </p>
           <Field label="مزود البديل (عند الفشل فقط)">
             <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>

@@ -4,7 +4,7 @@ import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
 import { normalizeHermesEndpoint, probeProviderEndpoint } from "@/modules/ai/provider";
 import { resolveModel } from "@/modules/ai/router";
-import { assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
+import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
@@ -35,15 +35,18 @@ export const POST = createHandler(
       return ok({ provider: "mock", status: "local", latencyMs: 0, detail: "LOCAL_MOCK_OK" });
     }
 
-    // Hermes Agent gateway (OpenAI-compatible). Endpoint prefers a public
-    // workspace override (SSRF-guarded like internal), else server ENV
+    // Hermes Agent gateway (OpenAI-compatible). Endpoint prefers a workspace
+    // override (Hermes-scoped SSRF guard: loopback/LAN additionally allowed
+    // only with server HERMES_ALLOW_PRIVATE_NETWORK), else server ENV
     // HERMES_BASE_URL (deployer-trusted — localhost/LAN gateways allowed).
-    // Key always comes from server ENV, never the client.
+    // Key always comes from server ENV, never the client. Redirects are
+    // never followed (fail fast instead).
     if (choice === "hermes") {
       const override = (settings.customBaseUrl as string | null)?.trim();
+      const allowPrivateNetwork = isHermesPrivateNetworkAllowed();
       let endpoint: string | null = null;
       if (override) {
-        const guard = await assertEndpointResolvesPublic(override);
+        const guard = await assertHermesEndpointResolves(override, { allowPrivateNetwork });
         if (!guard.ok) {
           return ok({ provider: "hermes", status: "failed", latencyMs: 0, detail: `SSRF_REJECTED_${guard.reason}` });
         }
@@ -59,7 +62,7 @@ export const POST = createHandler(
         return ok({ provider: "hermes", status: "needs_key", latencyMs: 0, detail: "API_KEY_MISSING" });
       }
       const model = (settings.responseModel as string | null) ?? env.HERMES_MODEL ?? env.RESPONSE_MODEL ?? "hermes-agent";
-      const probe = await probeProviderEndpoint(endpoint, key, model);
+      const probe = await probeProviderEndpoint(endpoint, key, model, { followRedirects: false });
       return ok({
         provider: "hermes",
         status: probe.ok ? "working" : "failed",

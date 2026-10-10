@@ -2,7 +2,13 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
-import { validateEndpointUrl, assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
+import {
+  validateEndpointUrl,
+  assertEndpointResolvesPublic,
+  validateHermesEndpoint,
+  assertHermesEndpointResolves,
+  isHermesPrivateNetworkAllowed,
+} from "@/modules/ai/endpoint-guard";
 import { AppError } from "@/core/errors";
 
 const settingsSchema = z.object({
@@ -45,14 +51,37 @@ export const PATCH = createHandler(
     // P7 SSRF guard (fail-closed): an operator-supplied model endpoint must
     // not target loopback/LAN/metadata addresses. Sync checks always; DNS
     // re-check when a new endpoint is being stored.
+    // Hermes exception (narrow, deployer-opt-in): when the EFFECTIVE provider
+    // is hermes, loopback/RFC1918 targets are additionally allowed IFF the
+    // server sets HERMES_ALLOW_PRIVATE_NETWORK=1/true/yes. Metadata, creds,
+    // and reserved ranges stay blocked regardless; every other provider keeps
+    // the strict guard byte-identically.
     if (body.customBaseUrl !== undefined && body.customBaseUrl !== null) {
-      const sync = validateEndpointUrl(body.customBaseUrl);
-      if (!sync.ok) {
-        throw new AppError(`عنوان الاتصال مرفوض (${sync.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
-      }
-      const dns = await assertEndpointResolvesPublic(body.customBaseUrl);
-      if (!dns.ok) {
-        throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
+      const current = await prisma.aISettings.findUnique({ where: { workspaceId: auth!.workspaceId } });
+      const effectiveProvider = body.provider ?? current?.provider ?? "mock";
+      if (effectiveProvider === "hermes") {
+        const allowPrivateNetwork = isHermesPrivateNetworkAllowed();
+        const sync = validateHermesEndpoint(body.customBaseUrl, { allowPrivateNetwork });
+        if (!sync.ok) {
+          throw new AppError(
+            `عنوان Hermes مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة`,
+            422,
+            "ENDPOINT_REJECTED"
+          );
+        }
+        const dns = await assertHermesEndpointResolves(body.customBaseUrl, { allowPrivateNetwork });
+        if (!dns.ok) {
+          throw new AppError(`عنوان Hermes مرفوض (${dns.reason}) — تحقق من العنوان وأن DNS يحله لوجهة مسموحة`, 422, "ENDPOINT_REJECTED");
+        }
+      } else {
+        const sync = validateEndpointUrl(body.customBaseUrl);
+        if (!sync.ok) {
+          throw new AppError(`عنوان الاتصال مرفوض (${sync.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
+        }
+        const dns = await assertEndpointResolvesPublic(body.customBaseUrl);
+        if (!dns.ok) {
+          throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
+        }
       }
     }
     const settings = await prisma.aISettings.upsert({

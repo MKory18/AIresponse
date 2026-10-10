@@ -20,6 +20,10 @@ const envSchema = z.object({
   HERMES_BASE_URL: z.string().optional(),
   HERMES_API_KEY: z.string().optional(),
   HERMES_MODEL: z.string().optional(),
+  // Deployer opt-in: allow a workspace-configured Hermes endpoint to target
+  // loopback/RFC1918 (self-hosted gateway). "1"/"true"/"yes" enables.
+  // Metadata/reserved ranges stay blocked regardless. Never set from the UI.
+  HERMES_ALLOW_PRIVATE_NETWORK: z.string().optional(),
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
   META_VERIFY_TOKEN: z.string().optional(),

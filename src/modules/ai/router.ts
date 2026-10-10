@@ -347,6 +347,8 @@ export function getWorkspaceProvider(
       apiKey: key,
       baseUrl: normalizeHermesEndpoint(base),
       defaultModel: settings?.responseModel ?? e.hermesModel ?? e.responseModel ?? "hermes-agent",
+      // Never follow gateway redirects with the key + prompts (fail fast).
+      followRedirects: false,
     });
   }
   // Self-hosted endpoint: explicit opt-in per workspace. Delivery is declared

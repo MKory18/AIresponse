@@ -58,13 +58,22 @@ export class OpenAICompatibleProvider implements AIProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly defaultModel: string;
+  /**
+   * Redirect policy. Default true preserves every existing provider's
+   * behavior byte-identically. Hermes instances pass false: a gateway that
+   * answers with a redirect is a misconfiguration, and silently following
+   * it could carry the Bearer key + customer-derived prompts to an
+   * attacker-chosen host. Redirects then fail fast (non-retryable).
+   */
+  private readonly followRedirects: boolean;
 
-  constructor(opts: { name: string; apiKey: string; baseUrl: string; defaultModel: string; delivery?: "external" | "internal" }) {
+  constructor(opts: { name: string; apiKey: string; baseUrl: string; defaultModel: string; delivery?: "external" | "internal"; followRedirects?: boolean }) {
     this.name = opts.name;
     this.delivery = opts.delivery ?? "external";
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl;
     this.defaultModel = opts.defaultModel;
+    this.followRedirects = opts.followRedirects ?? true;
   }
 
   /** P6 studio: safe connection metadata (never the key itself). */
@@ -96,6 +105,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         },
         body: JSON.stringify(body),
         signal: controller.signal,
+        redirect: this.followRedirects ? "follow" : "manual",
       });
     } catch (err) {
       clearTimeout(timer);
@@ -107,6 +117,12 @@ export class OpenAICompatibleProvider implements AIProvider {
       throw err;
     }
     clearTimeout(timer);
+    if (!this.followRedirects && (res.type === "opaqueredirect" || res.status === 0 || (res.status >= 300 && res.status < 400))) {
+      throw new AIProviderError(
+        `${this.name} endpoint refused: server answered with a redirect (REDIRECT_BLOCKED). Point the endpoint at the final gateway URL — redirects are never followed.`,
+        { retryable: false }
+      );
+    }
     if (!res.ok) {
       // Classify BEFORE reading the body: timeouts/rate-limits/5xx are
       // transient (durable retry with backoff); 401/403/404/400 are permanent
@@ -397,6 +413,9 @@ export function resolveAIProvider(opts: {
       apiKey: key,
       baseUrl: normalizeHermesEndpoint(base),
       defaultModel: opts.hermesModel?.trim() || opts.responseModel || "hermes-agent",
+      // Hermes turns may invoke tools: never follow a gateway redirect with
+      // the key + prompts (fail fast instead).
+      followRedirects: false,
     });
   }
   if (opts.aiProvider === "openai" || opts.aiProvider === "openrouter") {
@@ -474,11 +493,12 @@ export async function probeProviderEndpoint(
   endpointUrl: string,
   apiKey: string,
   model: string,
-  opts?: { fetchFn?: typeof fetch; timeoutMs?: number }
+  opts?: { fetchFn?: typeof fetch; timeoutMs?: number; followRedirects?: boolean }
 ): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
   const started = Date.now();
   const fetchFn = opts?.fetchFn ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? 8000;
+  const followRedirects = opts?.followRedirects ?? true;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -487,7 +507,11 @@ export async function probeProviderEndpoint(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 5 }),
       signal: controller.signal,
+      redirect: followRedirects ? "follow" : "manual",
     });
+    if (!followRedirects && (res.type === "opaqueredirect" || res.status === 0 || (res.status >= 300 && res.status < 400))) {
+      return { ok: false, latencyMs: Date.now() - started, detail: "REDIRECT_BLOCKED" };
+    }
     return { ok: res.ok, latencyMs: Date.now() - started, detail: `HTTP_${res.status}` };
   } catch (err) {
     return { ok: false, latencyMs: Date.now() - started, detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) };

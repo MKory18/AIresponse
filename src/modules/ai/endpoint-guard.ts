@@ -119,6 +119,17 @@ function ipv6Blocked(host: string): boolean {
   return false;
 }
 
+/** Loopback only (127.0.0.0/8) — the narrowest private allowance. */
+function isLoopbackIPv4(o: number[]): boolean {
+  return o[0] === 127;
+}
+
+/** RFC1918 private LAN (10/8, 172.16/12, 192.168/16) — no link-local. */
+function isRfc1918IPv4(o: number[]): boolean {
+  const [a, b] = o;
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 function hostnameBlocked(host: string): boolean {
   const h = host.toLowerCase();
   if (h === "localhost") return true;
@@ -193,4 +204,148 @@ export async function assertEndpointResolvesPublic(
     }
   }
   return { ok: true };
+}
+
+// ── Hermes-scoped private-network exception ─────────────────────────────
+// A self-hosted Hermes gateway typically listens on loopback/LAN
+// (e.g. http://127.0.0.1:8642), which the strict guard above rejects by
+// design. This exception is NARROW and deployer-opt-in:
+//
+// - Enabled ONLY via server-side `HERMES_ALLOW_PRIVATE_NETWORK=1/true/yes`
+//   (never from workspace UI input — the UI only supplies the URL).
+// - Applies ONLY to provider "hermes" call sites (settings save + probe).
+//   Every other provider keeps the strict guard, byte-identical.
+// - Additionally allowed (beyond strict): IPv4 loopback 127/8, RFC1918 LAN
+//   (10/8, 172.16/12, 192.168/16 — obfuscated literals included, since
+//   normalizeIPv4 canonicalizes them first), the `localhost` hostname, and
+//   IPv6 `::1`.
+// - ALWAYS blocked, flag or not: cloud metadata hostnames/IPs (notably
+//   169.254.169.254, which lives in link-local 169.254/16 — kept blocked),
+//   0.0.0.0/::, multicast, reserved, CGNAT, ULA, embedded credentials,
+//   non-http(s) schemes, and malformed URLs.
+
+export interface HermesEndpointOpts {
+  allowPrivateNetwork?: boolean;
+}
+
+function parseHermesHost(raw: string):
+  | { ok: true; url: URL; host: string }
+  | { ok: false; reason: EndpointRejection } {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return { ok: false, reason: "INVALID_URL" };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { ok: false, reason: "SCHEME_NOT_ALLOWED" };
+  }
+  if (url.username || url.password) {
+    return { ok: false, reason: "CREDENTIALS_IN_URL" };
+  }
+  let host = url.hostname.toLowerCase();
+  if (!host) return { ok: false, reason: "INVALID_URL" };
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  host = host.split("%")[0];
+  // Metadata namespaces are never Hermes targets, flag or not.
+  if (
+    METADATA_HOSTS.has(host) ||
+    host === "metadata.google.internal" ||
+    host === "localhost.localdomain"
+  ) {
+    return { ok: false, reason: "HOST_BLOCKED" };
+  }
+  return { ok: true, url, host };
+}
+
+/** Hermes sync checks: strict baseline + optional loopback/RFC1918. */
+export function validateHermesEndpoint(
+  raw: string,
+  opts: HermesEndpointOpts = {}
+): { ok: true } | { ok: false; reason: EndpointRejection } {
+  const parsed = parseHermesHost(raw);
+  if (!parsed.ok) return parsed;
+  const { host } = parsed;
+  if (!opts.allowPrivateNetwork) return validateEndpointUrl(raw);
+  // Private allowance (narrow): localhost name, loopback, RFC1918.
+  if (host === "localhost") return { ok: true };
+  if (host === "::1") return { ok: true };
+  const v4 = normalizeIPv4(host);
+  if (v4) {
+    if (isLoopbackIPv4(v4) || isRfc1918IPv4(v4)) return { ok: true };
+    // Anything else literal (incl. 169.254.x metadata, 0.0.0.0, multicast,
+    // reserved, CGNAT) falls through to the strict classifier below.
+  } else if (host.includes(":")) {
+    // IPv6: only ::1 is additionally allowed; ULA/link-local stay blocked.
+    if (host !== "::1") {
+      if (ipv6Blocked(host)) return { ok: false, reason: "IP_NOT_GLOBAL_UNICAST" };
+      return { ok: true };
+    }
+    return { ok: true };
+  }
+  // Non-literal hostnames (.lan/.local etc. stay blocked like strict) and
+  // all remaining literals: strict verdict decides.
+  return validateEndpointUrl(raw);
+}
+
+function dnsAddrAllowed(
+  address: string,
+  family: number,
+  allowPrivateNetwork: boolean
+): boolean {
+  const addr = address.toLowerCase().split("%")[0];
+  if (family === 6 || addr.includes(":")) {
+    if (addr === "::1") return allowPrivateNetwork;
+    return !ipv6Blocked(addr);
+  }
+  const v4 = normalizeIPv4(addr);
+  if (!v4) return false;
+  if (!ipv4Blocked(v4)) return true; // global unicast
+  // Blocked-literal that is still acceptable for Hermes iff explicitly
+  // loopback/RFC1918 under the flag. 169.254/16 (metadata), 0.0.0.0,
+  // multicast, reserved and CGNAT never pass, flag or not.
+  return allowPrivateNetwork && (isLoopbackIPv4(v4) || isRfc1918IPv4(v4));
+}
+
+/** Hermes DNS layer: every resolved address must be allowed (see above). */
+export async function assertHermesEndpointResolves(
+  raw: string,
+  opts: HermesEndpointOpts & {
+    lookupFn?: (host: string) => Promise<Array<{ address: string; family: number }>>;
+  } = {}
+): Promise<{ ok: true } | { ok: false; reason: EndpointRejection }> {
+  const { lookupFn = async (h: string) => {
+    const resolved = await lookup(h, { all: true });
+    return resolved.map((x) => ({ address: x.address, family: x.family }));
+  }, allowPrivateNetwork = false } = opts;
+  const sync = validateHermesEndpoint(raw, { allowPrivateNetwork });
+  if (!sync.ok) return sync;
+  const parsed = parseHermesHost(raw);
+  if (!parsed.ok) return parsed;
+  // Literal IPs need no DNS (already classified above).
+  if (normalizeIPv4(parsed.host) || parsed.host.includes(":")) return { ok: true };
+  let addrs: Array<{ address: string; family: number }>;
+  try {
+    addrs = await lookupFn(parsed.host);
+  } catch {
+    return { ok: false, reason: "DNS_RESOLUTION_FAILED" };
+  }
+  if (addrs.length === 0) return { ok: false, reason: "DNS_RESOLUTION_FAILED" };
+  for (const a of addrs) {
+    if (!dnsAddrAllowed(a.address, a.family, allowPrivateNetwork)) {
+      return { ok: false, reason: "DNS_NOT_GLOBAL_UNICAST" };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Trusted server-side toggle for the Hermes private exception. Reads ONLY
+ * the deployer's environment (never workspace input): "1"/"true"/"yes"
+ * (case-insensitive) enables; anything else (incl. unset) disables.
+ */
+export function isHermesPrivateNetworkAllowed(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  return ["1", "true", "yes"].includes((env.HERMES_ALLOW_PRIVATE_NETWORK ?? "").toLowerCase());
 }
