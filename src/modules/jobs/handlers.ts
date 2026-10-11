@@ -1,6 +1,7 @@
 import { childLogger } from "@/core/logger";
 import { processPendingJobs, type JobHandler } from "@/modules/jobs/service";
 import { handleChannelInbound } from "@/modules/channels/inbound-job";
+import { handleWhatsAppMediaDownload } from "@/modules/channels/whatsapp/media-download";
 import { getEmbeddingProvider, getCurrentEmbeddingIdentity } from "@/modules/knowledge/embeddings";
 import { classifySentiment } from "@/modules/feedback/service";
 
@@ -539,6 +540,7 @@ export function getJobHandlers(): Record<string, JobHandler> {
     generate_summary: (payload) => handleGenerateSummary(getDb(), payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(getDb(), payload),
     process_channel_inbound: (payload) => handleChannelInbound(getDb(), payload),
+    download_whatsapp_media: (payload) => handleWhatsAppMediaDownload(getDb(), payload),
     evaluate_automation: (payload) => handleEvaluateAutomation(getDb(), payload),
     process_due_followups: () => handleProcessDueFollowUps(getDb()),
     aggregate_workspace_analytics: (payload) => handleAggregateAnalytics(getDb(), payload),
