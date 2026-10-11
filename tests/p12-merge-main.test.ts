@@ -8,6 +8,8 @@ import { createProduct } from "@/modules/products/service";
 import { createPlaygroundSession, sendPlaygroundMessage } from "@/modules/ai/playground-service";
 import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
 import { encryptSecret } from "@/core/crypto";
+import { readFileSync } from "node:fs";
+import { SYSTEM_SPECS, TOKEN_PRESETS } from "@/modules/integrations/systems";
 
 /**
  * P12 × main (وضع Hermes للشخصية الخارجية) — دمج دلالي:
@@ -163,5 +165,51 @@ describe("P12 × main — قواعد سيستم 1 بالتجربة اليدوي�
     expect(systems.length).toBeGreaterThan(0);
     expect(systems[0]).toContain(BANNED);
     expect(systems[0]).toContain(ALLOWED);
+  });
+});
+
+/**
+ * قرار المالك على main (67093e8): «لا Hermes بأي نص مرئي» — تسميات عامة
+ * (الوكيل الذكي …) والقيم الداخلية (`hermes` · `hermes-bridge` · `HERMES_*` ·
+ * `hermes-agent`) والتعليقات بتضل. نفس القاعدة على واجهات P12 والتسميات اللي بتعرضها.
+ */
+describe("P12 × main — ولا اسم Hermes بأي نص مرئي بواجهات P12", () => {
+  const P12_UI = [
+    "src/app/(dashboard)/settings/agents/page.tsx",
+    "src/app/(dashboard)/settings/integrations/page.tsx",
+    "src/app/(dashboard)/settings/page.tsx",
+    "src/app/(dashboard)/settings/ai/page.tsx",
+    "src/components/agents/drafts-queue.tsx",
+    "src/components/agents/external-agent-risk.tsx",
+    "src/components/integrations/oms-card.tsx",
+    "src/components/integrations/system-card.tsx",
+    "src/components/integrations/settings-cards.tsx",
+    "src/components/integrations/token-manager.tsx",
+    "src/components/orders/oms-handoff-card.tsx",
+    "src/components/products/compliance-card.tsx",
+    "src/components/inbox/marketing-card.tsx",
+  ];
+  /** النص المرئي تقريبًا = المصدر بلا تعليقات وبلا المعرّفات التقنية المسموحة. */
+  const visible = (src: string) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/.*$/gm, "$1")
+      .replace(/value="hermes"/g, "")
+      .replace(/["'`]hermes(-bridge)?["'`]/g, "")
+      .replace(/\bhermes(?=\s*:)/g, "")
+      .replace(/HERMES_[A-Z_]+/g, "")
+      .replace(/hermes-agent/g, "");
+
+  it.each(P12_UI)("%s: بلا اسم العلامة", (f) => {
+    expect(visible(readFileSync(f, "utf8"))).not.toMatch(/hermes/i);
+  });
+
+  it("أسماء الأنظمة والتوكنات المعروضة عامة (والمعرّف الداخلي hermes-bridge ثابت)", () => {
+    expect(TOKEN_PRESETS["hermes-bridge"].nameAr).not.toMatch(/hermes/i);
+    for (const spec of Object.values(SYSTEM_SPECS) as Array<Record<string, unknown>>) {
+      for (const [k, v] of Object.entries(spec)) {
+        if (typeof v === "string" && /Ar$/.test(k)) expect(v, k).not.toMatch(/hermes/i);
+      }
+    }
   });
 });

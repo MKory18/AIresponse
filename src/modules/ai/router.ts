@@ -286,13 +286,13 @@ export function validateTaskModel(
 // customBaseUrl builds an INTERNAL OpenAI-compatible provider (delivery
 // "internal", tested independently — never claimed internal by name alone).
 
-// ── Hermes external-persona mode ─────────────────────────────────────────
-// When the EFFECTIVE reply provider is Hermes, reply personality (voice,
-// dialect, tone, persuasion) is owned by the externally-configured Hermes
-// agent — never by local Persona rows or prompt templates. These helpers
-// are the single definition of that mode (settings-level intent +
-// runtime instance check), so UI gates, API guards, and the pipeline all
-// agree on when local persona control is suspended.
+// ── External-provider reply path (Hermes) ──────────────────────────────────
+// When the EFFECTIVE reply provider is Hermes, the SELECTED local persona
+// still drives voice (the gateway carries no personaId parameter, so the
+// published instructions travel inside the request). These helpers are the
+// single definition of that path, so the pipeline agrees on when automatic
+// handoffs stay suspended: activating a persona must never reintroduce
+// auto-handoffs, and failures keep conversations OPEN without records.
 
 /** Settings-level intent: would resolution pick Hermes (no I/O)? */
 export function isHermesSelected(

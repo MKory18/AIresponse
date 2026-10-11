@@ -161,7 +161,7 @@ export function DraftsQueue({ highlightId, refreshKey }: { highlightId: string |
 
   return (
     <GlassCard className="space-y-3 p-4 sm:p-5">
-      <SectionHead icon={<FileText size={15} />} title="مسودات Hermes" sub="«المسودة مسودة»: ولا أثر برّا قبل قرارك. المسودة بتنتهي بعد 7 أيام بلا قرار." tone="violet" />
+      <SectionHead icon={<FileText size={15} />} title="مسودات الوكيل الذكي" sub="«المسودة مسودة»: ولا أثر برّا قبل قرارك. المسودة بتنتهي بعد 7 أيام بلا قرار." tone="violet" />
       <Tabs
         items={[
           { key: "PENDING", label: "بانتظارك" },
@@ -193,7 +193,7 @@ export function DraftsQueue({ highlightId, refreshKey }: { highlightId: string |
                   <HealthPill health={st.health}>{st.label}</HealthPill>
                 </div>
                 <p className="text-[11px] text-ink-subtle">
-                  مصدرها Hermes · قبل {d.ageHours} ساعة{pending && d.expiresAt ? ` · بتنتهي ${fmtDateTime(d.expiresAt)}` : ""}
+                  مصدرها الوكيل الذكي · قبل {d.ageHours} ساعة{pending && d.expiresAt ? ` · بتنتهي ${fmtDateTime(d.expiresAt)}` : ""}
                   {d.decidedAt ? ` · القرار ${fmtDateTime(d.decidedAt)}` : ""}
                 </p>
                 {d.kind === "reply_template" ? (

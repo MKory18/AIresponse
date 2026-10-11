@@ -28,7 +28,7 @@ interface Overview {
 /**
  * P12 — «الربط مع الأنظمة»: كل منظومة Zaki بصفحة وحدة — الـ OMS · الميديا
  * باير · الكليبر · المالية · سيستم 1 · الأزمات · المهام · مساحة العمل · جسر
- * Hermes. كل خطر أو أتمتة بالأحمر وتصحيحه بالبرتقالي تحته.
+ * الوكيل الذكي. كل خطر أو أتمتة بالأحمر وتصحيحه بالبرتقالي تحته.
  */
 export default function IntegrationsPage() {
   const [data, setData] = useState<Overview | null>(null);
@@ -50,7 +50,7 @@ export default function IntegrationsPage() {
     void load();
   }, [load]);
 
-  const header = <PageHeader title="الربط مع الأنظمة" description="نظام الردود جزء من منظومة Zaki: الطلبات للـ OMS، والأرقام للميديا باير والكليبر وHermes — بلا أي بيانات زبون خارج الحاجة." />;
+  const header = <PageHeader title="الربط مع الأنظمة" description="نظام الردود جزء من منظومة Zaki: الطلبات للـ OMS، والأرقام للميديا باير والكليبر والوكيل الذكي — بلا أي بيانات زبون خارج الحاجة." />;
 
   if (error) {
     return (
@@ -89,7 +89,7 @@ export default function IntegrationsPage() {
         <HealthPill health="off">{configured} من {data.systems.length + 1} مربوط</HealthPill>
         <Link href="/settings/agents" className="ms-auto inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline dark:text-brand-300">
           <Bot size={13} />
-          باب الوكلاء (Hermes)
+          باب الوكلاء
         </Link>
       </GlassCard>
 
@@ -119,7 +119,7 @@ export default function IntegrationsPage() {
       </div>
 
       <GlassCard className="space-y-3 p-4 sm:p-5">
-        <SectionHead icon={<KeyRound size={15} />} title="توكنات الأنظمة الداخلة" sub="الميديا باير بيقرأ القدرة بس · الكليبر بيطلب حملات ويقرأ حالتها بس. توكن Hermes من صفحة باب الوكلاء." tone="amber" />
+        <SectionHead icon={<KeyRound size={15} />} title="توكنات الأنظمة الداخلة" sub="الميديا باير بيقرأ القدرة بس · الكليبر بيطلب حملات ويقرأ حالتها بس. توكن الوكيل من صفحة باب الوكلاء." tone="amber" />
         <TokenManager tokens={data.tokens} presets={data.tokenPresets} systems={["mediabuyer", "clipper"]} appUrl={data.appUrl} onChange={load} />
       </GlassCard>
 

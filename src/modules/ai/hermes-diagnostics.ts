@@ -190,7 +190,7 @@ export async function runHermesDiagnostics(
   }
   const loopbackNote =
     host === "localhost" || host === "127.0.0.1" || host === "::1"
-      ? "LOOPBACK_NOTE: 127.0.0.1/localhost only works when Hermes shares this container's network namespace (same pod/compose service network)"
+      ? "LOOPBACK_NOTE: 127.0.0.1/localhost only works when the gateway shares this container's network namespace (same pod/compose service network)"
       : undefined;
   stages.push({
     stage: "CONFIGURATION",

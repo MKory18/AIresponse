@@ -264,10 +264,10 @@ export async function runExtraction(
         memories: extraction.memories,
       });
     }
-    // Hermes external-persona mode: NO HumanHandoff records, NO HANDOFF
+    // External-provider path: NO HumanHandoff records, NO HANDOFF
     // terminal. The order stays blocked by OrderService rules (nothing is
-    // confirmed), the block is audit-visible, and Hermes still replies so
-    // the conversation stays OPEN and reprocessable.
+    // confirmed), the block is audit-visible, and the reply still goes out
+    // with the selected persona so the conversation stays OPEN.
     if (hermesPersona) {
       if (!params.dryRun) {
         await recordAudit(db, {
@@ -333,11 +333,11 @@ export async function runExtraction(
     }
   }
 
-  // 9. Handoff policy — SUSPENDED in Hermes external-persona mode: no
+  // 9. Handoff policy — SUSPENDED on the external-provider path: no
   // automatic handoff on injection/complaint/request/low confidence, no
-  // confidence thresholds gating replies, no HANDOFF terminals. Hermes owns
-  // the linguistic handling; injection content is still treated as
-  // untrusted data (delimiters + INJECTION_ECHO guardrail stay).
+  // confidence thresholds gating replies, no HANDOFF terminals. The selected
+  // persona still handles the wording; injection content stays untrusted
+  // data (delimiters + INJECTION_ECHO guardrail stay).
   const handoffThreshold = settings?.humanHandoffThreshold ?? 0.5;
   const mustHandoff =
     injection ||

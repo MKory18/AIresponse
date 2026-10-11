@@ -108,7 +108,7 @@ export function ComplianceCard({ productId }: { productId: string }) {
       {!data?.s1ProductRef ? (
         <div className="space-y-1.5">
           <RiskNote title="المنتج مش مربوط بسيستم 1 — ما في قائمة ادعاءات ممنوعة خاصة فيه" />
-          <FixNote>حط مرجعه فوق: الذكاء وقوالب Hermes بيلتزموا بقواعده حرفيًا (الحارس العام بيضل شغّال بكل الأحوال).</FixNote>
+          <FixNote>حط مرجعه فوق: الذكاء وقوالب الوكيل الذكي بيلتزموا بقواعده حرفيًا (الحارس العام بيضل شغّال بكل الأحوال).</FixNote>
         </div>
       ) : !c ? (
         refreshError ? null : (

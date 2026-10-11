@@ -714,7 +714,7 @@ export const TOOLS: ToolDef[] = [
           templateLanguage: input.template_language,
           frequencyCapDays: freq,
           approvedBy: "hermes",
-          note: (input.offer ? `مسودة Hermes — ${input.offer}` : "مسودة Hermes").slice(0, 500),
+          note: (input.offer ? `مسودة الوكيل الذكي — ${input.offer}` : "مسودة الوكيل الذكي").slice(0, 500),
           product,
         },
         productCode: input.product_code ?? null,

@@ -66,7 +66,7 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 export const TOKEN_PRESETS = {
   mediabuyer: { nameAr: "الميديا باير", scopes: ["capacity.read"] },
   clipper: { nameAr: "الكليبر", scopes: ["retarget.create", "retarget.read"] },
-  "hermes-bridge": { nameAr: "جسر Hermes (zaki-bridge)", scopes: ["agent.read", "agent.draft"] },
+  "hermes-bridge": { nameAr: "جسر الوكيل الذكي (zaki-bridge)", scopes: ["agent.read", "agent.draft"] },
 } as const satisfies Record<string, { nameAr: string; scopes: readonly TokenScope[] }>;
 export type TokenSystem = keyof typeof TOKEN_PRESETS;
 export const TOKEN_SYSTEMS = Object.keys(TOKEN_PRESETS) as TokenSystem[];
@@ -189,8 +189,8 @@ export const SYSTEM_SPECS: Record<ZakiSystem, SystemSpec> = {
   },
   bridge: {
     key: "bridge",
-    nameAr: "جسر Hermes (zaki-bridge)",
-    summaryAr: "Hermes يقرأ أرقام الردود ويجهّز مسودات عبر باب الوكلاء، والجسر يستقبل إنذار القدرة.",
+    nameAr: "جسر الوكيل الذكي (zaki-bridge)",
+    summaryAr: "الوكيل الذكي يقرأ أرقام الردود ويجهّز مسودات عبر باب الوكلاء، والجسر يستقبل إنذار القدرة.",
     eventsPath: "/events/replies",
     sendsEvents: OUTBOUND_EVENT_TYPES.filter((t) => (OUTBOUND_EVENT_ROUTES[t] as readonly string[]).includes("bridge")),
     calls: [],

@@ -128,7 +128,7 @@ export function MarketsCard({ channels, markets, onSaved }: { channels: ChannelR
   }
   return (
     <GlassCard className="space-y-3 p-4 sm:p-5">
-      <SectionHead icon={<Globe2 size={15} />} title="سوق كل قناة" sub="Hermes بيسأل «كيف الردود بسوريا؟» — الجواب من قنوات السوق هاد بس." tone="emerald" />
+      <SectionHead icon={<Globe2 size={15} />} title="سوق كل قناة" sub="الوكيل الذكي بيسأل «كيف الردود بسوريا؟» — الجواب من قنوات السوق هاد بس." tone="emerald" />
       {channels.length === 0 ? (
         <p className="text-xs text-ink-subtle">ما في قنوات مربوطة لسا.</p>
       ) : (
@@ -171,14 +171,14 @@ export function EndpointsCard({ endpoints, appUrl }: { endpoints: Endpoints; app
       {!appUrl && (
         <RiskWithFix
           risk="APP_URL مش مضبوط بالخادم — الروابط تحت ناقصة الدومين"
-          fix="حط APP_URL=https://دومين-الردود بملف البيئة وأعد التشغيل؛ روابط المراجعة لـ Hermes ورابط أحداث الـ OMS بيعتمدوا عليه."
+          fix="حط APP_URL=https://دومين-الردود بملف البيئة وأعد التشغيل؛ روابط المراجعة للوكيل ورابط أحداث الـ OMS بيعتمدوا عليه."
         />
       )}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <CopyField label="قدرة الرد — للميديا باير (GET)" value={endpoints.capacity} />
         <CopyField label="حملات إعادة التواصل — للكليبر (POST + Idempotency-Key)" value={endpoints.retargetCampaigns} />
-        <CopyField label="دليل أدوات Hermes (GET)" value={endpoints.agentTools} />
-        <CopyField label="نداء أداة Hermes (POST)" value={endpoints.agentCall} />
+        <CopyField label="دليل أدوات الوكيل (GET)" value={endpoints.agentTools} />
+        <CopyField label="نداء أداة الوكيل (POST)" value={endpoints.agentCall} />
         <CopyField label="أحداث سيستم 1 (POST موقّع)" value={endpoints.s1Webhook} />
         <CopyField label="صحة النظام (GET)" value={endpoints.health} />
       </div>

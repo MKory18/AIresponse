@@ -10,7 +10,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
 const HIGHLIGHTS = [
-  { icon: MessagesSquare, title: "رد آلي ذكي", desc: "Hermes يرد على عملائك لحظيًا على مدار الساعة" },
+  { icon: MessagesSquare, title: "رد آلي ذكي", desc: "الوكيل الذكي يرد على عملائك لحظيًا على مدار الساعة" },
   { icon: ShoppingBag, title: "طلبات بلا أخطاء", desc: "استخراج البيانات وتأكيد الطلبات تلقائيًا" },
   { icon: TrendingUp, title: "نمو تقيسه", desc: "تحليلات المبيعات والأداء لحظة بلحظة" },
 ];

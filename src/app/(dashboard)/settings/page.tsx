@@ -8,7 +8,7 @@ export default function SettingsPage() {
     { href: "/settings/ai", title: "إعدادات AI", desc: "المزود، النماذج، حرارة التوليد، حدود الثقة، والتشغيل/الإيقاف.", icon: Bot },
     { href: "/settings/team", title: "الفريق والصلاحيات", desc: "الأعضاء، الدعوات، الأدوار، التعليق، وإعدادات مساحة العمل.", icon: Users },
     { href: "/settings/integrations", title: "الربط مع الأنظمة", desc: "الـ OMS · الميديا باير · الكليبر · المالية · سيستم 1 · الأزمات · المهام · مساحة العمل — الروابط والتوكنات وسجل الصادر.", icon: Cable },
-    { href: "/settings/agents", title: "باب الوكلاء (Hermes)", desc: "مسودات Hermes بانتظار قرارك · توكن الجسر · زر الإيقاف · سجل كل نداء.", icon: Network },
+    { href: "/settings/agents", title: "باب الوكلاء", desc: "مسودات الوكيل الذكي بانتظار قرارك · توكن الجسر · زر الإيقاف · سجل كل نداء.", icon: Network },
   ];
   return (
     <div className="page-wrap">

@@ -14,7 +14,7 @@ import type { SystemInfo } from "@/components/integrations/system-card";
 import type { Endpoints, IntegrationSettings } from "@/components/integrations/settings-cards";
 import { DraftsQueue } from "@/components/agents/drafts-queue";
 import { CallLog } from "@/components/agents/call-log";
-import { HermesProviderRisk } from "@/components/agents/hermes-provider-risk";
+import { ExternalAgentRisk } from "@/components/agents/external-agent-risk";
 
 interface Overview {
   appUrl: string | null;
@@ -28,12 +28,12 @@ interface Overview {
 const BRIDGE_YAML = (appUrl: string | null) => `# zaki-bridge/config/systems.yaml
   replies:
     url_env: REPLIES_URL            # ${appUrl ?? "https://<رابط-الردود>"}
-    token_env: REPLIES_AGENT_TOKEN  # توكن hermes-bridge من هالصفحة
-    events_secret_env: REPLIES_EVENTS_SECRET  # سر «جسر Hermes» من صفحة الربط
+    token_env: REPLIES_AGENT_TOKEN  # توكن الجسر من هالصفحة
+    events_secret_env: REPLIES_EVENTS_SECRET  # سر «جسر الوكيل الذكي» من صفحة الربط
     enabled: true`;
 
 /**
- * P12 — «باب الوكلاء»: Hermes بيقرأ أرقام الردود ويجهّز مسودات عبر
+ * P12 — «باب الوكلاء»: الوكيل الذكي بيقرأ أرقام الردود ويجهّز مسودات عبر
  * agent-door/v1 (بلا بيانات شخصية)، والمالك بيقرّر هون: المسودات · التوكن ·
  * زر الإيقاف · سجل كل نداء.
  */
@@ -59,7 +59,7 @@ export default function AgentsPage() {
 
   useEffect(() => {
     void load();
-    // رابط المراجعة من Hermes: /settings/agents?draft=<id> — بلا useSearchParams (بدون Suspense بالبناء).
+    // رابط المراجعة من الوكيل: /settings/agents?draft=<id> — بلا useSearchParams (بدون Suspense بالبناء).
     const id = new URLSearchParams(window.location.search).get("draft");
     if (id && /^[A-Za-z0-9_-]{1,64}$/.test(id)) setHighlight(id);
     apiJson<{ provider: string; fallbackProvider: string | null }>("/api/ai/settings")
@@ -83,8 +83,8 @@ export default function AgentsPage() {
 
   const header = (
     <PageHeader
-      title="باب الوكلاء (Hermes)"
-      description="Hermes بيقرأ أرقام الردود ويجهّز مسودات قوالب وحملات — بلا أي اسم أو رقم زبون، وكل مسودة بتستنى قرارك هون."
+      title="باب الوكلاء"
+      description="الوكيل الذكي بيقرأ أرقام الردود ويجهّز مسودات قوالب وحملات — بلا أي اسم أو رقم زبون، وكل مسودة بتستنى قرارك هون."
     />
   );
   if (error) {
@@ -108,14 +108,14 @@ export default function AgentsPage() {
 
   const paused = data.settings.agentDoorPaused;
   const bridge = data.systems.find((s) => s.key === "bridge");
-  const activeHermesTokens = data.tokens.filter((t) => t.system === "hermes-bridge" && t.status === "active").length;
+  const activeAgentTokens = data.tokens.filter((t) => t.system === "hermes-bridge" && t.status === "active").length;
 
   return (
     <div className="page-wrap">
       {header}
 
       {provider && (provider.provider === "hermes" || provider.fallbackProvider === "hermes") && (
-        <HermesProviderRisk asFallback={provider.provider !== "hermes"} />
+        <ExternalAgentRisk asFallback={provider.provider !== "hermes"} />
       )}
 
       <GlassCard className="space-y-4 p-4 sm:p-5">
@@ -124,8 +124,8 @@ export default function AgentsPage() {
           title="حالة الباب"
           sub="العقد agent-door/v1 · 11 أداة (8 للردود + 3 قياسية) · قراءة ومسودة بس — ولا أداة تنفيذ ولا مال ولا إرسال."
           action={
-            <HealthPill health={paused ? "error" : activeHermesTokens > 0 ? "ok" : "warn"}>
-              {paused ? "موقوف" : activeHermesTokens > 0 ? "شغّال" : "بلا توكن"}
+            <HealthPill health={paused ? "error" : activeAgentTokens > 0 ? "ok" : "warn"}>
+              {paused ? "موقوف" : activeAgentTokens > 0 ? "شغّال" : "بلا توكن"}
             </HealthPill>
           }
         />
@@ -150,7 +150,7 @@ export default function AgentsPage() {
           <CopyField label="دليل الأدوات (GET)" value={data.endpoints.agentTools} />
           <CopyField label="نداء أداة (POST)" value={data.endpoints.agentCall} />
         </div>
-        <RiskNote title="مؤتمت: Hermes بيسأل الأرقام لحاله ويعمل مسودات (لحد 20 باليوم)">
+        <RiskNote title="مؤتمت: الوكيل الذكي بيسأل الأرقام لحاله ويعمل مسودات (لحد 20 باليوم)">
           ولا مسودة بتأثر على زبون قبل اعتمادك، والحملة المعتمدة بتستنى اعتماد إرسال تاني بصفحة الحملات.
         </RiskNote>
         <FixNote>بدك توقف كل شي فورًا؟ «زر الإيقاف» فوق (بلا ما ينحذف التوكن) — أو «إيقاف» التوكن تحت إذا انكشف.</FixNote>
@@ -159,7 +159,7 @@ export default function AgentsPage() {
       <DraftsQueue highlightId={highlight} refreshKey={tick} />
 
       <GlassCard className="space-y-3 p-4 sm:p-5">
-        <SectionHead icon={<KeyRound size={15} />} title="توكن الجسر (hermes-bridge)" sub="قراءة + مسودة · 60 طلب بالدقيقة · 20 مسودة باليوم · 90 يوم ثم تجديد." tone="amber" />
+        <SectionHead icon={<KeyRound size={15} />} title="توكن الجسر (zaki-bridge)" sub="قراءة + مسودة · 60 طلب بالدقيقة · 20 مسودة باليوم · 90 يوم ثم تجديد." tone="amber" />
         <TokenManager tokens={data.tokens} presets={data.tokenPresets} systems={["hermes-bridge"]} appUrl={data.appUrl} onChange={load} />
       </GlassCard>
 
@@ -168,7 +168,7 @@ export default function AgentsPage() {
         <CopyField label="systems.yaml" value={BRIDGE_YAML(data.appUrl)} />
         {bridge && !bridge.connection.configured && (
           <InfoNote>
-            لإنذار القدرة لـ Hermes: من «الربط مع الأنظمة» ← «جسر Hermes» حط رابط أحداث الجسر وولّد سر التوقيع، وانسخه للجسر كـ REPLIES_EVENTS_SECRET.
+            لإنذار القدرة للوكيل: من «الربط مع الأنظمة» ← «جسر الوكيل الذكي» حط رابط أحداث الجسر وولّد سر التوقيع، وانسخه للجسر كـ REPLIES_EVENTS_SECRET.
           </InfoNote>
         )}
       </GlassCard>
@@ -180,7 +180,7 @@ export default function AgentsPage() {
         onClose={() => setConfirmPause(false)}
         onConfirm={() => setPaused(true)}
         title="إيقاف باب الوكلاء؟"
-        body="كل نداء من Hermes بيرجع 401 لحد ما تشغّله — Hermes بيكتب «الردود مش متاحة» بموجزه. المسودات الموجودة بتضل بانتظارك."
+        body="كل نداء من الوكيل بيرجع 401 لحد ما تشغّله — الوكيل بيكتب «الردود مش متاحة» بموجزه. المسودات الموجودة بتضل بانتظارك."
         confirmLabel="أوقف الباب"
         busy={busy}
         danger

@@ -326,7 +326,7 @@ export async function buildRetargetCampaign(
     },
     spec.product ?? null
   );
-  const label = input.source === "clipper" ? "كليبر" : "Hermes";
+  const label = input.source === "clipper" ? "كليبر" : "الوكيل الذكي";
   const segment = (await db.audienceSegment.create({
     data: {
       workspaceId: input.workspaceId,

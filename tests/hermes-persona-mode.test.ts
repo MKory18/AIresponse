@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
-import { MockAIProvider, setMockAIProvider } from "@/modules/ai/provider";
+import { MockAIProvider, setMockAIProvider, AIProviderError } from "@/modules/ai/provider";
 import { processAIMessage } from "@/modules/ai/orchestrator";
 import { processIncomingMessage } from "@/modules/conversations/service";
 import { createProduct } from "@/modules/products/service";
@@ -9,10 +9,12 @@ import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/fac
 import { encryptSecret } from "@/core/crypto";
 
 /**
- * Hermes external-persona mode — mandatory coverage through the REAL reply
- * path (processAIMessage with the workspace AISettings.provider=hermes, no
- * injected provider double). Hermes owns reply personality; Zaki AI keeps
- * privacy, prices, orders, and workspace isolation.
+ * Local personas drive replies on EVERY provider (including Hermes).
+ *
+ * The external gateway carries no personaId parameter, so the selected
+ * persona's published instructions travel inside the request via the
+ * standard message builder. Automatic handoffs stay suspended on the
+ * Hermes path (failures keep conversations OPEN with no HumanHandoff).
  */
 
 const WS = "ws-hermes-persona";
@@ -113,9 +115,19 @@ async function seedHermesWorkspace() {
       maxTokens: 500,
       aiEnabled: true,
       autoRespond: true,
-      // Suspended in Hermes mode — set aggressively to prove they are ignored.
-      humanHandoffThreshold: 0.99,
-      fallbackModel: "should-never-be-used",
+      // Explicit, telemetry-visible fallback (same provider channel).
+      humanHandoffThreshold: 0.5,
+      fallbackModel: "fallback-voice-model",
+    },
+  } as never);
+  // Workspace-default persona (active): selected for every reply unless a
+  // channel persona overrides it.
+  await db.persona.create({
+    data: {
+      workspaceId: WS, name: "البائع-الافتراضي", language: "ar", dialect: "افتراضية-UNIQUE",
+      tone: "t", formality: "informal", responseLength: "short", emojiLevel: 1, salesStyle: "s",
+      systemInstructions: "DEFAULT-MARKER-321", prohibitedPhrases: [], customRules: [],
+      isActive: true, version: 3,
     },
   } as never);
   const ch = (await db.channel.create({
@@ -176,7 +188,7 @@ afterEach(() => {
 });
 
 describe("Hermes persona mode — actual reply path uses Hermes", () => {
-  it("1+5+8+15. Hermes generates the reply; conversation stays OPEN/AI_ACTIVE; usage proves the provider", async () => {
+  it("1+5+8+15. Hermes generates the reply with the workspace-default persona; conversation stays OPEN/AI_ACTIVE; usage proves provider + persona", async () => {
     const { conversationId, messageId } = await seedConversation("مرحبا", "t1");
     const res = await runReply(conversationId, messageId);
     expect(res.status).toBe("RESPONDED");
@@ -187,30 +199,36 @@ describe("Hermes persona mode — actual reply path uses Hermes", () => {
       expect(authzOf(c)).toBe(`Bearer ${HERMES_KEY}`);
       expect(c.body?.model).toBe("hermes-agent");
     }
+    // The SELECTED (workspace-default) persona shapes the provider request.
+    const blob = systemsOf().join("\n");
+    expect(blob).toContain("البائع-الافتراضي");
+    expect(blob).toContain("DEFAULT-MARKER-321");
+    expect(blob).toContain("افتراضية-UNIQUE");
     // Customer received exactly the Hermes text.
     expect(outboundTexts()).toEqual(["أهلًا فيك 🌹 كيف فيني ساعدك؟"]);
     // Conversation untouched: OPEN, AI_ACTIVE, never closed or taken over.
     const conv = await conversationOf(conversationId);
     expect(conv.status).toBe("OPEN");
     expect(conv.aiState).toBe("AI_ACTIVE");
-    // Telemetry: hermes provider, no local persona, no fallback.
+    // Telemetry: hermes provider + REAL persona identity/version, no fallback.
     const rows = await usageFor(messageId);
     const resp = rows.find((r) => r.purpose === "RESPONSE" && r.status === "SUCCESS");
     expect(resp.provider).toBe("hermes");
     expect(resp.model).toBe("hermes-agent");
-    expect(resp.personaId).toBeNull();
-    expect(resp.personaVersion).toBeNull();
+    const def = (db._stores.persona as any[]).find((p) => p.name === "البائع-الافتراضي");
+    expect(resp.personaId).toBe(def.id);
+    expect(resp.personaVersion).toBe(3);
     expect(resp.fallbackUsed).toBe(false);
     expect(handoffCount()).toBe(0);
   });
 
-  it("2+3. no local persona or version leaks into Hermes requests", async () => {
+  it("2+3+16. channel persona wins over the default; its instructions + version reach the provider and telemetry", async () => {
     const persona = (await db.persona.create({
       data: {
         workspaceId: WS, name: "بائع-زقزوق-UNIQUE", language: "ar", dialect: "مريخية-UNIQUE",
         tone: "t", formality: "informal", responseLength: "short", emojiLevel: 1, salesStyle: "s",
         systemInstructions: "MARKER-UNIQUE-123", prohibitedPhrases: ["عبارة-UNIQUE-456"], customRules: [],
-        isActive: true, version: 5,
+        isActive: false, version: 5,
       },
     } as never)) as any;
     const ch = (db._stores.channel as any[])[0];
@@ -218,30 +236,56 @@ describe("Hermes persona mode — actual reply path uses Hermes", () => {
     const { conversationId, messageId } = await seedConversation("مرحبا", "t2");
     const res = await runReply(conversationId, messageId);
     expect(res.status).toBe("RESPONDED");
+    // Channel persona (not the default) drives the request…
     const blob = systemsOf().join("\n");
-    for (const marker of ["زقزوق-UNIQUE", "MARKER-UNIQUE-123", "مريخية-UNIQUE", "عبارة-UNIQUE-456"]) {
-      expect(blob).not.toContain(marker);
+    for (const marker of ["زقزوق-UNIQUE", "MARKER-UNIQUE-123", "مريخية-UNIQUE"]) {
+      expect(blob).toContain(marker);
     }
+    expect(blob).not.toContain("البائع-الافتراضي");
+    expect(blob).not.toContain("DEFAULT-MARKER-321");
+    // Prohibited phrases are persona instructions: they travel to the
+    // provider AND are re-enforced server-side by guardrails.
+    expect(blob).toContain("عبارة-UNIQUE-456");
+    // …and prohibited phrases travel to guardrails (provider still Hermes)…
+    expect(fetchCalls.every((c) => c.url === HERMES_ENDPOINT)).toBe(true);
+    // …with the channel persona identity + published version tracked.
     const rows = await usageFor(messageId);
     for (const r of rows) {
-      expect(r.personaId).toBeNull();
-      expect(r.personaVersion).toBeNull();
+      if (r.purpose === "RESPONSE" || r.purpose === "EXTRACTION") {
+        expect(r.personaId).toBe(persona.id);
+      }
     }
+    const resp = rows.find((r) => r.purpose === "RESPONSE" && r.status === "SUCCESS");
+    expect(resp.personaVersion).toBe(5);
+    // Unassign → workspace default applies again (priority policy).
+    await (db as any).channel.update({ where: { id: ch.id }, data: { aiPersonaId: null } });
+    fetchCalls.length = 0;
+    const c2 = await seedConversation("مرحبا", "t2b");
+    expect((await runReply(c2.conversationId, c2.messageId)).status).toBe("RESPONDED");
+    const blob2 = systemsOf().join("\n");
+    expect(blob2).toContain("البائع-الافتراضي");
+    expect(blob2).not.toContain("زقزوق-UNIQUE");
   });
 
-  it("4. configured fallback model is never used behind Hermes", async () => {
-    replyResponder = { throw: new Error("hermes down") };
+  it("4. the explicit fallback is attempted visibly (same provider channel) on Hermes failure", async () => {
+    // Retryable outage (gateway down): withRetry retries, then the
+    // explicitly configured fallback model is attempted on the same
+    // provider — visible in telemetry, never a hidden substitute.
+    replyResponder = { throw: new AIProviderError("hermes down", { retryable: true }) };
     const { conversationId, messageId } = await seedConversation("مرحبا", "t4");
     const res = await runReply(conversationId, messageId);
     expect(res.status).toBe("AI_FAILED");
-    // Every attempt targeted Hermes with the same model — no substitute.
+    // Every attempt targeted the Hermes endpoint — primary then the
+    // explicitly configured fallback model (no hidden substitute anywhere).
     expect(fetchCalls.length).toBeGreaterThan(0);
     for (const c of fetchCalls) {
       expect(c.url).toBe(HERMES_ENDPOINT);
-      expect(c.body?.model).toBe("hermes-agent");
     }
+    const models = fetchCalls.map((c) => c.body?.model);
+    expect(models).toContain("hermes-agent");
+    expect(models).toContain("fallback-voice-model");
     const rows = await usageFor(messageId);
-    expect(rows.some((r) => r.fallbackUsed)).toBe(false);
+    expect(rows.some((r) => r.fallbackUsed)).toBe(true);
     expect(outboundTexts()).toEqual([]);
   });
 
