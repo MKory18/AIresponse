@@ -36,6 +36,8 @@ export const DOMAIN_EVENTS = [
   "OrderCancelled",
   "OrderDuplicateDetected",
   "OrderStateChanged",
+  // P12 — الطلب انربط بالـ OMS يدويًا (مش تحديث حالة — ما بيشغّل محفّزات الحالة).
+  "OrderOmsLinked",
 ] as const;
 
 export type DomainEventName = (typeof DOMAIN_EVENTS)[number];

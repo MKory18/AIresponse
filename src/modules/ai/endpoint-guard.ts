@@ -100,6 +100,42 @@ function ipv4Blocked(o: number[]): boolean {
   return false;
 }
 
+/** يوسّع IPv6 لثمان مجموعات 16 بت (يدعم «::» والذيل العشري a.b.c.d). */
+function expandIPv6(host: string): number[] | null {
+  let h = host.toLowerCase();
+  const dotted = h.match(/^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) {
+    const parts = dotted[2].split(".").map(Number);
+    if (parts.some((p) => p > 255)) return null;
+    h = `${dotted[1]}${((parts[0] << 8) | parts[1]).toString(16)}:${((parts[2] << 8) | parts[3]).toString(16)}`;
+  }
+  const halves = h.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null;
+  const groups = [...head, ...Array(fill).fill("0"), ...tail];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+
+/**
+ * IPv4 مضمّن بعنوان IPv6 — المحلّل (WHATWG URL) بيكتب ::ffff:127.0.0.1
+ * بالشكل الست عشري ::ffff:7f00:1، فالفحص بالشكل العشري لحاله كان بيفوّته:
+ * mapped (::ffff:a.b.c.d) · translated (::ffff:0:a.b.c.d) · 6to4 (2002:AABB:CCDD::).
+ * compatible (::a.b.c.d — مهجور) = محجوب دايمًا.
+ */
+function embeddedIPv4(g: number[]): { v4: number[]; alwaysBlocked: boolean } | null {
+  const tail = (hi: number, lo: number) => [hi >> 8, hi & 255, lo >> 8, lo & 255];
+  const zero = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
+  if (zero(0, 5) && g[5] === 0xffff) return { v4: tail(g[6], g[7]), alwaysBlocked: false };
+  if (zero(0, 4) && g[4] === 0xffff && g[5] === 0) return { v4: tail(g[6], g[7]), alwaysBlocked: false };
+  if (zero(0, 6)) return { v4: tail(g[6], g[7]), alwaysBlocked: true };
+  if (g[0] === 0x2002) return { v4: tail(g[1], g[2]), alwaysBlocked: false };
+  return null;
+}
+
 function ipv6Blocked(host: string): boolean {
   // host arrives without brackets, lowercased, zone id stripped.
   if (host === "::1" || host === "::") return true;
@@ -111,6 +147,11 @@ function ipv6Blocked(host: string): boolean {
     const v4 = normalizeIPv4(mapped[1]);
     return !v4 || ipv4Blocked(v4);
   }
+  // P12: نفس الفحص بكل أشكال IPv4 المضمّن (ست عشري · translated · 6to4).
+  const groups = expandIPv6(low);
+  if (!groups) return true; // شكل غير مفهوم = محجوب (fail-closed)
+  const embedded = embeddedIPv4(groups);
+  if (embedded) return embedded.alwaysBlocked || ipv4Blocked(embedded.v4);
   if (low.startsWith("fe80:")) return true; // link-local
   if (low.startsWith("fc") || low.startsWith("fd")) return true; // unique-local
   if (low.startsWith("ff")) return true; // multicast

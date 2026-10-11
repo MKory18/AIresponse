@@ -21,6 +21,29 @@ export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean 
   return ORDER_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+/**
+ * P12 — هل الحالة الهدف قابلة للوصول للأمام عبر انتقالات صالحة؟
+ * الـ OMS الحقيقي لا يرسل «قيد التجهيز»: يقفز من مؤكد إلى مشحون ثم مُسلَّم.
+ * بعد الترحيل الـ OMS هو المالك، فالمرآة المحلية تتقدم للأمام عبر المسار
+ * الصالح (مؤكد ← تجهيز ← بالتوصيل) — ولا ترجع للخلف أبدًا (لا مسار خلفي).
+ */
+export function canReachOrderStatus(from: OrderStatus, to: OrderStatus): boolean {
+  if (from === to) return false;
+  const seen = new Set<OrderStatus>([from]);
+  const queue: OrderStatus[] = [from];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const next of ORDER_TRANSITIONS[cur] ?? []) {
+      if (next === to) return true;
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return false;
+}
+
 export function assertOrderTransition(from: OrderStatus, to: OrderStatus): void {
   if (!canTransitionOrder(from, to)) {
     throw new AppError(

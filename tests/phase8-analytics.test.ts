@@ -44,7 +44,9 @@ describe("Phase 8 — time ranges & timezone", () => {
     expect(offset).toBe(180);
     const damascusDay = resolveRange({ range: "today", timezone: "Asia/Damascus" });
     // The damascus day start must be wall-clock midnight in Damascus.
-    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Damascus", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    // hourCycle h23 (مش hour12:false): على Node 20 (بيئة CI والإنتاج) hour12:false
+    // بيطبع منتصف الليل «24:00:00» — h23 ثابتة «00:00:00» بكل الإصدارات.
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Damascus", hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     expect(fmt.format(damascusDay.start)).toBe("00:00:00");
     expect(fmt.format(new Date(damascusDay.start.getTime() - 60_000))).not.toBe("00:00:00");
   });

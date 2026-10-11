@@ -413,7 +413,14 @@ export async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<s
         provider: "facebook",
         type: "TEXT",
         text: (m.text as string) ?? null,
-        metadata: { channelAccountId: m.channelAccountId, attachments: m.attachments ?? [] },
+        metadata: {
+          channelAccountId: m.channelAccountId,
+          attachments: m.attachments ?? [],
+          // P12: كانت الإحالة تسقط هنا فلا يُلتقط أي إعلان ماسنجر بالمسار الحي —
+          // ref (P8) والإحالة الكاملة برقم الإعلان تمرّان الآن للمعالج.
+          adRef: (m.adRef as string | null | undefined) ?? null,
+          ...(m.referral ? { referral: m.referral } : {}),
+        },
         sentAt: m.timestamp ? new Date(m.timestamp as string) : undefined,
       });
       processed += 1;
@@ -425,6 +432,17 @@ export async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<s
         { webhookEventId, workspaceId, error: err instanceof Error ? err.message : String(err) },
         "webhook_message_failed"
       );
+    }
+  }
+
+  // P12: إحالات بلا رسالة → لمسات إسناد (أفضل جهد — لا تفشل الدفعة).
+  const signals = (payload.referralSignals as Array<Record<string, unknown>> | undefined) ?? [];
+  if (signals.length > 0) {
+    try {
+      const { captureReferralSignals } = await import("@/modules/integrations/referral-signals");
+      await captureReferralSignals(db as never, { workspaceId, channelType: "FACEBOOK", signals });
+    } catch (err) {
+      log.warn({ webhookEventId, error: err instanceof Error ? err.message : String(err) }, "referral_signals_failed");
     }
   }
 
@@ -493,6 +511,24 @@ async function handleCampaignTick(db: HandlerDb, payload: Record<string, unknown
   return { success: true };
 }
 
+/** handoff_order_to_oms: P12 — ترحيل تلقائي بعد التأكيد (نفس مفتاح عدم التكرار). */
+async function handleHandoffOrderToOms(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string }> {
+  const { handleAutoHandoffJob } = await import("@/modules/oms/auto-handoff");
+  return handleAutoHandoffJob(db as never, payload, workspaceId);
+}
+
+/** validate_attribution_code: P12 — تحقق رمز الكليبر ثم conversation.coded. */
+async function handleValidateAttributionCode(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const { validateCodeTouch } = await import("@/modules/integrations/clipper");
+  return validateCodeTouch(db as never, String(payload.touchId ?? ""));
+}
+
+/** refresh_product_compliance: P12 — إعادة قراءة قواعد الادعاءات من سيستم 1. */
+async function handleRefreshProductCompliance(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string }> {
+  const { refreshComplianceJob } = await import("@/modules/integrations/compliance");
+  return refreshComplianceJob(db as never, workspaceId, payload);
+}
+
 export function getJobHandlers(): Record<string, JobHandler> {
   return {
     process_knowledge_document: (payload) => handleProcessDocument(getDb(), payload),
@@ -510,6 +546,11 @@ export function getJobHandlers(): Record<string, JobHandler> {
     resume_workflow_executions: () => handleResumeWorkflowExecutions(getDb()),
     run_campaign: (payload) => handleRunCampaign(getDb(), payload),
     campaign_tick: (payload) => handleCampaignTick(getDb(), payload),
+    handoff_order_to_oms: (payload, jobId, workspaceId) =>
+      handleHandoffOrderToOms(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),
+    validate_attribution_code: (payload) => handleValidateAttributionCode(getDb(), payload),
+    refresh_product_compliance: (payload, jobId, workspaceId) =>
+      handleRefreshProductCompliance(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),
   };
 }
 

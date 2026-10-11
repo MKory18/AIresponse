@@ -73,9 +73,43 @@ function conditionToWhere(c: SegmentCondition, now: Date): Prisma.CustomerWhereI
       // مقارنة أعمدة (آخر رسالة موظف بعد آخر رسالة عميل) غير مدعومة في
       // Prisma where — تُطبق حتميًا بعد الجلب (post-filter bounded).
       return {};
+    case "attribution.code": {
+      // P12 — لمسة رمز (غير مرفوض) خلال النافذة [now-maxDays, now-minDays].
+      const touch: Record<string, unknown> = {
+        kind: "CODE",
+        codeStatus: { in: ["VALID", "UNVERIFIED"] },
+        occurredAt: { gte: daysBoundary(Math.max(c.maxDays, c.minDays), now), lte: daysBoundary(c.minDays, now) },
+      };
+      if (c.op === "EQ" && c.value) touch.refCode = c.value;
+      if (c.op === "PREFIX" && c.value) touch.refCode = { startsWith: c.value };
+      if (c.productCode) touch.codeProductCode = c.productCode;
+      return { attributionTouches: { some: touch } } as Prisma.CustomerWhereInput;
+    }
+    case "orders.noneWithinDays":
+      return { orders: { none: { createdAt: { gte: daysBoundary(c.days, now) } } } };
+    case "orders.statusBetweenDays":
+      return {
+        orders: {
+          some: {
+            status: { in: c.value as never },
+            updatedAt: { gte: daysBoundary(Math.max(c.maxDays, c.minDays), now), lte: daysBoundary(c.minDays, now) },
+            ...(c.productId ? { items: { some: { productId: c.productId } } } : {}),
+          },
+        },
+      };
+    case "campaign.notReceivedWithinDays":
+      // لا علاقة Customer↔CampaignRecipient بالمخطط — يُطبق كاستبعاد حتمي
+      // بعد الجلب (FREQUENCY_CAP) على المرشحين فقط.
+      return {};
     default:
       throw new AppError("شرط شريحة غير مدعوم", 422, "INVALID_SEGMENT");
   }
+}
+
+/** P12 — سقف التكرار المعرّف بالشريحة (null = بلا سقف). */
+export function frequencyCapDays(definition: SegmentDefinition): number | null {
+  const caps = definition.conditions.filter((c) => c.field === "campaign.notReceivedWithinDays") as Array<{ days: number }>;
+  return caps.length ? Math.max(...caps.map((c) => c.days)) : null;
 }
 
 function conditionsToWhere(definition: SegmentDefinition, now: Date): Prisma.CustomerWhereInput {
@@ -157,6 +191,19 @@ export async function evaluateSegment(
     contactByCustomer.set(i.customerId, set);
   }
 
+  // P12 — سقف التكرار: من وصلته رسالة حملة خلال المدة يُستبعد بسبب مسمى.
+  const capDays = frequencyCapDays(definition);
+  const capped = new Set<string>();
+  if (capDays && ids.length) {
+    const recent = (await (db as unknown as {
+      campaignRecipient: { findMany: (a: unknown) => Promise<Array<{ customerId: string }>> };
+    }).campaignRecipient.findMany({
+      where: { workspaceId: input.workspaceId, customerId: { in: ids }, status: "SENT", sentAt: { gte: daysBoundary(capDays, now) } },
+      select: { customerId: true },
+    })) as Array<{ customerId: string }>;
+    for (const r of recent) capped.add(r.customerId);
+  }
+
   const byReason = {} as Record<ExclusionReason, number>;
   const byChannel: Record<string, number> = {};
   const eligible: Array<Record<string, unknown>> = [];
@@ -167,6 +214,7 @@ export async function evaluateSegment(
     if (c.isBlacklisted === true) reason = "BLACKLISTED";
     else if (c.marketingOptOutAt || c.marketingConsent === "OPTED_OUT") reason = "OPTED_OUT";
     else if (c.marketingConsent !== "OPTED_IN") reason = "NO_CONSENT";
+    else if (capped.has(String(c.id))) reason = "FREQUENCY_CAP";
     else if (input.channelType && !(contactByCustomer.get(String(c.id)) ?? new Set()).has(input.channelType)) {
       reason = "NO_CHANNEL_CONTACT";
     }

@@ -12,6 +12,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
+import { ComplianceCard } from "@/components/products/compliance-card";
 
 type MediaAsset = { id: string; url: string; type: string; title: string | null; category: string };
 type Faq = { id: string; question: string; answer: string; isActive: boolean };
@@ -47,6 +48,7 @@ const TABS = [
   { key: "content", label: "المحتوى البيعي" },
   { key: "media", label: "الوسائط" },
   { key: "faqs", label: "الأسئلة الشائعة" },
+  { key: "compliance", label: "الامتثال" },
 ];
 
 export default function ProductDetailPage() {
@@ -458,6 +460,9 @@ export default function ProductDetailPage() {
             </details>
           </GlassCard>
         )}
+
+        {/* P12 — قواعد الادعاءات من سيستم 1 */}
+        {tab === "compliance" && <ComplianceCard productId={product.id} />}
 
         {/* FAQs */}
         {tab === "faqs" && (

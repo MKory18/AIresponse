@@ -20,6 +20,25 @@ export interface NormalizedInboundMessage {
   rawEventId: string;
   /** P8 — مصدر إحالة موثوق من Meta (referral/postback ref) إن وُجد. */
   adRef?: string | null;
+  /** P12 — الإحالة كاملة (رقم الإعلان من «انقر للمراسلة» أو ref رابط m.me). */
+  referral?: FacebookReferral | null;
+}
+
+/** P12 — إحالة ماسنجر/إنستغرام مطبّعة (ad_id للإعلان · ref لرابط الرمز). */
+export interface FacebookReferral {
+  source: "fb_referral" | "fb_ref_link" | "ig_referral" | "ig_ref_link";
+  adId: string | null;
+  adSourceType: string | null;
+  ref: string | null;
+  pageId: string | null;
+}
+
+/** P12 — إحالة بلا رسالة (messaging_referrals لمحادثة قائمة). */
+export interface FacebookReferralSignal {
+  psid: string;
+  referral: FacebookReferral;
+  timestamp: Date;
+  eventKey: string;
 }
 
 export interface FacebookPageRef {

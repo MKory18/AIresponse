@@ -3,7 +3,8 @@ import { AppError, NotFoundError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { enqueueJob } from "@/modules/jobs/service";
 import { dispatchOutbound } from "@/modules/channels/outbound";
-import { evaluateSegment } from "./segment-service";
+import { evaluateSegment, frequencyCapDays } from "./segment-service";
+import { segmentDefinitionSchema } from "./segment-schemas";
 import { campaignRequiresTemplate, checkRecipientEligibility } from "./eligibility";
 import { CAMPAIGN_BATCH_MAX, CAMPAIGN_MAX_ATTEMPTS } from "./campaign-schemas";
 
@@ -14,6 +15,16 @@ import { CAMPAIGN_BATCH_MAX, CAMPAIGN_MAX_ATTEMPTS } from "./campaign-schemas";
  * محفوظة على صف الحملة نفسها. كل إرسال يمر عبر dispatchOutbound القائم
  * (idempotency + سياسات + تصنيف عابر/دائم) مع إعادة تحقق أهلية المستلم.
  */
+
+/** P12 — نتيجة مؤقتة لحملة نظام خارجي (الكليبر) عند الانتهاء/الإلغاء/الفشل. */
+async function notifyExternalOutcome(db: Db, campaignId: string) {
+  try {
+    const { emitRetargetResult } = await import("@/modules/integrations/clipper");
+    await emitRetargetResult(db, campaignId, false);
+  } catch {
+    /* best-effort — لا يوقف دورة الحملة */
+  }
+}
 
 async function addEvent(
   db: Db,
@@ -39,6 +50,7 @@ export async function startCampaignRun(db: Db, campaignId: string): Promise<{ st
     await db.campaign.update({ where: { id: campaignId }, data: { status: "FAILED", failReason: reason } as never });
     await addEvent(db, ws, campaignId, "POLICY_BLOCKED", { reason });
     await recordAudit(db, { workspaceId: ws, action: "campaign.start_blocked", entityType: "Campaign", entityId: campaignId, metadata: { reason } });
+    await notifyExternalOutcome(db, campaignId);
     return { started: false, reason };
   };
 
@@ -127,6 +139,7 @@ export async function campaignTick(db: Db, campaignId: string, seq: number): Pro
         data: { status: "CANCELLED" } as never,
       });
       await addEvent(db, ws, campaignId, "CANCELLED", { reason: campaign.cancelReason ?? null });
+      await notifyExternalOutcome(db, campaignId);
     }
     await finalizeIfDone(db, campaignId);
     return { done: true, sent: 0 };
@@ -164,6 +177,10 @@ export async function campaignTick(db: Db, campaignId: string, seq: number): Pro
   // القناة مرة واحدة لكل دفعة (تتحقق حيًا — الإيقاف الفوري عند انقطاعها).
   const requireTemplate = campaignRequiresTemplate(campaign.channelType);
   let sentCount = 0;
+  // P12 — سقف التكرار من تعريف الشريحة (يُعاد فحصه لكل مستلم لحظة الإرسال).
+  const segmentRow = await db.audienceSegment.findUnique({ where: { id: campaign.segmentId } });
+  const parsedDef = segmentDefinitionSchema.safeParse(segmentRow?.definition);
+  const capDays = parsedDef.success ? frequencyCapDays(parsedDef.data) : null;
 
   for (const r of pending) {
     // إعادة قراءة الحالة قبل كل إرسال (إيقاف فوري بين مستلم وآخر).
@@ -176,6 +193,8 @@ export async function campaignTick(db: Db, campaignId: string, seq: number): Pro
       channelType: campaign.channelType,
       channelId: campaign.channelId,
       requireTemplate,
+      frequencyCapDays: capDays,
+      recipientId: r.id,
     });
     if (!check.ok) {
       await (db as unknown as {
@@ -359,6 +378,7 @@ async function finalizeIfDone(db: Db, campaignId: string) {
       entityId: campaignId,
       metadata: {},
     });
+    await notifyExternalOutcome(db, campaignId);
   }
 }
 

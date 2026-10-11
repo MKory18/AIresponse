@@ -93,6 +93,9 @@ export function verifyPayload(token: string, maxAgeSeconds?: number): Record<str
   }
   const expectedSig = crypto.createHmac("sha256", key).update(data).digest();
   const providedSig = Buffer.from(encodedSig, "base64url");
+  // P12: ترميز قانوني فقط — فك base64url متسامح (آخر حرف بأكتر من شكل بيعطي
+  // نفس البايتات)، فنفس التوكن كان يقبل أكتر من كتابة (تلاعب بالتوقيع).
+  if (data.toString("base64url") !== encodedData || providedSig.toString("base64url") !== encodedSig) return null;
   if (providedSig.length !== expectedSig.length) return null;
   if (!crypto.timingSafeEqual(providedSig, expectedSig)) return null;
   let payload: Record<string, unknown>;

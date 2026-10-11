@@ -53,6 +53,9 @@ model Workspace {
   timezone                    String   @default("UTC")
   slaFirstResponseMinutes     Int?
   slaHandoffResolutionMinutes Int?
+  // P12 — إعدادات الربط العامة (حدود إنذار القدرة · نوافذ الإسناد …) —
+  // مفاتيح مسماة تُقرأ عبر integrations/settings.ts بقيم افتراضية آمنة.
+  integrationSettings         Json     @default("{}")
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
 
@@ -80,6 +83,14 @@ model Workspace {
   WorkspaceUsage          WorkspaceUsage[]
   DailyWorkspaceAnalytics DailyWorkspaceAnalytics[]
   omsConnection           OmsConnection?
+  // P12 — الربط مع منظومة Zaki وباب الوكلاء
+  integrationConnections  IntegrationConnection[]
+  integrationTokens       IntegrationToken[]
+  integrationDeliveries   IntegrationDelivery[]
+  attributionTouches      AttributionTouch[]
+  agentDrafts             AgentDraft[]
+  agentCallLogs           AgentCallLog[]
+  productCompliances      ProductCompliance[]
 
   @@index([slug])
 }
@@ -142,6 +153,8 @@ model Channel {
   externalId  String?
   // Page-level AI persona assignment (null → workspace default persona).
   aiPersonaId String?
+  // P12: سوق القناة (SY · JO) — فلتر «market» بباب الوكلاء. null = غير محدد.
+  market      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -220,6 +233,9 @@ model Customer {
   marketingConsent  MarketingConsent @default(UNKNOWN)
   marketingOptOutAt DateTime?
   marketingConsentAt DateTime?
+  // P12 — من سجّل الموافقة/الإلغاء: AGENT · CUSTOMER_KEYWORD · IMPORT
+  // (مصدر مسمى فقط — بلا نص حر من العميل).
+  marketingConsentSource String?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -229,6 +245,7 @@ model Customer {
   memories      CustomerMemory[]
   feedbacks     Feedback[]
   identities    ChannelIdentity[]
+  attributionTouches AttributionTouch[]
 
   @@unique([workspaceId, phone])
   @@unique([workspaceId, channelCustomerId])
@@ -440,6 +457,8 @@ model Product {
   discountCap      Decimal?    @db.Decimal(12, 2)
   offers           Json        @default("[]")
   complementarySkus String[]   @default([])
+  // P12 — مرجع المنتج بسيستم 1 (مثل pf_2031) لقراءة قواعد الادعاءات.
+  s1ProductRef     String?
   isActive         Boolean     @default(true)
   isArchived       Boolean     @default(false)
   createdAt        DateTime    @default(now())
@@ -452,6 +471,7 @@ model Product {
   faqs       Faq[]
   feedbacks  Feedback[]
   MediaAsset MediaAsset[]
+  compliance ProductCompliance?
 
   @@unique([workspaceId, sku])
   @@index([workspaceId, isActive])
@@ -865,6 +885,25 @@ model Order {
   omsStatusAt        DateTime?
   handedOffAt        DateTime?
   adSource           String?
+  // P12 — رقم الطلب كما يظهر بالـ OMS (الربط اليدوي ومطابقة أحداثه بالرقم)
+  // وطريقة الترحيل: api · manual.
+  omsOrderNumber     String?
+  handoffMode        String?
+  // P12 — الإسناد لحظة إنشاء الطلب (لقطة ثابتة — لا تتغير بعدها):
+  // channel: whatsapp · messenger · instagram · telegram · tiktok · web
+  // attributionMethod: AD · CODE · NONE — «بداية المحادثة بتحكم».
+  // ctwaClidEnc/psidEnc مشفّرة بنفس تشفير أسرار القنوات ولا تظهر بأي شاشة.
+  channel            String?
+  attributionMethod  String?
+  adId               String?
+  adSourceType       String?
+  ctwaClidEnc        String?
+  refCode            String?
+  refCodeAt          DateTime?
+  touchAt            DateTime?
+  pageRef            String?
+  psidEnc            String?
+  wabaId             String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -876,6 +915,8 @@ model Order {
   @@unique([workspaceId, orderNumber])
   @@index([workspaceId, status])
   @@index([workspaceId, customerId, createdAt])
+  @@index([workspaceId, omsOrderNumber])
+  @@index([workspaceId, refCode])
 }
 
 // اتصال الـ OMS لكل مستأجر — التوكن مشفّر بنفس آلية أسرار القنوات (AES-256-GCM)
@@ -887,6 +928,21 @@ model OmsConnection {
   isActive           Boolean  @default(true)
   lastProductSyncAt  DateTime?
   lastCustomerSyncAt DateTime?
+  // P12 — طريقة الترحيل: api (باب الـ OMS) · manual (نسخ لشاشة إدخال الطلب
+  // بالذكاء بالـ OMS ثم ربط رقمه). الصفوف القديمة تبقى api/legacy كما كانت.
+  mode               String   @default("api")
+  // لهجة الـ API: legacy (النقاط المؤقتة /oms/*) · v1 (عقد /api/v1 الموحّد).
+  apiVersion         String   @default("legacy")
+  // سر توقيع أحداث تطبيقات الـ OMS (zk_…) — مشفّر، منفصل عن توكن الـ API.
+  webhookSecretEncrypted String?
+  // مفتاح عام عشوائي لمسار الاستقبال /api/webhooks/oms/{key} (ليس سرًا).
+  webhookKey         String?  @unique
+  // ترحيل تلقائي عند التأكيد (وضع api فقط).
+  autoHandoff        Boolean  @default(false)
+  lastWebhookAt      DateTime?
+  lastOkAt           DateTime?
+  lastErrorAt        DateTime?
+  lastError          String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -1497,6 +1553,15 @@ model Campaign {
   failReason      String?
   lastTickSeq     Int            @default(0)
   createdBy       String
+  /// P12 — مصدر الحملة: manual · clipper · hermes. الحملات القادمة من نظام
+  /// آخر تحمل مرجعه ومفتاح عدم التكرار حتى لا تتكرر بإعادة المحاولة.
+  source          String         @default("manual")
+  externalSystem  String?
+  externalRef     String?
+  externalIdempotencyKey String?
+  /// P12 — نتائج الحملة المبلّغة للنظام صاحبها (مؤقتة ثم نهائية).
+  resultsSentAt      DateTime?
+  finalResultsSentAt DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -1506,8 +1571,10 @@ model Campaign {
   recipients     CampaignRecipient[]
   events         CampaignEvent[]
 
+  @@unique([workspaceId, externalIdempotencyKey])
   @@index([workspaceId, status])
   @@index([workspaceId, scheduledAt])
+  @@index([workspaceId, externalSystem, externalRef])
 }
 
 /// لقطة محتوى append-only: تعديل المسودة ينشئ إصدارًا جديدًا، والاعتماد
@@ -1575,4 +1642,193 @@ model CampaignEvent {
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, campaignId, type])
+}
+
+// ─────────────── P12: الربط مع منظومة Zaki وباب الوكلاء ───────────────
+
+/// لمسة إسناد واحدة (إعلان أو رمز كليبر) مسجّلة من بيانات قناة موثوقة
+/// (referral من Meta) أو رمز صريح بأول رسالة. «بداية المحادثة بتحكم»:
+/// أول لمسة بنافذتها تفتح حلقة (episodeStart) ولا تُستبدل داخلها.
+/// المعرّفات الشخصية (ctwa_clid · PSID) مشفّرة ولا تظهر بأي شاشة أو سجل.
+model AttributionTouch {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  customerId      String
+  conversationId  String
+  channel         String
+  kind            String
+  source          String
+  adId            String?
+  adSourceType    String?
+  ctwaClidEnc     String?
+  refCode         String?
+  codeStatus      String?
+  codeProductCode String?
+  codeCampaignRef String?
+  codeWindowDays  Int?
+  pageId          String?
+  psidEnc         String?
+  wabaId          String?
+  messageId       String?
+  episodeStart    Boolean  @default(false)
+  dedupeKey       String   @unique
+  occurredAt      DateTime
+  createdAt       DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer  Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, conversationId, occurredAt])
+  @@index([workspaceId, customerId, occurredAt])
+  @@index([workspaceId, refCode])
+}
+
+/// اتصال سيستم 7 بنظام آخر بالمنظومة (الميديا باير · الكليبر · المالية ·
+/// سيستم 1 · الأزمات · المهام · مساحة العمل · جسر Hermes). التوكن والسر
+/// مشفّران (AES-256-GCM) ولا يرجعان لأي شاشة أو سجل.
+model IntegrationConnection {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  system                String
+  baseUrl               String?
+  tokenEncrypted        String?
+  eventsUrl             String?
+  eventsSecretEncrypted String?
+  enabled               Boolean   @default(true)
+  settings              Json      @default("{}")
+  lastOkAt              DateTime?
+  lastErrorAt           DateTime?
+  lastError             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, system])
+}
+
+/// توكن نظام/وكيل يدخل على سيستم 7 (Bearer). يُحفظ تجزئته فقط، ويُعرض مرة
+/// واحدة عند الإنشاء. صلاحيات مسماة بأقل حد · حد طلبات · سقف مسودات ·
+/// صلاحية 90 يوم · زر إيقاف (revokedAt).
+model IntegrationToken {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  system          String
+  name            String
+  tokenHash       String    @unique
+  tokenPrefix     String
+  scopes          String[]  @default([])
+  rateLimitPerMin Int       @default(60)
+  dailyDraftCap   Int       @default(20)
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  lastUsedAt      DateTime?
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, system])
+}
+
+/// صندوق الصادر الموحّد: كل حدث موقّع أو نداء لنظام آخر يُكتب هنا أولًا ثم
+/// يرسله العامل بإعادة محاولة متزايدة — الحدث لا يضيع إذا النظام التاني واقف،
+/// ولا يُرسل مرتين (dedupeKey + Idempotency-Key).
+model IntegrationDelivery {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  system         String
+  kind           String
+  eventId        String?
+  type           String
+  method         String    @default("POST")
+  url            String
+  body           String
+  idempotencyKey String?
+  dedupeKey      String    @unique
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime?
+  responseCode   Int?
+  error          String?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, system, createdAt])
+}
+
+/// مسودة من وكيل (Hermes) أو نظام: بطابور المراجعة ولا أثر لها قبل الاعتماد.
+model AgentDraft {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  tokenId        String?
+  source         String
+  kind           String
+  title          String
+  payload        Json      @default("{}")
+  status         String    @default("PENDING")
+  idempotencyKey String?
+  resultRef      String?
+  decidedBy      String?
+  decidedAt      DateTime?
+  decisionNote   String?
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, createdAt])
+  @@index([tokenId, createdAt])
+}
+
+/// سجل نداءات باب الوكلاء: مين · أي أداة · النتيجة · الوقت (بلا مدخلات حرة).
+model AgentCallLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  tokenId     String?
+  tool        String
+  risk        String
+  status      String
+  errorCode   String?
+  requestId   String?
+  agentRef    String?
+  dryRun      Boolean  @default(false)
+  latencyMs   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([tokenId, createdAt])
+}
+
+/// نسخة قواعد الادعاءات من سيستم 1 لكل منتج — مصدرها سيستم 1 فقط،
+/// وتُعاد قراءتها مع compliance.updated وقبل أي استخدام إذا قديمة.
+model ProductCompliance {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  productId       String    @unique
+  productRef      String
+  classification  String?
+  verdict         String?
+  allowedClaims   String[]  @default([])
+  bannedClaims    String[]  @default([])
+  adRules         String[]  @default([])
+  sourceUpdatedAt DateTime?
+  fetchedAt       DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }

@@ -27,6 +27,7 @@ function matchesCondition(value: any, cond: any): boolean {
     if (op === "lt") { result = result && value < arg; continue; }
     if (op === "lte") { result = result && value <= arg; continue; }
     if (op === "equals") { result = result && value === arg; continue; }
+    if (op === "startsWith") { result = result && typeof value === "string" && value.startsWith(String(arg)); continue; }
     if (op === "in") { result = result && arg.includes(value); continue; }
     if (op === "notIn") { result = result && !arg.includes(value); continue; }
     if (op === "hasSome") { result = result && (Array.isArray(value) ? value : []).some((v) => arg.includes(v)); continue; }
@@ -64,7 +65,7 @@ function matchesWhere(row: Row, where: Row | undefined): boolean {
       if ("some" in (cond as Row) && !related.some((r) => matchesWhere(r, (cond as Row).some))) return false;
       if ("none" in (cond as Row) && related.some((r) => matchesWhere(r, (cond as Row).none))) return false;
     } else if (cond && typeof cond === "object" && !Array.isArray(cond) && !(cond instanceof Date)) {
-      const ops = new Set(["contains", "not", "in", "notIn", "gt", "gte", "lt", "lte", "equals", "mode"]);
+      const ops = new Set(["contains", "not", "in", "notIn", "gt", "gte", "lt", "lte", "equals", "mode", "startsWith"]);
       if (Object.keys(cond as Row).every((k) => ops.has(k))) {
         if (!matchesCondition(row[key], cond)) return false;
       } else {
@@ -124,14 +125,20 @@ const cloneRow = (r: Row): Row => JSON.parse(JSON.stringify(r));
 // Relation attachment for where-filter evaluation (Prisma relation filters).
 let allStores: Record<string, Row[]> | null = null;
 const RELATIONS: Record<string, Record<string, string>> = {
-  customer: { orders: "order", conversations: "conversation" },
+  customer: { orders: "order", conversations: "conversation", attributionTouches: "attributionTouch" },
   conversation: { channel: "channel" },
 };
+// العلاقات الي ربطناها نحنا (مش الي جاية من بيانات الاختبار) بتنقرأ من جديد
+// بكل استعلام — وإلا طلب انضاف بعد أول استعلام ما بيبين بفلاتر العلاقات.
+const attachedByUs = new WeakMap<Row, Set<string>>();
 function attachRelations(name: string, row: Row) {
   const rel = RELATIONS[name];
   if (!rel || !allStores) return;
   for (const key of Object.keys(rel)) {
-    if (row[key] !== undefined) continue;
+    const ours = attachedByUs.get(row);
+    if (row[key] !== undefined && !ours?.has(key)) continue;
+    if (ours) ours.add(key);
+    else attachedByUs.set(row, new Set([key]));
     if (key === "channel") {
       row[key] = (allStores.channel ?? []).find((c: Row) => c.id === row.channelId) ?? null;
     } else {
@@ -166,7 +173,11 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
     },
     async findFirst(args: any) {
       store.forEach((r) => attachRelations(name, r));
-      const row = store.find((r) => matchesWhere(r, args.where));
+      // Prisma semantics: findFirst honors orderBy (e.g. "latest episode start",
+      // "last alert"). Without orderBy the first match in insertion order (unchanged).
+      const row = args?.orderBy
+        ? sortRows(store.filter((r) => matchesWhere(r, args.where)), args.orderBy)[0]
+        : store.find((r) => matchesWhere(r, args.where));
       return row ? simulateInclude(row, args) : null;
     },
     async findUniqueOrThrow(args: any) {
@@ -207,6 +218,15 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         customer: (r, w) => w.phone != null && r.workspaceId === w.workspaceId && r.phone === w.phone,
         campaignContentVersion: (r, w) => r.campaignId === w.campaignId && r.version === w.version,
         campaignRecipient: (r, w) => r.campaignId === w.campaignId && r.customerId === w.customerId,
+        // P12 — قيود الربط مع المنظومة (مطابقة لترحيل p12_ecosystem_integrations).
+        attributionTouch: (r, w) => r.dedupeKey === w.dedupeKey,
+        integrationConnection: (r, w) => r.workspaceId === w.workspaceId && r.system === w.system,
+        integrationToken: (r, w) => r.tokenHash === w.tokenHash,
+        integrationDelivery: (r, w) => r.dedupeKey === w.dedupeKey,
+        agentDraft: (r, w) => w.idempotencyKey != null && r.workspaceId === w.workspaceId && r.idempotencyKey === w.idempotencyKey,
+        productCompliance: (r, w) => r.productId === w.productId,
+        omsConnection: (r, w) => r.workspaceId === w.workspaceId || (w.webhookKey != null && r.webhookKey === w.webhookKey),
+        campaign: (r, w) => w.externalIdempotencyKey != null && r.workspaceId === w.workspaceId && r.externalIdempotencyKey === w.externalIdempotencyKey,
       };
       const uniq = uniqMap[name];
       if (uniq) {
@@ -368,6 +388,15 @@ export function createFakeDb() {
   const campaignRecipientRows: Row[] = [];
   const campaignEventRows: Row[] = [];
   const workspaceRows: Row[] = [];
+  // P12
+  const attributionTouchRows: Row[] = [];
+  const integrationConnectionRows: Row[] = [];
+  const integrationTokenRows: Row[] = [];
+  const integrationDeliveryRows: Row[] = [];
+  const agentDraftRows: Row[] = [];
+  const agentCallLogRows: Row[] = [];
+  const productComplianceRows: Row[] = [];
+  const omsConnectionRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -383,6 +412,14 @@ export function createFakeDb() {
       campaignContentVersion: campaignContentVersionRows, campaignRecipient: campaignRecipientRows,
       campaignEvent: campaignEventRows,
       workspace: workspaceRows,
+      attributionTouch: attributionTouchRows,
+      integrationConnection: integrationConnectionRows,
+      integrationToken: integrationTokenRows,
+      integrationDelivery: integrationDeliveryRows,
+      agentDraft: agentDraftRows,
+      agentCallLog: agentCallLogRows,
+      productCompliance: productComplianceRows,
+      omsConnection: omsConnectionRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -424,12 +461,21 @@ export function createFakeDb() {
     deliveryRule: makeModel("deliveryRule", deliveryRuleRows, { fee: 0, isAvailable: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     salesEvent: makeModel("salesEvent", salesEventRows, { payload: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     audienceSegment: makeModel("audienceSegment", audienceSegmentRows, { description: null, isActive: true, tags: [], isArchived: false, isApproved: false, deletedAt: null }),
-    campaign: makeModel("campaign", campaignRows, { description: null, channelId: null, scheduledAt: null, timezone: "UTC", endsAt: null, ratePerMinute: 30, windowStartAt: null, sentInWindow: 0, contentVersionId: null, approvedBy: null, approvedAt: null, approvalAudienceHash: null, startedAt: null, completedAt: null, cancelledAt: null, cancelReason: null, failReason: null, lastTickSeq: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    campaign: makeModel("campaign", campaignRows, { description: null, channelId: null, scheduledAt: null, timezone: "UTC", endsAt: null, ratePerMinute: 30, windowStartAt: null, sentInWindow: 0, contentVersionId: null, approvedBy: null, approvedAt: null, approvalAudienceHash: null, startedAt: null, completedAt: null, cancelledAt: null, cancelReason: null, failReason: null, lastTickSeq: 0, source: "manual", externalSystem: null, externalRef: null, externalIdempotencyKey: null, resultsSentAt: null, finalResultsSentAt: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     campaignContentVersion: makeModel("campaignContentVersion", campaignContentVersionRows, { templateName: null, templateLanguage: null, templateVariables: {}, status: "DRAFT", approvedBy: null, approvedAt: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     campaignRecipient: makeModel("campaignRecipient", campaignRecipientRows, { conversationId: null, excludeReason: null, messageId: null, attempts: 0, lastError: null, errorCategory: null, sentAt: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     campaignEvent: makeModel("campaignEvent", campaignEventRows, { actorUserId: null, reason: null, count: 0, payload: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     discountApproval: makeModel("discountApproval", discountApprovalRows, { status: "PENDING", currency: "USD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    workspace: makeModel("workspace", workspaceRows, { plan: "FREE", timezone: "UTC", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    workspace: makeModel("workspace", workspaceRows, { plan: "FREE", timezone: "UTC", integrationSettings: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    // P12 — نماذج الربط مع المنظومة وباب الوكلاء.
+    attributionTouch: makeModel("attributionTouch", attributionTouchRows, { episodeStart: false, adId: null, adSourceType: null, ctwaClidEnc: null, refCode: null, codeStatus: null, codeProductCode: null, codeCampaignRef: null, codeWindowDays: null, pageId: null, psidEnc: null, wabaId: null, messageId: null }),
+    integrationConnection: makeModel("integrationConnection", integrationConnectionRows, { baseUrl: null, tokenEncrypted: null, eventsUrl: null, eventsSecretEncrypted: null, enabled: true, settings: {}, lastOkAt: null, lastErrorAt: null, lastError: null }),
+    integrationToken: makeModel("integrationToken", integrationTokenRows, { scopes: [], rateLimitPerMin: 60, dailyDraftCap: 20, expiresAt: null, revokedAt: null, lastUsedAt: null }),
+    integrationDelivery: makeModel("integrationDelivery", integrationDeliveryRows, { method: "POST", eventId: null, idempotencyKey: null, status: "PENDING", attempts: 0, nextAttemptAt: null, responseCode: null, error: null, deliveredAt: null }),
+    agentDraft: makeModel("agentDraft", agentDraftRows, { tokenId: null, payload: {}, status: "PENDING", idempotencyKey: null, resultRef: null, decidedBy: null, decidedAt: null, decisionNote: null, expiresAt: null }),
+    agentCallLog: makeModel("agentCallLog", agentCallLogRows, { tokenId: null, errorCode: null, requestId: null, agentRef: null, dryRun: false, latencyMs: 0 }),
+    productCompliance: makeModel("productCompliance", productComplianceRows, { classification: null, verdict: null, allowedClaims: [], bannedClaims: [], adRules: [], sourceUpdatedAt: null, fetchedAt: null, lastError: null }),
+    omsConnection: makeModel("omsConnection", omsConnectionRows, { isActive: true, lastProductSyncAt: null, lastCustomerSyncAt: null, mode: "api", apiVersion: "legacy", webhookSecretEncrypted: null, webhookKey: null, autoHandoff: false, lastWebhookAt: null, lastOkAt: null, lastErrorAt: null, lastError: null }),
   };
 
   const conversationModel = db.conversation as any;

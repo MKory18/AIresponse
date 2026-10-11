@@ -7,6 +7,7 @@ import { Badge, StatusBadge } from "../ui/badge";
 import { GlassCard } from "../ui/card";
 import { EmptyState } from "../ui/empty-state";
 import { CHANNEL_LABELS, type CustomerDetail, type DraftInfo } from "./types";
+import { MarketingCard } from "./marketing-card";
 
 export function CustomerPanel({
   customer,
@@ -88,6 +89,9 @@ export function CustomerPanel({
           </div>
         )}
       </GlassCard>
+
+      {/* P12 — موافقة الرسائل التسويقية ومصدر الزبون */}
+      <MarketingCard customerId={customer.id} />
 
       {/* Orders */}
       <GlassCard level="glass-subtle" className="p-3.5">

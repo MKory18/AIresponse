@@ -18,6 +18,18 @@ export interface WhatsAppInboundMessage {
   mediaUrl?: string | null;
   timestamp: Date;
   rawEventId: string;
+  /**
+   * P12 — إحالة إعلان «انقر للمراسلة» (Click-to-WhatsApp) من أول رسالة:
+   * source_id = رقم الإعلان · ctwa_clid = رمز النقرة (للتحويلات فقط) ·
+   * wabaId = حساب واتساب للأعمال (entry.id).
+   */
+  referral?: {
+    source: "wa_referral";
+    adId: string | null;
+    adSourceType: string | null;
+    ctwaClid: string | null;
+    wabaId: string | null;
+  } | null;
 }
 
 /** Same app-secret HMAC scheme as the Meta family. */
@@ -40,8 +52,9 @@ function mediaKind(type: string | undefined): WhatsAppInboundMessage["mediaType"
 
 export function normalizeWhatsAppWebhook(payload: unknown, rawEventId: string): WhatsAppInboundMessage[] {
   const out: WhatsAppInboundMessage[] = [];
-  const entries = (payload as { entry?: { changes?: { field?: string; value?: Record<string, unknown> }[] }[] }).entry ?? [];
+  const entries = (payload as { entry?: { id?: string; changes?: { field?: string; value?: Record<string, unknown> }[] }[] }).entry ?? [];
   for (const entry of entries) {
+    const wabaId = typeof entry.id === "string" && entry.id ? entry.id : null;
     for (const change of entry.changes ?? []) {
       if (change.field !== "messages") continue;
       const value = (change.value ?? {}) as {
@@ -56,6 +69,7 @@ export function normalizeWhatsAppWebhook(payload: unknown, rawEventId: string): 
           video?: { link?: string };
           audio?: { link?: string; voice?: boolean };
           document?: { link?: string };
+          referral?: { source_id?: string; source_type?: string; ctwa_clid?: string; source_url?: string };
         }[];
       };
       const phoneNumberId = value.metadata?.phone_number_id ?? "";
@@ -73,6 +87,17 @@ export function normalizeWhatsAppWebhook(payload: unknown, rawEventId: string): 
           mediaUrl,
           timestamp: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
           rawEventId,
+          ...(m.referral && (m.referral.source_id || m.referral.ctwa_clid)
+            ? {
+                referral: {
+                  source: "wa_referral" as const,
+                  adId: m.referral.source_id ? String(m.referral.source_id).slice(0, 64) : null,
+                  adSourceType: m.referral.source_type ? String(m.referral.source_type).slice(0, 16) : null,
+                  ctwaClid: m.referral.ctwa_clid ? String(m.referral.ctwa_clid).slice(0, 512) : null,
+                  wabaId,
+                },
+              }
+            : {}),
         });
       }
     }

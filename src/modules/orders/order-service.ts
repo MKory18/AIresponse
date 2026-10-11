@@ -213,6 +213,34 @@ export async function createOrderFromDraft(
     // sales hooks are best-effort — never break order creation
   }
 
+  // P12 — لقطة الإسناد على الطلب (رقم الإعلان · رمز الكليبر · القناة) من
+  // الحلقة الفعّالة لحظة الإنشاء، ثم ترحيل تلقائي للـ OMS إذا مفعّل بالـ API.
+  // الاتنين best-effort: فشلهم ما بيكسر طلب انحفظ (الترحيل اليدوي متاح دايمًا).
+  try {
+    const { snapshotOrderAttribution } = await import("@/modules/integrations/attribution");
+    const conv = draft.conversationId
+      ? ((await db.conversation.findUnique({ where: { id: draft.conversationId }, select: { channelId: true } })) as { channelId?: string } | null)
+      : null;
+    const channel = conv?.channelId
+      ? ((await db.channel.findUnique({ where: { id: conv.channelId }, select: { type: true } })) as { type?: string } | null)
+      : null;
+    await snapshotOrderAttribution(db, {
+      id: order.id,
+      workspaceId: ctx.workspaceId,
+      conversationId: draft.conversationId,
+      createdAt: (order as { createdAt?: Date }).createdAt ?? new Date(),
+      channelType: channel?.type ?? null,
+    });
+  } catch {
+    // الإسناد معلومة إضافية — غيابها ما بيوقف الطلب
+  }
+  try {
+    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
+    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, order.id);
+  } catch {
+    // الترحيل التلقائي بيتأجل للزر اليدوي بصفحة الطلب
+  }
+
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,
@@ -325,8 +353,21 @@ export async function listOrders(
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
   });
   const hasMore = orders.length > limit;
-  const items = hasMore ? orders.slice(0, limit) : orders;
+  const page = hasMore ? orders.slice(0, limit) : orders;
+  // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع بأي قائمة.
+  const items = page.map((o) => withoutClickSecrets(o));
   return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+}
+
+/**
+ * P12: طلب للمتصفح بلا معرّفات الإسناد المشفّرة (رمز النقرة · PSID) — كل
+ * رد API بيرجّع صف طلب لازم يمر من هون (القوائم · التفاصيل · التعديل).
+ */
+export function withoutClickSecrets<T extends object>(order: T): Omit<T, "ctwaClidEnc" | "psidEnc"> {
+  const { ctwaClidEnc: _c, psidEnc: _p, ...rest } = order as T & { ctwaClidEnc?: unknown; psidEnc?: unknown };
+  void _c;
+  void _p;
+  return rest as Omit<T, "ctwaClidEnc" | "psidEnc">;
 }
 
 // â”€â”€ Customer data merging (confidence-gated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -41,6 +41,8 @@ export interface AIContext {
     objections: string[];
     salesNotes: string | null;
     faqs: { id: string; question: string; answer: string }[];
+    /** P12 — قواعد الادعاءات من سيستم 1 (إن رُبط المنتج بمرجعه). */
+    compliance?: { allowedClaims: string[]; bannedClaims: string[]; verdict: string | null } | null;
   };
   knowledge: { faqs: { id: string; question: string; answer: string }[]; documents: { id: string; content: string; score: number }[] };
   feedback: { id: string; content: string; rating: number | null; source: string | null; mediaUrl: string | null }[];
@@ -57,6 +59,28 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
     include: { faqs: { where: { isActive: true }, take: 5 } },
   });
   if (!product || product.workspaceId !== workspaceId) throw new NotFoundError("Product");
+  // P12 — قواعد سيستم 1 (أفضل جهد: غيابها لا يوقف الرد — الحارس العام يبقى).
+  let compliance: { allowedClaims: string[]; bannedClaims: string[]; verdict: string | null } | null = null;
+  try {
+    const { getProductCompliance } = await import("@/modules/integrations/compliance");
+    // نسخة لمرجع تاني (المرجع تغيّر) ما بتنطبق — بنعاملها كأنها مش موجودة.
+    const ref = (product as { s1ProductRef?: string | null }).s1ProductRef?.trim() || null;
+    const c = await getProductCompliance(db, product.id, ref);
+    if (c) compliance = { allowedClaims: c.allowedClaims, bannedClaims: c.bannedClaims, verdict: c.verdict };
+    else if (ref) {
+      // مربوط بسيستم 1 وما في نسخة قواعد لسا: نطلب قراءة فورية بالخلفية (مرة
+      // بالساعة) — الرد الحالي بيمشي بالحارس العام لحد ما توصل القواعد.
+      const { enqueueJob } = await import("@/modules/jobs/service");
+      await enqueueJob(db, {
+        workspaceId,
+        type: "refresh_product_compliance",
+        payload: { productId: product.id },
+        idempotencyKey: `compliance-missing:${product.id}:${new Date().toISOString().slice(0, 13)}`,
+      }).catch(() => undefined);
+    }
+  } catch {
+    compliance = null;
+  }
 
   return {
     product: {
@@ -77,6 +101,7 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
       objections: product.objections,
       salesNotes: product.salesNotes,
       faqs: product.faqs.map((f) => ({ id: f.id, question: f.question, answer: f.answer })),
+      ...(compliance ? { compliance } : {}),
     } as AIContext["product"],
     citations: [
       { sourceType: "PRODUCT", sourceId: product.id } as Citation,

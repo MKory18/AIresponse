@@ -4,7 +4,10 @@ import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { createOmsClient } from "./client";
-import type { OmsOrderPayload } from "./client";
+import type { OmsApiVersion, OmsOrderPayload } from "./client";
+import { revealRef } from "@/modules/integrations/attribution";
+import { conversationRef } from "@/modules/integrations/format";
+import { checkSystemUrl } from "@/modules/integrations/connections";
 
 /**
  * Hands a CONFIRMED local order to the OMS. Idempotent at two layers:
@@ -53,6 +56,41 @@ export async function handoffOrderToOms(
   if (!conn || !conn.isActive) {
     throw new AppError("OMS connection not configured", 422, "OMS_NOT_CONFIGURED");
   }
+  // P12: وضع الترحيل اليدوي = لا نداء API (الـ OMS بلا باب استقبال بعد) —
+  // الواجهة تعرض نص الإدخال الجاهز وربط رقم الـ OMS.
+  if (conn.mode === "manual") {
+    throw new AppError("OMS handoff is in manual mode — use the OMS intake text", 409, "OMS_MANUAL_MODE");
+  }
+  // P12: فحص الرابط مع DNS عند كل ترحيل (اتصالات ما قبل P12 ما انفحصت عند
+  // الحفظ): رابط داخلي/محجوب = ولا توكن ولا بيانات زبون بتطلع. فشل حل مؤقت =
+  // OMS_UNREACHABLE (المهمة بتعيد)، والرفض الأمني نهائي لحد ما ينصلح الرابط.
+  const urlCheck = await checkSystemUrl(String(conn.baseUrl ?? ""));
+  if (!urlCheck.ok) {
+    const code = urlCheck.transient ? "OMS_UNREACHABLE" : "OMS_URL_REJECTED";
+    await (db as any).omsConnection
+      ?.update?.({ where: { workspaceId: ctx.workspaceId }, data: { lastErrorAt: new Date(), lastError: `handoff: ${code} (${urlCheck.reason})` } })
+      ?.catch?.(() => undefined);
+    throw new AppError(
+      urlCheck.transient ? "تعذر الوصول لاسم الـ OMS (DNS) — بنعيد المحاولة" : `رابط الـ OMS مرفوض (${urlCheck.reason}) — ما انبعت شي`,
+      urlCheck.transient ? 503 : 422,
+      code
+    );
+  }
+  const apiVersion: OmsApiVersion = conn.apiVersion === "v1" ? "v1" : "legacy";
+  const o = order as typeof order & {
+    channel?: string | null;
+    attributionMethod?: string | null;
+    adId?: string | null;
+    adSourceType?: string | null;
+    ctwaClidEnc?: string | null;
+    refCode?: string | null;
+    refCodeAt?: Date | string | null;
+    touchAt?: Date | string | null;
+    pageRef?: string | null;
+    psidEnc?: string | null;
+    wabaId?: string | null;
+  };
+  const isoOrNull = (v: Date | string | null | undefined) => (v ? new Date(v).toISOString() : null);
 
   const payload: OmsOrderPayload = {
     idempotencyKey: order.idempotencyKey ?? `order:${order.id}`,
@@ -80,24 +118,63 @@ export async function handoffOrderToOms(
     adSource: order.adSource ?? null,
     notes: order.notes ?? null,
     conversationId: order.conversationId ?? null,
+    channel: o.channel ?? null,
+    // P12: لقطة الإسناد (رقم الإعلان · رمز النقرة · رمز الكليبر) — الحساس
+    // يُفك تشفيره هنا لحظة الإرسال فقط ولا يُسجَّل بأي مكان.
+    attribution:
+      apiVersion === "v1"
+        ? {
+            method: (o.attributionMethod as "AD" | "CODE" | "NONE" | null) ?? "NONE",
+            adId: o.adId ?? null,
+            adSourceType: o.adSourceType ?? null,
+            ctwaClid: revealRef(o.ctwaClidEnc),
+            refCode: o.refCode ?? null,
+            refCodeAt: isoOrNull(o.refCodeAt),
+            touchAt: isoOrNull(o.touchAt),
+            pageId: o.pageRef ?? null,
+            psid: revealRef(o.psidEnc),
+            wabaId: o.wabaId ?? null,
+            conversationRef: order.conversationId ? conversationRef(order.conversationId) : null,
+          }
+        : null,
   };
 
-  const omsClient = createOmsClient({ baseUrl: conn.baseUrl, token: decryptSecret(conn.tokenEncrypted) });
+  const omsClient = createOmsClient({ baseUrl: conn.baseUrl, token: decryptSecret(conn.tokenEncrypted), apiVersion });
   // Ambiguous outcome (timeout/unreachable) → exactly one retry with the
   // SAME idempotencyKey. Definitive OMS answers are never retried.
-  let result: { id: string; status: string };
+  let result: { id: string; status: string; orderNumber?: string | null };
   try {
-    result = await omsClient.createOrder(payload);
+    try {
+      result = await omsClient.createOrder(payload);
+    } catch (err) {
+      const code = err instanceof AppError ? err.code : "";
+      if (code !== "OMS_TIMEOUT" && code !== "OMS_UNREACHABLE") throw err;
+      result = await omsClient.createOrder(payload);
+    }
   } catch (err) {
-    const code = err instanceof AppError ? err.code : "";
-    if (code !== "OMS_TIMEOUT" && code !== "OMS_UNREACHABLE") throw err;
-    result = await omsClient.createOrder(payload);
+    // P12: آخر خطأ يظهر بصفحة الربط (رمز فقط — لا بيانات زبون ولا توكن).
+    await (db as any).omsConnection
+      ?.update?.({
+        where: { workspaceId: ctx.workspaceId },
+        data: { lastErrorAt: new Date(), lastError: `handoff: ${err instanceof AppError ? err.code : "ERROR"}` },
+      })
+      ?.catch?.(() => undefined);
+    throw err;
   }
 
   await db.order.update({
     where: { id: order.id },
-    data: { omsOrderId: result.id, omsStatus: result.status, handedOffAt: new Date() },
+    data: {
+      omsOrderId: result.id,
+      omsStatus: result.status,
+      handedOffAt: new Date(),
+      handoffMode: "api",
+      ...(result.orderNumber ? { omsOrderNumber: result.orderNumber } : {}),
+    } as never,
   });
+  await (db as any).omsConnection
+    ?.update?.({ where: { workspaceId: ctx.workspaceId }, data: { lastOkAt: new Date() } })
+    ?.catch?.(() => undefined);
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,

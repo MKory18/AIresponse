@@ -2,7 +2,7 @@ import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { Db } from "@/modules/customers/service";
-import { canTransitionOrder } from "@/modules/orders/state-machine";
+import { canReachOrderStatus, canTransitionOrder } from "@/modules/orders/state-machine";
 import type { OrderStatus } from "@prisma/client";
 
 /**
@@ -45,6 +45,9 @@ export interface OmsStatusResult {
 
 const OMS_STATUS_TO_LOCAL: Record<string, OrderStatus> = {
   PROCESSING: "PROCESSING",
+  // P12 — أسماء آلة حالات الـ OMS الحقيقية (13 مرحلة) حيث يطابقها معنى محلي.
+  READY_FOR_SHIPPING: "PROCESSING",
+  REJECTED: "CANCELLED",
   SHIPPED: "OUT_FOR_DELIVERY",
   OUT_FOR_DELIVERY: "OUT_FOR_DELIVERY",
   DELIVERED: "DELIVERED",
@@ -87,7 +90,14 @@ export async function handleOmsStatusChanged(db: Db, payload: OmsStatusWebhook):
   // Tolerant parse: real drivers return Date; JSON-cloned doubles (tests)
   // may surface ISO strings. Either way we compare epoch millis.
   const lastAppliedAt = row.omsStatusAt ? new Date(row.omsStatusAt).getTime() : NaN;
-  if (eventTime && Number.isFinite(lastAppliedAt) && eventTime.getTime() <= lastAppliedAt) {
+  // حدث بنفس اللحظة تمامًا: بمعرّف تسليم مميّز (أحداث التطبيقات) هو حدث تاني
+  // مش إعادة — الإعادة بتنمسك بمفتاح التكرار فوق. بلا معرّف: نفس السلوك القديم.
+  const sameInstantIsStale = !payload.eventId?.trim();
+  if (
+    eventTime &&
+    Number.isFinite(lastAppliedAt) &&
+    (eventTime.getTime() < lastAppliedAt || (sameInstantIsStale && eventTime.getTime() === lastAppliedAt))
+  ) {
     await recordAudit(db, {
       workspaceId: order.workspaceId,
       action: "oms.status_stale_skipped",
@@ -98,8 +108,16 @@ export async function handleOmsStatusChanged(db: Db, payload: OmsStatusWebhook):
     return { orderId: order.id, appliedLocalStatus: null, duplicate: false, stale: true };
   }
 
-  const localStatus = OMS_STATUS_TO_LOCAL[payload.status];
-  const applied = Boolean(localStatus && canTransitionOrder(order.status, localStatus));
+  let localStatus = OMS_STATUS_TO_LOCAL[payload.status];
+  // P12: الـ OMS بيلغي طلب بعد الشحن (رفض استلام مثلًا) — محليًا ما في
+  // «ملغى» بعد «بالتوصيل»؛ أقرب معنى صحيح: التوصيل ما تم (FAILED)، والمرآة
+  // omsStatus بتضل CANCELLED كما قال الـ OMS.
+  if (localStatus === "CANCELLED" && order.status === "OUT_FOR_DELIVERY") localStatus = "FAILED";
+  // P12: الـ OMS الحقيقي يقفز (مؤكد ← مشحون ← مُسلَّم) — المرآة تتقدم للأمام عبر
+  // مسار صالح، ولا ترجع للخلف أبدًا.
+  const applied = Boolean(
+    localStatus && (canTransitionOrder(order.status, localStatus) || canReachOrderStatus(order.status, localStatus))
+  );
   const data: Record<string, unknown> = { omsStatus: payload.status, omsStatusAt: eventTime ?? new Date() };
   if (applied) {
     data.status = localStatus;

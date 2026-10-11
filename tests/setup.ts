@@ -5,6 +5,7 @@
 // local `.env` containing e.g. `AI_PROVIDER=openai` (no key) silently flips
 // provider-dependent tests to AI_NOT_CONFIGURED depending on import order.
 import "@/core/db/prisma";
+import { setIntegrationDnsLookup } from "@/modules/integrations/connections";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test";
@@ -39,3 +40,7 @@ for (const k of [
 ]) {
   delete process.env[k];
 }
+
+// P12 hermeticity: لا DNS حقيقي بالاختبارات — كل اسم بيتحلّ لعنوان عام ثابت
+// (الاختبارات الي بتفحص DNS بتركّب محلّلها الخاص فوق هالافتراضي).
+setIntegrationDnsLookup(async () => [{ address: "93.184.216.34", family: 4 }]);

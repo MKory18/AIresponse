@@ -1,0 +1,12 @@
+{
+  "description": "تسليم واحد موقّع حرفيًا كما يرسله deliverOne() بالـ OMS — للتحقق من التوقيع بأي لغة.",
+  "secret": "test-only-oms-app-secret",
+  "headers": {
+    "Content-Type": "application/json",
+    "X-Zaki-Event": "order.shipped",
+    "X-Zaki-Delivery": "e2c4a6b8-0d1f-4e3a-9b5c-7d9e1f3a5b7c",
+    "X-Zaki-Timestamp": "1791712093000"
+  },
+  "body_raw": "{\"event\":\"order.shipped\",\"at\":\"2026-10-11T09:48:12.000Z\",\"data\":{\"orderId\":\"8d7c2f4e-1b9a-4c3e-9f6d-2a5b7c8e9f01\",\"orderNumber\":\"SY-2026-0148\",\"shippingStatus\":\"SHIPPED\",\"previousStatus\":\"READY_FOR_PICKUP\",\"total\":185000,\"currency\":\"SYP\",\"trackingNumber\":\"ALB-77812\"}}",
+  "signature_example": "sha256=a247d08e21565cfba9892352002c8d22cf8bf3a2790185101508df467f7633c0"
+}

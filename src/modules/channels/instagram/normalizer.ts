@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { timingSafeEqual } from "@/core/crypto";
+import { normalizeMetaReferral, type MetaReferral } from "../facebook/normalizer";
+import type { FacebookReferral } from "../facebook/types";
 
 /**
  * Instagram Messaging normalizer (P5-B). Webhook object is "instagram";
@@ -17,12 +19,15 @@ interface InstagramPayload {
       sender?: { id?: string };
       recipient?: { id?: string };
       timestamp?: number;
+      // P12 — إحالة إعلان إنستغرام أو رابط ig.me برمز.
+      referral?: MetaReferral;
       message?: {
         mid?: string;
         text?: string;
         is_echo?: boolean;
         is_deleted?: boolean;
         attachments?: { type?: string; payload?: { url?: string } }[];
+        referral?: MetaReferral;
       };
     }[];
   }[];
@@ -38,6 +43,8 @@ export interface NormalizedInstagramMessage {
   mediaUrl?: string | null;
   timestamp: Date;
   rawEventId: string;
+  /** P12 — الإحالة (رقم إعلان إنستغرام · ref رابط ig.me) إن وُجدت. */
+  referral?: FacebookReferral | null;
 }
 
 /** Same app-secret HMAC scheme as the Messenger family (Meta). */
@@ -67,7 +74,9 @@ export function normalizeInstagramWebhook(
       const msg = event.message;
       if (!msg || msg.is_echo || msg.is_deleted || !msg.mid || !event.sender?.id) continue;
       const first = (msg.attachments ?? [])[0];
+      const referral = normalizeMetaReferral(event.referral ?? msg.referral, entry.id ?? null, "ig");
       out.push({
+        ...(referral ? { referral } : {}),
         externalCustomerId: event.sender.id,
         externalConversationId: event.sender.id,
         externalMessageId: msg.mid,
