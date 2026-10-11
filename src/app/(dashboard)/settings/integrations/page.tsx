@@ -11,10 +11,12 @@ import { SystemCard, connHealth, type SystemInfo } from "@/components/integratio
 import { DeliveriesLog } from "@/components/integrations/deliveries-log";
 import { EndpointsCard, MarketsCard, SettingsCard, type ChannelRow, type Endpoints, type IntegrationSettings } from "@/components/integrations/settings-cards";
 import { TokenManager, type TokenPreset, type TokenView } from "@/components/integrations/token-manager";
-import { HealthPill, SectionHead, apiJson } from "@/components/integrations/ui";
+import { HealthPill, RiskWithFix, SectionHead, apiJson } from "@/components/integrations/ui";
 
 interface Overview {
   appUrl: string | null;
+  /** مدة الاحتفاظ بحمولة أحداث القنوات الخام (إعداد خادم · 0 = مطفي). */
+  webhookPayloadRetentionDays: number;
   systems: SystemInfo[];
   oms: { spec: { nameAr: string; summaryAr: string }; view: OmsView };
   settings: IntegrationSettings;
@@ -117,6 +119,44 @@ export default function IntegrationsPage() {
         <SettingsCard settings={data.settings} onSaved={load} />
         <MarketsCard channels={data.channels} markets={data.markets} onSaved={load} />
       </div>
+
+      {/* مدة الاحتفاظ بالحمولة الخام: مؤتمتة — أحمر مع تصحيحه بالبرتقالي. */}
+      {data.webhookPayloadRetentionDays > 0 ? (
+        <RiskWithFix
+          risk={`مؤتمت: حمولة أحداث القنوات الخام بتتفرّغ بعد ${data.webhookPayloadRetentionDays} يوم`}
+          detail={
+            <>
+              كل حدث جاي من القنوات بينحفظ بحمولته الخام — <strong>رقم الزبون ونص رسالته ورمز نقرة الإعلان</strong>.
+              بعد <span dir="ltr" className="num">{data.webhookPayloadRetentionDays}</span> يوم من المعالجة،
+              المحتوى <strong>بينتفرّغ لحاله وما بيرجع</strong>. سجل الحدث نفسه بيضل — لأن منع تكرار
+              الأحداث معتمد عليه، وبلاه إعادة قديمة من ميتا بتنعالج من جديد ويوصل الزبون رد مكرر.
+            </>
+          }
+          fix={
+            <>
+              المدة بإعداد الخادم <span dir="ltr" className="num">WEBHOOK_PAYLOAD_RETENTION_DAYS</span>.
+              حطّها <span dir="ltr" className="num">0</span> إذا بدك توقّف التفريغ والحمولة تبقى بلا مدة.
+              الأحداث الي لسا عم تنعالج بتضل بحمولتها حتى الإعادة تقدر تشتغل.
+            </>
+          }
+        />
+      ) : (
+        <RiskWithFix
+          risk="مؤتمت مطفي: حمولة أحداث القنوات الخام بتتخزّن بلا مدة احتفاظ"
+          detail={
+            <>
+              الكنس موقّف (<span dir="ltr" className="num">WEBHOOK_PAYLOAD_RETENTION_DAYS=0</span>)، يعني
+              <strong> رقم كل زبون ونص كل رسالة ورمز كل نقرة</strong> بيضلوا مخزّنين للأبد.
+            </>
+          }
+          fix={
+            <>
+              حطّ <span dir="ltr" className="num">WEBHOOK_PAYLOAD_RETENTION_DAYS=30</span> (أو المدة الي
+              بتناسبك) ببيئة الخادم — والكنس بيشتغل كل ساعة لحاله.
+            </>
+          }
+        />
+      )}
 
       <GlassCard className="space-y-3 p-4 sm:p-5">
         <SectionHead icon={<KeyRound size={15} />} title="توكنات الأنظمة الداخلة" sub="الميديا باير بيقرأ القدرة بس · الكليبر بيطلب حملات ويقرأ حالتها بس. توكن الوكيل من صفحة باب الوكلاء." tone="amber" />
