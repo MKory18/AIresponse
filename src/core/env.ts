@@ -42,6 +42,8 @@ const envSchema = z.object({
   AI_REQUEST_TIMEOUT_MS: z.string().optional(),
   FACEBOOK_SEND_TIMEOUT_MS: z.string().optional(),
   ORPHAN_MAX_AGE_HOURS: z.string().optional(),
+  // مدة الاحتفاظ بوسائط الزبون الواردة بالأيام (افتراضي 180 · `0` = مطفي).
+  WA_MEDIA_RETENTION_DAYS: z.string().optional(),
   EMBEDDING_DIMENSIONS: z.string().optional(),
   EMBEDDING_MODEL: z.string().optional(),
   CLASSIFICATION_MODEL: z.string().optional(),

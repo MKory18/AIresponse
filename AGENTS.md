@@ -80,7 +80,8 @@ npm run build
 | الـ OMS | `src/modules/oms/` — `app-webhook.ts` (أحداث التطبيقات الحقيقية) · `manual.ts` (نص الإدخال + الربط) · `handoff.ts` · `auto-handoff.ts` (8 محاولات + كنس ساعي) · `client.ts` (legacy · v1) |
 | باب الوكلاء (Hermes) | `src/modules/agent-door/` — `tools.ts` (11 أداة · مخططات حرفية) · `door.ts` · `drafts.ts` · `status.ts` |
 | المزوّد الخارجي (الوكيل الذكي) | `src/modules/ai/router.ts` (`isHermesSelected` · `isHermesPersonaMode`) · `stages/*` · `hermes-diagnostics.ts` — الشخصيات المحلية بتقود الصوت بكل مزوّد · ⚠️ بلا تحويل تلقائي للموظف على المسار الخارجي |
-| وسائط القنوات الواردة | `src/modules/channels/whatsapp/media-download.ts` (معرّف ميتا ← رابط مؤقت ← بايتات ← مخزننا) · الصف من `channels/inbound-job.ts` بمفتاح `wa-media:مساحة:wamid` |
+| وسائط القنوات الواردة | `src/modules/channels/whatsapp/media-download.ts` (معرّف ميتا ← رابط مؤقت ← بايتات ← مخزننا) · الصف من `channels/inbound-job.ts` بمفتاح `wa-media:مساحة:wamid` · الحذف بـ `media-retention.ts` |
+| خصوصية وسيط الزبون | تصنيف `CUSTOMER_INBOUND` + `MediaAsset.messageId` · `excludeCustomerInbound()` بـ `media/service.ts` **لازم ينضاف لأي استعلام وسائط جديد** · الاسم معتم دايمًا |
 | العقود | `contracts/` (الأصل) · `tests/contracts-*.test.ts` |
 | المسارات | `/api/v1/*` (القدرة · حملات الكليبر · أحداث الأنظمة) · `/api/agent/tools` · `/api/agent/call` · `/api/webhooks/oms/[key]` · `/api/integrations/*` |
 | الواجهة | `settings/integrations` · `settings/agents` · `settings/ai` · بطاقة الـ OMS بصفحة الطلب · تبويب الامتثال بالمنتج · بطاقة الموافقة بالمحادثة |
@@ -92,6 +93,7 @@ npm run build
 - عقد agent-door/v1 حرفي: `additionalProperties:false` بكل كائن · nullable بـ `anyOf` · بلا `format` · tuple بحدود zod — `tests/p12-agent-door.test.ts` بيحرسه.
 - أي مفتاح عدم تكرار جديد (صادر · مهام · مراجع لأنظمة تانية) **لازم فيه المساحة** (أو وسم `opaqueTag`).
 - `ctwaClidEnc` و`psidEnc` ما بيطلعوا بأي رد API (`withoutClickSecrets`).
+- وسيط الزبون الوارد (`CUSTOMER_INBOUND`) مربوط برسالته بس: ممنوع يطلع بالمكتبة أو منتقي أو سياق ذكاء أو رابط عام، والاسم معتم — أي استعلام وسائط جديد لازم يمرّ من `excludeCustomerInbound()` (`tests/wa-media-privacy.test.ts` بيحرسه).
 - عدم تكرار الإرسال: SENT · DELIVERED · READ نهائية لنفس المفتاح.
 - قواعد سيستم 1 (المسموح · الممنوع) بتوصل لكل مسار بيكتب رد: كل المزوّدين · التجربة اليدوية (`tests/p12-merge-main.test.ts`).
 - **ولا «Hermes» بأي نص مرئي بالموقع** (قرار المالك): تسميات عامة — «الوكيل الذكي» · «مزوّد الذكاء الاصطناعي». القيم الداخلية (`hermes` · `hermes-bridge` · `HERMES_*` · `hermes-agent`) والتعليقات والتوثيق والاختبارات بتضل — `tests/persona-management.test.ts` + `tests/p12-merge-main.test.ts` بيحرسوها.

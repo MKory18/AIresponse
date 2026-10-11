@@ -23,7 +23,7 @@ async function enqueueWhatsAppMediaDownload(
 ): Promise<void> {
   if (m.channelType !== "WHATSAPP" || m.mediaUrl) return;
   const waMedia = (m.metadata ?? {})["waMedia"] as
-    | { id?: string; mimeType?: string | null; filename?: string | null }
+    | { id?: string; mimeType?: string | null }
     | undefined;
   if (!waMedia?.id || !m.channelId) return;
   try {
@@ -37,7 +37,6 @@ async function enqueueWhatsAppMediaDownload(
         externalMessageId: m.externalMessageId,
         mediaId: waMedia.id,
         mimeType: waMedia.mimeType ?? null,
-        filename: waMedia.filename ?? null,
       },
       idempotencyKey: `wa-media:${workspaceId}:${m.externalMessageId}`,
       // رابط ميتا مؤقت والمهمة ممكن تسبق حفظ الرسالة — ميزانية إعادة أوسع.

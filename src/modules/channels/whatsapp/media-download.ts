@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { decryptSecret } from "@/core/crypto";
 import { childLogger } from "@/core/logger";
 import { getWhatsAppClient, WhatsAppApiError } from "./client";
 import { UPLOAD_LIMITS, ALLOWED_MIME_TYPES } from "@/modules/media/storage";
-import { uploadMedia } from "@/modules/media/service";
+import { uploadMedia, CUSTOMER_INBOUND } from "@/modules/media/service";
 import type { Db } from "@/modules/customers/service";
 
 const log = childLogger("channels.whatsapp.media");
@@ -28,6 +29,11 @@ function extFor(mime: string): string {
   return ALLOWED_MIME_TYPES[mime]?.ext ?? "bin";
 }
 
+/** اسم معتم مشتق من المساحة ومعرّف الوسيط — ولا شي من بيانات الزبون. */
+function opaque(workspaceId: string, mediaId: string): string {
+  return createHash("sha256").update(`${workspaceId}:${mediaId}`).digest("hex").slice(0, 24);
+}
+
 export interface WhatsAppMediaJobPayload {
   workspaceId: string;
   channelId: string;
@@ -35,7 +41,6 @@ export interface WhatsAppMediaJobPayload {
   externalMessageId: string;
   mediaId: string;
   mimeType?: string | null;
-  filename?: string | null;
 }
 
 /** سبب نهائي ينكتب على الرسالة بدل ما ينضيع بصمت. */
@@ -119,22 +124,23 @@ export async function handleWhatsAppMediaDownload(
     }
 
     const { data } = await client.downloadMedia(token, meta.url, limit);
-    const safeBase = String(p.filename ?? "")
-      .replace(/[^\w.\-]+/g, "_")
-      .slice(0, 64);
-    const filename = safeBase && /\.[a-z0-9]{1,8}$/i.test(safeBase)
-      ? safeBase
-      : `wa-${mediaId.slice(0, 24)}.${extFor(mime)}`;
+    // ⚠️ اسم الملف الأصلي والتعليق من الزبون ممكن يكون فيهم اسمه أو رقمه،
+    // والعنوان بيظهر بأماكن تانية — فالاسم **معتم دايمًا**، ولا اسم ولا تعليق
+    // بينحفظ بالعنوان أو الوصف.
+    const filename = `wa-${opaque(workspaceId, mediaId)}.${extFor(mime)}`;
 
     const asset = await uploadMedia(db, { userId: SYSTEM_ACTOR, workspaceId }, {
       filename,
       mimeType: mime,
       size: data.byteLength,
       data,
-      category: "OTHER",
+      // تصنيف خاص: مربوط برسالته بس وممنوع يطلع بأي مكان مشترك.
+      category: CUSTOMER_INBOUND,
       title: filename,
-      description: "وسيط وارد من واتساب",
+      description: null,
     });
+    // الربط بالرسالة — النطاق الوحيد الي بيظهر فيه.
+    await db.mediaAsset.update({ where: { id: asset.id }, data: { messageId: message.id } });
 
     const metadata = (message.metadata ?? {}) as Record<string, unknown>;
     delete metadata.waMediaError;

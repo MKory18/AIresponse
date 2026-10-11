@@ -6,6 +6,19 @@ import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
 import { getStorage, generateStorageKey, validateUpload, assertMagicBytes } from "./storage";
 export { validateUpload } from "./storage";
+
+/**
+ * وسيط الزبون الوارد (واتساب) مربوط برسالته بس. ممنوع يطلع بأي مكان مشترك:
+ * المكتبة · منتجات · سياق الذكاء · الحملات والقوالب · الروابط العامة.
+ * بلا هالاستثناء، رسالة صورة بلا نص كانت ترجّع «أحدث 3 وسائط» بالمساحة —
+ * يعني وسائط زباين **تانيين** بعنوانها ورابطها جوّا برومبت الموديل.
+ */
+export const CUSTOMER_INBOUND: MediaCategory = "CUSTOMER_INBOUND";
+
+/** شرط الاستثناء — بينضاف لكل استعلام مشترك. */
+export function excludeCustomerInbound(): Prisma.MediaAssetWhereInput {
+  return { category: { not: CUSTOMER_INBOUND } };
+}
 import { signPayload } from "@/core/crypto";
 import { getEnv } from "@/core/env";
 
@@ -125,7 +138,12 @@ export async function listMedia(
   }
 ): Promise<Paginated<Prisma.MediaAssetGetPayload<Record<string, never>>>> {
   const limit = Math.min(params.limit ?? 30, 100);
-  const where: Prisma.MediaAssetWhereInput = { workspaceId: params.workspaceId };
+  // المكتبة وكل المنتقيات (حملات · منتجات · قوالب) بتمر من هون.
+  if (params.category === CUSTOMER_INBOUND) return { items: [], nextCursor: null };
+  const where: Prisma.MediaAssetWhereInput = {
+    workspaceId: params.workspaceId,
+    ...excludeCustomerInbound(),
+  };
   if (params.category) where.category = params.category;
   if (params.type) where.type = params.type;
   const andClauses: Prisma.MediaAssetWhereInput[] = [];
@@ -227,7 +245,7 @@ export async function findProductMedia(db: Db, workspaceId: string, productId: s
   // Dual-source read during migration: legacy direct FK + canonical join table.
   const [direct, links] = await Promise.all([
     db.mediaAsset.findMany({
-      where: { workspaceId, productId, type: "IMAGE" },
+      where: { workspaceId, productId, type: "IMAGE", ...excludeCustomerInbound() },
       orderBy: [{ createdAt: "desc" }],
       take: limit,
     }),
@@ -242,7 +260,7 @@ export async function findProductMedia(db: Db, workspaceId: string, productId: s
   const merged: typeof direct = [];
   for (const l of links) {
     const a = (l as { mediaAsset?: (typeof direct)[number] }).mediaAsset;
-    if (a && a.workspaceId === workspaceId && !seen.has(a.id)) {
+    if (a && a.workspaceId === workspaceId && a.category !== CUSTOMER_INBOUND && !seen.has(a.id)) {
       seen.add(a.id);
       merged.push(a);
     }
@@ -263,14 +281,21 @@ export async function findFeedbackMedia(db: Db, workspaceId: string, productId: 
     orderBy: { createdAt: "desc" },
     take: limit,
   });
-  return feedbacks.map((f) => f.media).filter((m): m is NonNullable<typeof m> => Boolean(m));
+  return feedbacks
+    .map((f) => f.media)
+    .filter((m): m is NonNullable<typeof m> => Boolean(m) && m!.category !== CUSTOMER_INBOUND);
 }
 
 export async function findRelevantMedia(
   db: Db,
   params: { workspaceId: string; query?: string; productId?: string; category?: MediaCategory; type?: MediaType; limit?: number }
 ) {
-  const where: Prisma.MediaAssetWhereInput = { workspaceId: params.workspaceId };
+  // وسيط الزبون الوارد مستثنى دايمًا — حتى لو انطلب تصنيفه صريح.
+  if (params.category === CUSTOMER_INBOUND) return [];
+  const where: Prisma.MediaAssetWhereInput = {
+    workspaceId: params.workspaceId,
+    ...excludeCustomerInbound(),
+  };
   if (params.productId) where.productId = params.productId;
   if (params.category) where.category = params.category;
   if (params.type) where.type = params.type;
@@ -292,6 +317,14 @@ export async function generatePublicMediaUrl(
   ttlMinutes = 60
 ): Promise<string> {
   const asset = await getOwnedMedia(db, workspaceId, mediaId);
+  // وسيط الزبون الوارد ما بينشر برابط عام أبدًا (ولا للإرسال لميتا).
+  if (asset.category === CUSTOMER_INBOUND) {
+    throw new AppError(
+      "Customer inbound media is never published through a public URL",
+      403,
+      "CUSTOMER_INBOUND_NOT_PUBLISHABLE"
+    );
+  }
   const env = getEnv();
   const baseUrl = (env.APP_URL ?? "").replace(/\/+$/, "");
   // A relative or non-public base URL makes Meta's fetcher fail with an

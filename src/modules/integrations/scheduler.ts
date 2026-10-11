@@ -64,6 +64,13 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
   // OMS كان واقف ← إعادة بنفس المفتاح.
   if (hourly) await sweepStuckOmsHandoffs(db, now).catch((err) => log.error({ err }, "oms_handoff_sweep_failed"));
 
+  // مدة الاحتفاظ بوسائط الزبون الواردة: كنس عام (الوسيط مربوط برسالته،
+  // مش بمساحة مربوطة بنظام) — بيحذف الملف والصف ويختم الرسالة بعلامة.
+  if (hourly) {
+    const { purgeOldCustomerMedia } = await import("@/modules/channels/whatsapp/media-retention");
+    await purgeOldCustomerMedia(db, now).catch((err) => log.error({ err }, "wa_media_purge_failed"));
+  }
+
   const conns = (await (db as unknown as { integrationConnection?: { findMany: (a: unknown) => Promise<unknown> } }).integrationConnection?.findMany({
     where: { enabled: true },
     select: { workspaceId: true, system: true, enabled: true },
