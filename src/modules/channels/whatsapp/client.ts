@@ -149,6 +149,99 @@ export class WhatsAppClient {
       throw new WhatsAppApiError("WhatsApp unreachable", "TRANSIENT");
     }
   }
+
+  /**
+   * الوسائط الواردة: الخطوة الأولى — معرّف الوسيط ← رابط تحميل مؤقت
+   * (GET {graph}/{media-id}) صالح ~5 دقايق وبيحتاج نفس التوكن بالتحميل.
+   */
+  async getMediaMeta(
+    token: string,
+    mediaId: string
+  ): Promise<{ url: string; mimeType: string | null; fileSize: number | null }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(`${this.graphUrl}/${encodeURIComponent(mediaId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const json = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        mime_type?: string;
+        file_size?: number;
+        error?: { message?: string; code?: number };
+      };
+      if (!res.ok || json.error || !json.url) {
+        const code = json.error?.code ?? res.status;
+        // توكن منتهي/وسيط محذوف = نهائي؛ الضغط والأعطال = مؤقت ومنعيد.
+        const transient = code === 429 || code === 130429 || (code >= 500 && code < 100000);
+        throw new WhatsAppApiError(
+          json.error?.message ?? `WhatsApp media lookup failed (${code})`,
+          transient ? "TRANSIENT" : "PERMANENT",
+          code,
+          res.status
+        );
+      }
+      return {
+        url: json.url,
+        mimeType: json.mime_type ?? null,
+        fileSize: typeof json.file_size === "number" ? json.file_size : null,
+      };
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof WhatsAppApiError) throw err;
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new WhatsAppApiError("WhatsApp media lookup timed out", "TRANSIENT");
+      }
+      throw new WhatsAppApiError("WhatsApp unreachable", "TRANSIENT");
+    }
+  }
+
+  /**
+   * الخطوة التانية — تحميل البايتات من رابط ميتا بنفس التوكن.
+   * `maxBytes` بيوقف التحميل قبل ما يعبّي الذاكرة: وسيط أكبر من الحد
+   * بينرفض نهائيًا (ما بينعاد) بدل ما يوقع العامل.
+   */
+  async downloadMedia(token: string, url: string, maxBytes: number): Promise<{ data: Buffer; mimeType: string | null }> {
+    if (!/^https:\/\//i.test(url)) {
+      throw new WhatsAppApiError("WhatsApp media url must be https", "PERMANENT");
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const transient = res.status === 429 || res.status >= 500;
+        throw new WhatsAppApiError(
+          `WhatsApp media download failed (${res.status})`,
+          transient ? "TRANSIENT" : "PERMANENT",
+          res.status,
+          res.status
+        );
+      }
+      const declared = Number(res.headers.get("content-length") ?? "0");
+      if (declared > maxBytes) {
+        throw new WhatsAppApiError(`WhatsApp media too large (${declared} > ${maxBytes})`, "PERMANENT");
+      }
+      const data = Buffer.from(await res.arrayBuffer());
+      if (data.byteLength > maxBytes) {
+        throw new WhatsAppApiError(`WhatsApp media too large (${data.byteLength} > ${maxBytes})`, "PERMANENT");
+      }
+      return { data, mimeType: res.headers.get("content-type") };
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof WhatsAppApiError) throw err;
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new WhatsAppApiError("WhatsApp media download timed out", "TRANSIENT");
+      }
+      throw new WhatsAppApiError("WhatsApp unreachable", "TRANSIENT");
+    }
+  }
 }
 
 type Factory = () => WhatsAppClient;

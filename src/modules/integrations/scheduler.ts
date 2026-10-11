@@ -64,9 +64,13 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
   // OMS كان واقف ← إعادة بنفس المفتاح.
   if (hourly) await sweepStuckOmsHandoffs(db, now).catch((err) => log.error({ err }, "oms_handoff_sweep_failed"));
 
+  // مدة الاحتفاظ بوسائط الزبون الواردة: كنس عام (الوسيط مربوط برسالته،
+  // مش بمساحة مربوطة بنظام) — بيحذف الملف والصف ويختم الرسالة بعلامة.
   // مدة الاحتفاظ بحمولة أحداث القنوات الخام (أرقام · نصوص · رمز النقرة):
   // كنس عام مش لكل مساحة — `WebhookEvent.workspaceId` ممكن يكون فاضي.
   if (hourly) {
+    const { purgeOldCustomerMedia } = await import("@/modules/channels/whatsapp/media-retention");
+    await purgeOldCustomerMedia(db, now).catch((err) => log.error({ err }, "wa_media_purge_failed"));
     const { purgeOldWebhookPayloads } = await import("@/modules/channels/webhook-retention");
     await purgeOldWebhookPayloads(db, now).catch((err) => log.error({ err }, "webhook_payload_purge_failed"));
   }

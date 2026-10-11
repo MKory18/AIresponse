@@ -16,6 +16,18 @@ export interface WhatsAppInboundMessage {
   text: string | null;
   mediaType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT";
   mediaUrl?: string | null;
+  /**
+   * واتساب ما بيبعت رابط للوسائط الواردة — بيبعت معرّف لازم ينحمّل بتوكن
+   * القناة (Cloud API: image/video/audio/document = {id, mime_type, sha256}).
+   * منخزنه هون حتى مهمة التحميل تجيبه بعدين وتحوّله لرابط عندنا.
+   */
+  media?: {
+    id: string;
+    mimeType: string | null;
+    filename: string | null;
+    caption: string | null;
+    voice: boolean;
+  } | null;
   timestamp: Date;
   rawEventId: string;
   /**
@@ -37,6 +49,16 @@ export function verifyWhatsAppSignature(rawBody: string, signatureHeader: string
   if (!signatureHeader?.startsWith("sha256=")) return false;
   const expected = crypto.createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex");
   return timingSafeEqual(signatureHeader.slice(7), expected);
+}
+
+/** شكل كائن الوسيط بالـ Cloud API: `link` للصادر، `id` للوارد. */
+interface WhatsAppMediaObject {
+  id?: string;
+  link?: string;
+  mime_type?: string;
+  filename?: string;
+  caption?: string;
+  voice?: boolean;
 }
 
 function mediaKind(type: string | undefined): WhatsAppInboundMessage["mediaType"] {
@@ -65,10 +87,11 @@ export function normalizeWhatsAppWebhook(payload: unknown, rawEventId: string): 
           timestamp?: string;
           type?: string;
           text?: { body?: string };
-          image?: { link?: string };
-          video?: { link?: string };
-          audio?: { link?: string; voice?: boolean };
-          document?: { link?: string };
+          image?: WhatsAppMediaObject;
+          video?: WhatsAppMediaObject;
+          audio?: WhatsAppMediaObject;
+          document?: WhatsAppMediaObject;
+          sticker?: WhatsAppMediaObject;
           referral?: { source_id?: string; source_type?: string; ctwa_clid?: string; source_url?: string };
         }[];
       };
@@ -76,8 +99,8 @@ export function normalizeWhatsAppWebhook(payload: unknown, rawEventId: string): 
       for (const m of value.messages ?? []) {
         if (!m.from || !m.id) continue;
         const kind = mediaKind(m.type);
-        const mediaUrl =
-          m.image?.link ?? m.video?.link ?? m.audio?.link ?? m.document?.link ?? null;
+        const obj = m.image ?? m.video ?? m.audio ?? m.document ?? m.sticker ?? null;
+        const mediaUrl = obj?.link ?? null;
         out.push({
           from: m.from,
           waMessageId: m.id,
@@ -85,6 +108,17 @@ export function normalizeWhatsAppWebhook(payload: unknown, rawEventId: string): 
           text: m.text?.body ?? null,
           mediaType: kind,
           mediaUrl,
+          ...(obj?.id
+            ? {
+                media: {
+                  id: String(obj.id).slice(0, 256),
+                  mimeType: obj.mime_type ? String(obj.mime_type).slice(0, 128) : null,
+                  filename: obj.filename ? String(obj.filename).slice(0, 256) : null,
+                  caption: obj.caption ? String(obj.caption).slice(0, 1024) : null,
+                  voice: obj.voice === true,
+                },
+              }
+            : {}),
           timestamp: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
           rawEventId,
           ...(m.referral && (m.referral.source_id || m.referral.ctwa_clid)

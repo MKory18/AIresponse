@@ -28,6 +28,8 @@ export const JOB_TYPES = [
   "handoff_order_to_oms",
   "validate_attribution_code",
   "refresh_product_compliance",
+  // وسائط واتساب الواردة: ميتا تبعت معرّف مش رابط — التحميل بتوكن القناة.
+  "download_whatsapp_media",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

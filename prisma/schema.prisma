@@ -521,6 +521,9 @@ enum MediaCategory {
   BRAND
   EDUCATIONAL
   OTHER
+  // وسيط وارد من زبون (واتساب): مربوط برسالته بس — ممنوع يطلع بأي مكان
+  // مشترك (المكتبة · المنتجات · سياق الذكاء · الحملات · الروابط العامة).
+  CUSTOMER_INBOUND
 }
 
 enum MediaType {
@@ -547,6 +550,9 @@ model MediaAsset {
   tags        String[]      @default([])
   description String?
   metadata    Json          @default("{}")
+  // الرسالة الي إجا معها الوسيط (للوارد من الزبون بس) — النطاق الوحيد الي
+  // بيظهر فيه. ولا علاقة Prisma: الحذف بالكنس، والرسالة بتحتفظ بعلامة.
+  messageId   String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -556,6 +562,7 @@ model MediaAsset {
   feedbacks  Feedback[]
 
   @@unique([workspaceId, storageKey])
+  @@index([messageId])
   @@index([workspaceId, category])
   @@index([workspaceId, productId])
   @@index([workspaceId, type])
