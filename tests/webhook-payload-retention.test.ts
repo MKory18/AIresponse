@@ -176,13 +176,46 @@ describe("مدة الاحتفاظ — الكنس", () => {
     vi.unstubAllGlobals();
   });
 
-  it("الكنس محدود بكل دورة — الباقي بالدورة الي بعدها", async () => {
+  it("متراكم كبير (1200 صف) بينكنس كله بدورة وحدة — دفعة بعد دفعة", async () => {
+    for (let i = 0; i < 1200; i += 1) {
+      await seedEvent({ id: `ev-bulk${i}`, createdAt: daysAgo(40), processedAt: daysAgo(40) });
+    }
+    const res = await purgeOldWebhookPayloads(db as Db, NOW);
+    expect(res.purged).toBe(1200);
+    expect(res.batches).toBe(3); // 500 + 500 + 200
+    expect(res.budgetExhausted).toBeUndefined();
+    const left = (db._stores.webhookEvent as Record<string, unknown>[]).filter((e) => e.payloadPurgedAt === null);
+    expect(left).toHaveLength(0);
+    // ولا صف انحذف — الصفوف كلها موجودة بحمولة مفرّغة.
+    expect((db._stores.webhookEvent as unknown[]).length).toBe(1200);
+  });
+
+  it("الميزانية خلصت: بيوقف ويعلّم، والباقي بالدورة الجاية", async () => {
     for (let i = 0; i < 5; i += 1) {
       await seedEvent({ id: `ev-m${i}`, createdAt: daysAgo(50 + i), processedAt: daysAgo(50 + i) });
     }
-    expect((await purgeOldWebhookPayloads(db as Db, NOW, 2)).purged).toBe(2);
-    expect((await purgeOldWebhookPayloads(db as Db, NOW, 2)).purged).toBe(2);
-    expect((await purgeOldWebhookPayloads(db as Db, NOW, 2)).purged).toBe(1);
-    expect((await purgeOldWebhookPayloads(db as Db, NOW, 2)).purged).toBe(0);
+    // ساعة وهمية: البداية 0، وبعدها 10 ثواني كل فحص. ميزانية 20 ثانية
+    // ⇒ دفعتين (حجم الدفعة 1) وبعدين توقّف.
+    const times = [0, 0, 10_000, 20_000, 30_000, 40_000];
+    let i = 0;
+    const clock = () => times[Math.min(i++, times.length - 1)]!;
+    const first = await purgeOldWebhookPayloads(db as Db, NOW, { batchSize: 1, budgetMs: 20_000, clock });
+    expect(first.budgetExhausted).toBe(true);
+    expect(first.purged).toBeGreaterThan(0);
+    expect(first.purged).toBeLessThan(5);
+    // الدورة الجاية بميزانية عادية بتخلّص الباقي.
+    const second = await purgeOldWebhookPayloads(db as Db, NOW);
+    expect(first.purged + second.purged).toBe(5);
+    expect((await purgeOldWebhookPayloads(db as Db, NOW)).purged).toBe(0);
+  });
+
+  it("حجم الدفعة ما بيوقف الكنس — بيكمّل لحد ما يخلص المؤهّل", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await seedEvent({ id: `ev-b${i}`, createdAt: daysAgo(50 + i), processedAt: daysAgo(50 + i) });
+    }
+    const res = await purgeOldWebhookPayloads(db as Db, NOW, { batchSize: 2 });
+    expect(res.purged).toBe(5);
+    expect(res.batches).toBe(3);
+    expect((await purgeOldWebhookPayloads(db as Db, NOW)).purged).toBe(0);
   });
 });

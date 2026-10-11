@@ -15,7 +15,10 @@ const log = childLogger("channels.webhook-retention");
  * بتنعالج من جديد (رد مكرر للزبون). فالي بينشال المحتوى بس.
  */
 export const DEFAULT_RETENTION_DAYS = 30;
-const MAX_PER_RUN = 500;
+/** حجم الدفعة الواحدة — ما منسحب كل الصفوف بوقت واحد. */
+const BATCH_SIZE = 500;
+/** ميزانية الدورة الساعية: منكنس دفعة بعد دفعة لحد ما يخلص المؤهّل أو تخلص. */
+const BUDGET_MS = 20_000;
 
 /** `0` = الكنس مطفي (الحمولة بتضل) · بلا قيمة = 30 يوم. */
 export function retentionDays(): number {
@@ -32,6 +35,17 @@ export function retentionDays(): number {
 export interface PurgeResult {
   purged: number;
   disabled?: boolean;
+  /** عدد الدفعات الي انكنست بهالدورة. */
+  batches?: number;
+  /** صحيح لما الميزانية خلصت وفي صفوف مؤهّلة باقية للدورة الجاية. */
+  budgetExhausted?: boolean;
+}
+
+export interface PurgeOptions {
+  batchSize?: number;
+  budgetMs?: number;
+  /** ساعة قابلة للحقن — للاختبار الحتمي للميزانية. */
+  clock?: () => number;
 }
 
 /**
@@ -42,38 +56,65 @@ export interface PurgeResult {
 export async function purgeOldWebhookPayloads(
   db: Db,
   now = new Date(),
-  limit = MAX_PER_RUN
+  opts: PurgeOptions = {}
 ): Promise<PurgeResult> {
   const days = retentionDays();
   if (days === 0) return { purged: 0, disabled: true };
+  const batchSize = Math.max(1, opts.batchSize ?? BATCH_SIZE);
+  const budgetMs = Math.max(0, opts.budgetMs ?? BUDGET_MS);
+  const clock = opts.clock ?? Date.now;
+  const startedAt = clock();
   const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-  const rows = (await db.webhookEvent.findMany({
-    where: {
-      payloadPurgedAt: null,
-      createdAt: { lt: cutoff },
-      // المعالجة خلصت، أو فشلت وما عاد في إعادة بعد كل هالمدة.
-      OR: [{ processedAt: { not: null } }, { error: { not: null } }],
-    },
-    select: { id: true },
-    orderBy: { createdAt: "asc" },
-    take: limit,
-  })) as Array<{ id: string }>;
-  if (rows.length === 0) return { purged: 0 };
-
   let purged = 0;
-  for (const r of rows) {
-    try {
-      await db.webhookEvent.update({
-        where: { id: r.id },
-        // ولا رقم ولا نص ولا رمز نقرة بيضل — ختم المدة بس.
-        data: { payload: { purged: true }, payloadPurgedAt: now },
-      });
-      purged += 1;
-    } catch (err) {
-      log.warn({ id: r.id, error: err instanceof Error ? err.message : String(err) }, "webhook_payload_purge_failed");
+  let batches = 0;
+  let budgetExhausted = false;
+
+  // دفعة بعد دفعة لحد ما يخلص المؤهّل — متراكم قديم (مثلًا بعد تعطّل الكنس)
+  // ما يضل عالق للأبد بحد ثابت لكل ساعة.
+  for (;;) {
+    if (clock() - startedAt >= budgetMs) {
+      budgetExhausted = true;
+      break;
     }
+    const rows = (await db.webhookEvent.findMany({
+      where: {
+        payloadPurgedAt: null,
+        createdAt: { lt: cutoff },
+        // المعالجة خلصت، أو فشلت وما عاد في إعادة بعد كل هالمدة.
+        OR: [{ processedAt: { not: null } }, { error: { not: null } }],
+      },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: batchSize,
+    })) as Array<{ id: string }>;
+    if (rows.length === 0) break;
+    batches += 1;
+
+    let failedInBatch = 0;
+    for (const r of rows) {
+      try {
+        await db.webhookEvent.update({
+          where: { id: r.id },
+          // ولا رقم ولا نص ولا رمز نقرة بيضل — ختم المدة بس.
+          data: { payload: { purged: true }, payloadPurgedAt: now },
+        });
+        purged += 1;
+      } catch (err) {
+        failedInBatch += 1;
+        log.warn({ id: r.id, error: err instanceof Error ? err.message : String(err) }, "webhook_payload_purge_failed");
+      }
+    }
+    // دفعة كلها فشلت = نفس الصفوف رح تنسحب بالدورة الجاية — بلا حلقة لا نهائية.
+    if (failedInBatch === rows.length) break;
+    if (rows.length < batchSize) break;
   }
-  log.info({ purged, days, cutoff: cutoff.toISOString() }, "webhook_payloads_purged");
-  return { purged };
+
+  if (purged > 0 || budgetExhausted) {
+    log.info(
+      { purged, batches, budgetExhausted, days, cutoff: cutoff.toISOString() },
+      "webhook_payloads_purged"
+    );
+  }
+  return { purged, batches, ...(budgetExhausted ? { budgetExhausted } : {}) };
 }
