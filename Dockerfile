@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── deps ────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 # openssl3 + libc6-compat: required so Prisma 5.22 detects OpenSSL on musl
 # (prevents the libquery_engine-linux-musl.so.node fallback failure).
 RUN apk add --no-cache openssl libc6-compat
@@ -10,7 +10,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 
 # ── build ───────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -21,7 +21,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate && npm run build
 
 # ── runtime ─────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
