@@ -3,6 +3,7 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 import { PERSONA_LIMITS } from "@/modules/ai/persona-limits";
+import { assertLocalPersonaMutable } from "@/modules/ai/persona-control";
 
 const personaSchema = z.object({
   name: z.string().trim().min(2).max(PERSONA_LIMITS.name),
@@ -38,7 +39,9 @@ export const POST = createHandler(
   { body: personaSchema, permission: "personas.write" },
   async ({ auth, body }) => {
     // Only one active persona at a time per workspace.
+    // Activation changes live reply personality — refused while Hermes owns it.
     if (body.isActive !== false) {
+      await assertLocalPersonaMutable(auth!.workspaceId);
       await prisma.persona.updateMany({
         where: { workspaceId: auth!.workspaceId, isActive: true },
         data: { isActive: false },
@@ -67,6 +70,8 @@ export const PATCH = createHandler(
       return Response.json({ error: "NOT_FOUND" }, { status: 404 });
     }
     if (data.isActive) {
+      // Activating swaps the live reply personality — refused under Hermes.
+      await assertLocalPersonaMutable(auth!.workspaceId);
       await prisma.persona.updateMany({
         where: { workspaceId: auth!.workspaceId, isActive: true },
         data: { isActive: false },

@@ -286,6 +286,31 @@ export function validateTaskModel(
 // customBaseUrl builds an INTERNAL OpenAI-compatible provider (delivery
 // "internal", tested independently — never claimed internal by name alone).
 
+// ── Hermes external-persona mode ─────────────────────────────────────────
+// When the EFFECTIVE reply provider is Hermes, reply personality (voice,
+// dialect, tone, persuasion) is owned by the externally-configured Hermes
+// agent — never by local Persona rows or prompt templates. These helpers
+// are the single definition of that mode (settings-level intent +
+// runtime instance check), so UI gates, API guards, and the pipeline all
+// agree on when local persona control is suspended.
+
+/** Settings-level intent: would resolution pick Hermes (no I/O)? */
+export function isHermesSelected(
+  settings: { provider?: string | null } | null,
+  aiProvider?: string
+): boolean {
+  const ws = settings?.provider ?? null;
+  const wsReal = ws === "openai" || ws === "openrouter" || ws === "internal" || ws === "hermes";
+  if (wsReal) return ws === "hermes";
+  const envChoice = aiProvider ?? process.env.AI_PROVIDER;
+  return envChoice === "hermes";
+}
+
+/** Runtime truth: the resolved reply provider IS Hermes. */
+export function isHermesPersonaMode(provider: { name: string }): boolean {
+  return provider.name === "hermes";
+}
+
 export function getWorkspaceProvider(
   settings: {
     provider?: string | null;

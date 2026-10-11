@@ -726,9 +726,27 @@
 
 **مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P12.**
 
+## Hermes External Persona (11 تشرين الأول 2026) — شخصية الرد من Hermes
+
+**القرار المعماري:** عند اختيار المزود `hermes` (مساحة العمل أو `AI_PROVIDER`) تصبح شخصية الرد (الصوت/اللهجة/النبرة/الإقناع) مملوكة لوكيل Hermes المضبوط خارجيًا. Zaki AI يجهّز السياق والبيانات التجارية الموثوقة، يستلم الرد، يتحقق منه، ويرسله — دون حقن أي Persona محلية أو Prompt شخصية في طلبات Hermes.
+
+**ما تغيّر في مسار الرد (`gating → extraction → response`):**
+- `router.ts`: `isHermesSelected()` (نية الإعدادات) + `isHermesPersonaMode()` (المزود الفعلي) — تعريف واحد للوضع يتفق عليه المسار والواجهة والحراس.
+- `gating.ts`: تخطي `resolveChannelPersona` كليًا في وضع Hermes (لا قراءة Persona) + علّامة `hermesPersona` في الحالة + لا HumanHandoff عند تعذر الإعداد.
+- `extraction.ts`: تعليق `mustHandoff` (حقن/شكوى/طلب موظف/ثقة منخفضة) وتعليق HANDOFF الخاص بـ ORDER_BLOCKED (الطلب يبقى محظورًا بقواعد OrderService + audit، والرد يستمر) — المحادثة تبقى OPEN.
+- `response.ts`: النظام = ترويسة نقل (`hermesExternalPersonaHeader` — تأطير هيكلي يفوّض الصوت لـ Hermes) + البيانات التجارية الموثوقة فقط؛ لا `personaPrompt` ولا `responseInstruction` ولا `prohibitedPhrases` المحلية؛ لا fallback بديل (الفشل ظاهر وقابل لإعادة المعالجة بنفس idempotency)؛ لا Handoff عند الفشل؛ telemetry بـ `personaId/version = null`.
+- `playground-service.ts`: نفس القاعدة في التجربة اليدوية.
+- الاستخراج/التضمينات/المسودات/OMS/Privacy Gate/Guardrails/العزل/الصلاحيات: **بلا تغيير**.
+
+**تحييد Personas (بلا حذف جداول أو سجلات):** حارس خادمي `assertLocalPersonaMutable()` يرفض 409 كل ما يغيّر الشخصية الحية (تفعيل/نشر/رجوع/ربط قناة) في وضع Hermes — القراءة والمسودات والسجل باقية. الواجهات (personas/channels/settings-ai) تعرض لافتة وتعطّل الحقول الميتة (عتبات الثقة/البديل). aiEnabled/autoRespond وتبديل المزود تبقى مفاتيح إيقاف حية.
+
+**الحذف المستقبلي الموثق (Migration مستقلة لاحقًا، ليست الآن):** جداول `Persona`/`PersonaVersion` وعمود `Channel.aiPersonaId` وحقول الثقة في `AISettings` (`confidenceExecute/confidenceRespond/humanHandoffThreshold`) — تُحذف فقط بعد فترة تشغيل مستقرة بوضع Hermes + نسخة احتياطية. **لم يُحذف شيء الآن.**
+
+**التحقق:** ملف `tests/hermes-persona-mode.test.ts` (13 اختبارًا عبر `processAIMessage` الفعلي) + كامل البطارية (test/typecheck/lint/scan:secrets/build). **لم يُنشأ commit** — بانتظار مراجعة المالك.
+
 ## P12 — الربط مع منظومة Zaki وباب الوكلاء Hermes (11 تشرين الأول 2026)
 
-> الأساس: `844d564` (main). الفرع: `feat/p12-zaki-ecosystem`. البوابات: **1175/1175 (63 ملفًا — أساس 821 + 354 لـ P12)** ✅ · typecheck ✅ · lint ✅ · scan:secrets ✅ · build ✅ · الترحيل على Postgres 16 حقيقي + فحص الانجراف ✅ (الفرقان الوحيدان قديمان: `KnowledgeChunk.embedding` vector و`DailyWorkspaceAnalytics.date` @db.Date) · لقطات Playwright على 375px و1280px — **صفر تمرير أفقي وصفر أخطاء كونسول** (6 شاشات + 5 حالات لبطاقة الـ OMS بالجولة التانية). التفاصيل الكاملة: `docs/INTEGRATIONS.md` · باب الـ OMS: `docs/OMS-DOOR-V1.md`.
+> الأساس: `844d564` (main) + دمج `e87409b` (وضع Hermes للشخصية الخارجية). الفرع: `feat/p12-zaki-ecosystem`. البوابات: **1206/1206 (66 ملفًا — أساس 848 + 354 لـ P12 + 4 للدمج) على Node 20 (متل CI والإنتاج) وNode 22** ✅ · typecheck ✅ · lint ✅ · scan:secrets ✅ · build ✅ · الترحيل على Postgres 16 حقيقي + فحص الانجراف ✅ (الفرقان الوحيدان قديمان: `KnowledgeChunk.embedding` vector و`DailyWorkspaceAnalytics.date` @db.Date) · لقطات Playwright على 375px و1280px — **صفر تمرير أفقي وصفر أخطاء كونسول** (6 شاشات + 5 حالات لبطاقة الـ OMS بالجولة التانية). التفاصيل الكاملة: `docs/INTEGRATIONS.md` · باب الـ OMS: `docs/OMS-DOOR-V1.md`.
 
 ### الموجود مقابل المضاف (مثبت بالكود — ولا شي موجود انبنى من جديد)
 
@@ -781,6 +799,12 @@
 | ⚠️ OpenRouter بشاشة إدخال الـ OMS | خطر خارج الردود — 🔧 شيل `OPENROUTER_API_KEY` من بيئة الـ OMS |
 | تحقق حي مع الأنظمة الحقيقية | BLOCKED (بلا روابط/توكنات حقيقية بالبيئة) |
 | ⚠️ وسائط واتساب الواردة · احتفاظ `WebhookEvent.payload` | موجودة من قبل — موثقة بالأحمر مع تصحيح بـ `docs/INTEGRATIONS.md` |
+
+### الدمج مع `main` (وضع Hermes للشخصية الخارجية `e87409b`)
+
+- تعارض بإعدادات AI: انحفظت الميزتين — وضع Hermes الحي (`providerChoice` + تعطيل الحقول) + تنبيه Hermes الأحمر لما يكون مزود أو بديل. ملاحظات وضع Hermes (ردود آلية بلا تحويل للموظف · عتبات الثقة معطّلة) صارت أحمر مع تصحيح برتقالي حسب قاعدة المالك.
+- دمج دلالي: قواعد سيستم 1 (المسموح · الممنوع) ما كانت توصل لمسار Hermes الجديد ولا للتجربة اليدوية — صارت توصل بكل مسار (`tests/p12-merge-main.test.ts` — 3 فشلوا قبل التصليح).
+- ⚠️ CI على `main` كان أحمر 5 مرات متتالية (Node 20 بيطبع منتصف الليل «24:00:00» مع `hour12:false`) — 🔧 الاختبار صار `hourCycle: "h23"` (انعاد إنتاج الفشل محليًا على Node 20.20.2 قبل التصليح). كود الإنتاج كان أصلًا بيعالج «24».
 
 ### قرار P12
 

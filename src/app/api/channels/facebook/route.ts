@@ -3,6 +3,7 @@ import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
 import { recordAudit } from "@/modules/audit/service";
 import { NotFoundError } from "@/core/errors";
+import { assertLocalPersonaMutable } from "@/modules/ai/persona-control";
 import { z } from "zod";
 
 /**
@@ -49,6 +50,8 @@ export const PATCH = createHandler(
     });
     if (!channel) throw new NotFoundError("Facebook channel");
     if (body.aiPersonaId) {
+      // Binding a local persona changes reply personality (unassign/null stays allowed).
+      await assertLocalPersonaMutable(auth!.workspaceId);
       const persona = await prisma.persona.findFirst({
         where: { id: body.aiPersonaId, workspaceId: auth!.workspaceId },
         select: { id: true },

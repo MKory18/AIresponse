@@ -52,6 +52,7 @@ export async function runExtraction(
     conversation,
     settings,
     activePersona,
+    hermesPersona,
     customer,
     customerText,
     recentMessages,
@@ -263,6 +264,21 @@ export async function runExtraction(
         memories: extraction.memories,
       });
     }
+    // Hermes external-persona mode: NO HumanHandoff records, NO HANDOFF
+    // terminal. The order stays blocked by OrderService rules (nothing is
+    // confirmed), the block is audit-visible, and Hermes still replies so
+    // the conversation stays OPEN and reprocessable.
+    if (hermesPersona) {
+      if (!params.dryRun) {
+        await recordAudit(db, {
+          workspaceId: params.workspaceId,
+          action: "conversation.review_requested",
+          entityType: "Conversation",
+          entityId: conversation.id,
+          metadata: { reason: "ORDER_REQUIRES_HUMAN" },
+        });
+      }
+    } else {
     const { createHandoff } = await import("@/modules/handoffs/handoff-service");
     if (!params.dryRun) {
       await createHandoff(db, {
@@ -314,9 +330,14 @@ export async function runExtraction(
         persona: activePersona,
       },
     };
+    }
   }
 
-  // 9. Handoff policy.
+  // 9. Handoff policy — SUSPENDED in Hermes external-persona mode: no
+  // automatic handoff on injection/complaint/request/low confidence, no
+  // confidence thresholds gating replies, no HANDOFF terminals. Hermes owns
+  // the linguistic handling; injection content is still treated as
+  // untrusted data (delimiters + INJECTION_ECHO guardrail stay).
   const handoffThreshold = settings?.humanHandoffThreshold ?? 0.5;
   const mustHandoff =
     injection ||
@@ -325,7 +346,7 @@ export async function runExtraction(
     extraction.intent === "COMPLAINT" ||
     extraction.confidence < handoffThreshold;
 
-  if (mustHandoff && !params.dryRun) {
+  if (!hermesPersona && mustHandoff && !params.dryRun) {
     // Save memories even on handoff turns — complaints/requests carry facts.
     if (extraction.memories.length) {
       await saveMemories(db, {

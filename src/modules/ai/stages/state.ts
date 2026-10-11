@@ -67,6 +67,13 @@ export interface GatingState {
   settings: AISettingsLike | null;
   persona: PersonaConfig;
   activePersona: { id: string | null; name: string; source: string; version: number | null };
+  /**
+   * Hermes external-persona mode: the resolved reply provider IS Hermes, so
+   * reply personality is owned externally. Local persona rows/templates must
+   * not shape replies, confidence handoffs and auto-handoffs are suspended,
+   * and failures stay OPEN without HumanHandoff records.
+   */
+  hermesPersona: boolean;
   customer: Customer;
   channelRow: { displayName: string | null; externalId: string | null } | null;
   customerText: string;
