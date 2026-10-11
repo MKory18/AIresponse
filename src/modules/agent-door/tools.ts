@@ -361,6 +361,12 @@ export function hermesExternalRef(idempotencyKey: string): string {
 
 const DIALECTS = ["levantine", "syrian", "jordanian", "msa"] as const;
 
+const SEGMENT_LABELS_AR: Record<(typeof SEGMENT_KINDS)[number], string> = {
+  messaged_no_order: "راسلوا وما طلبوا",
+  cancelled_before_shipping: "ألغوا قبل الشحن",
+  repeat_product: "وقت إعادة الشراء",
+};
+
 // ── الأدوات ─────────────────────────────────────────────────────────────────
 export const TOOLS: ToolDef[] = [
   {
@@ -665,7 +671,7 @@ export const TOOLS: ToolDef[] = [
         message_ar: known ? "القالب مستخدم قبل بحملة معتمدة" : "القالب أول مرة بالردود — تأكد إنه معتمد بميتا قبل الاعتماد",
       });
       const title = redactContacts(
-        `حملة إعادة تواصل واتساب (${input.segment.kind})${input.product_code ? ` · ${input.product_code}` : ""} · ${input.template_ref}`
+        `حملة إعادة تواصل واتساب (${SEGMENT_LABELS_AR[input.segment.kind as keyof typeof SEGMENT_LABELS_AR] ?? input.segment.kind})${input.product_code ? ` · ${input.product_code}` : ""} · ${input.template_ref}`
       ).slice(0, 200);
       if (ctx.dryRun) {
         return {

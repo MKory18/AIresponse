@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { HermesProviderRisk } from "@/components/agents/hermes-provider-risk";
 
 type Settings = {
   provider: string;
@@ -36,6 +37,9 @@ export default function AISettingsPage() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // P12: المزود المختار حاليًا بالنموذج (لتنبيه Hermes الأحمر لحظة الاختيار).
+  const [providerSel, setProviderSel] = useState<string | null>(null);
+  const [fallbackSel, setFallbackSel] = useState<string | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoadError(null);
@@ -145,7 +149,7 @@ export default function AISettingsPage() {
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="المزود">
-            <Select name="provider" defaultValue={settings.provider}>
+            <Select name="provider" defaultValue={settings.provider} onChange={(e) => setProviderSel(e.target.value)}>
               {["mock", "openai", "openrouter", "internal", "hermes"].map((p) => (
                 <option key={p} value={p}>{p === "hermes" ? "hermes — Hermes Agent" : p}</option>
               ))}
@@ -169,8 +173,13 @@ export default function AISettingsPage() {
           <p className="-mt-1 rounded-xl bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-700 ring-1 ring-inset ring-sky-500/25 dark:text-sky-300 md:col-span-2">
             Hermes Agent: شغّل <span dir="ltr" className="num">hermes gateway</span> ثم ضع في الخادم <span dir="ltr" className="num">HERMES_BASE_URL=http://127.0.0.1:8642/v1</span> و <span dir="ltr" className="num">HERMES_API_KEY</span> (يساوي API_SERVER_KEY) واختر المزود <span dir="ltr" className="num">hermes</span> والنموذج <span dir="ltr" className="num">hermes-agent</span>. لإدخال عنوان محلي/داخلي هنا مباشرة يجب تفعيل <span dir="ltr" className="num">HERMES_ALLOW_PRIVATE_NETWORK=true</span> في بيئة الخادم أولًا. بعدها Hermes يستلم كل رسائل العملاء ويولّد الردود — مع بقاء حماية الأسعار والطلبات وتحويل الموظف (HUMAN_ACTIVE) كما هي.
           </p>
+          {((providerSel ?? settings.provider) === "hermes" || (fallbackSel ?? settings.fallbackProvider ?? "") === "hermes") && (
+            <div className="md:col-span-2">
+              <HermesProviderRisk asFallback={(providerSel ?? settings.provider) !== "hermes"} />
+            </div>
+          )}
           <Field label="مزود البديل (عند الفشل فقط)">
-            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>
+            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""} onChange={(e) => setFallbackSel(e.target.value)}>
               <option value="">بلا بديل</option>
               {["mock", "openai", "openrouter", "internal", "hermes"].map((p) => (
                 <option key={p} value={p}>{p}</option>

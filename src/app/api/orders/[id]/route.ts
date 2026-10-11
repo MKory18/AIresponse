@@ -15,7 +15,16 @@ export const GET = createHandler(
       orderBy: { createdAt: "desc" },
       take: 50,
     });
-    return ok({ ...order, timeline });
+    // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع للمتصفح أبدًا.
+    const { ctwaClidEnc: _ctwa, psidEnc: _psid, ...safe } = order as typeof order & { ctwaClidEnc?: unknown; psidEnc?: unknown };
+    void _ctwa;
+    void _psid;
+    // P12: وضع اتصال الـ OMS (بلا أي سر) لبطاقة الترحيل بصفحة الطلب.
+    const oms = await prisma.omsConnection.findUnique({
+      where: { workspaceId: auth!.workspaceId },
+      select: { mode: true, isActive: true, autoHandoff: true, apiVersion: true },
+    });
+    return ok({ ...safe, timeline, oms });
   }
 );
 

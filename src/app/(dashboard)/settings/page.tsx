@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import { ArrowLeft, Bot, Settings as SettingsIcon, Users } from "lucide-react";
+import { ArrowLeft, Bot, Cable, Network, Settings as SettingsIcon, Users } from "lucide-react";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { t } from "@/lib/i18n";
 
@@ -7,6 +7,8 @@ export default function SettingsPage() {
   const sections = [
     { href: "/settings/ai", title: "إعدادات AI", desc: "المزود، النماذج، حرارة التوليد، حدود الثقة، والتشغيل/الإيقاف.", icon: Bot },
     { href: "/settings/team", title: "الفريق والصلاحيات", desc: "الأعضاء، الدعوات، الأدوار، التعليق، وإعدادات مساحة العمل.", icon: Users },
+    { href: "/settings/integrations", title: "الربط مع الأنظمة", desc: "الـ OMS · الميديا باير · الكليبر · المالية · سيستم 1 · الأزمات · المهام · مساحة العمل — الروابط والتوكنات وسجل الصادر.", icon: Cable },
+    { href: "/settings/agents", title: "باب الوكلاء (Hermes)", desc: "مسودات Hermes بانتظار قرارك · توكن الجسر · زر الإيقاف · سجل كل نداء.", icon: Network },
   ];
   return (
     <div className="page-wrap">

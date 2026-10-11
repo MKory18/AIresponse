@@ -21,5 +21,8 @@ export const NAV_ITEMS: { href: string; label: string; icon: string; permission:
   { href: "/handoffs", label: t.nav.handoffs, icon: "Hand", permission: "handoffs.read" },
   { href: "/analytics", label: t.nav.analytics, icon: "ChartNoAxesCombined", permission: "analytics.read" },
   { href: "/settings", label: t.nav.settings, icon: "Settings", permission: "settings.manage" },
+  // P12 — منظومة Zaki: الربط مع الأنظمة وباب الوكلاء (Hermes).
+  { href: "/settings/integrations", label: "الربط مع الأنظمة", icon: "Cable", permission: "settings.manage" },
+  { href: "/settings/agents", label: "باب الوكلاء", icon: "AgentBot", permission: "settings.manage" },
   { href: "/settings/team", label: t.nav.team, icon: "Users", permission: "users.manage" },
 ];

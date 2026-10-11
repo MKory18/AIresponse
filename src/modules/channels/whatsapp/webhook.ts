@@ -2,6 +2,7 @@ import { enqueueJob } from "@/modules/jobs/service";
 import { childLogger } from "@/core/logger";
 import { deriveWhatsAppEventId } from "./normalizer";
 import { WhatsAppChannelAdapter } from "./adapter";
+import { applyWhatsAppStatuses, extractWhatsAppStatuses } from "./statuses";
 import { getChannelAdapter } from "../registry";
 import { ChannelNotSupportedError } from "../types";
 import type { Db } from "@/modules/customers/service";
@@ -89,6 +90,14 @@ async function ingestSingleNumber(db: Db, payload: unknown, phoneNumberId: strin
   if (!(adapter instanceof WhatsAppChannelAdapter)) {
     throw new ChannelNotSupportedError("WHATSAPP");
   }
+  // P12: إشارات التسليم (واصل · مقروء · فشل) لرسائلنا الصادرة — أرقام
+  // نتائج الحملات والكليبر منها. خفيفة: تحديث برقم الرسالة بس، بالطلب نفسه.
+  const signals = extractWhatsAppStatuses(payload, phoneNumberId);
+  if (signals.length > 0) {
+    const n = await applyWhatsAppStatuses(db, workspaceId, signals);
+    log.info({ phoneNumberId, signals: signals.length, updated: n }, "whatsapp_statuses_applied");
+  }
+
   const normalized = adapter.receiveMessage(payload).filter((m) =>
     (m.metadata as { phoneNumberId?: string } | undefined)?.phoneNumberId === phoneNumberId
   );

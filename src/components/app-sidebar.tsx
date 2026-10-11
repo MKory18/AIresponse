@@ -8,6 +8,7 @@ import {
   MessageCircle, BookOpen, UserRound, FlaskConical, Radio, Workflow, Clock,
   Hand, ChartNoAxesCombined, Settings, LogOut, X,
   ChevronsRight, ChevronsLeft, Bell, SlidersHorizontal, GitBranch, Megaphone,
+  Cable, Bot,
 } from "lucide-react";
 import type { LucideProps } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -48,6 +49,8 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   ChartNoAxesCombined,
   Settings,
   SlidersHorizontal,
+  Cable,
+  AgentBot: Bot,
 };
 
 function NavLink({
@@ -139,11 +142,17 @@ export function Sidebar({
     });
   }
 
+  // الرابط الأطول المطابق بس هو النشط (/settings/integrations مش /settings كمان).
+  const activeHref = items
+    .map((i) => i.href)
+    .filter((href) => pathname === href || pathname.startsWith(href + "/"))
+    .sort((a, b) => b.length - a.length)[0];
+
   function navList(coll: boolean, onNavigate?: () => void) {
     return (
       <nav aria-label={t.a11y.mainNav} className="flex-1 space-y-0.5 overflow-y-auto px-3 py-3">
         {items.map(({ href, label, icon, badge }) => {
-          const active = pathname === href || pathname.startsWith(href + "/");
+          const active = href === activeHref;
           return (
             <NavLink
               key={href}

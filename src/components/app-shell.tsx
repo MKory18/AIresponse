@@ -41,7 +41,9 @@ export function AppShell({
   const fullBleed = pathname === "/conversations";
 
   const crumbs = useMemo(() => {
-    const found = navItems.find((n) => pathname === n.href || pathname.startsWith(n.href + "/"));
+    const found = navItems
+      .filter((n) => pathname === n.href || pathname.startsWith(n.href + "/"))
+      .sort((a, b) => b.href.length - a.href.length)[0];
     const list = [{ href: "/dashboard", label: t.nav.dashboard }];
     if (found && found.href !== "/dashboard") list.push({ href: found.href, label: found.label });
     return list;

@@ -353,7 +353,14 @@ export async function listOrders(
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
   });
   const hasMore = orders.length > limit;
-  const items = hasMore ? orders.slice(0, limit) : orders;
+  const page = hasMore ? orders.slice(0, limit) : orders;
+  // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع بأي قائمة.
+  const items = page.map((o) => {
+    const { ctwaClidEnc: _c, psidEnc: _p, ...rest } = o as typeof o & { ctwaClidEnc?: unknown; psidEnc?: unknown };
+    void _c;
+    void _p;
+    return rest;
+  });
   return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
 }
 
