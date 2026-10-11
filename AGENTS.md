@@ -80,6 +80,7 @@ npm run build
 | الـ OMS | `src/modules/oms/` — `app-webhook.ts` (أحداث التطبيقات الحقيقية) · `manual.ts` (نص الإدخال + الربط) · `handoff.ts` · `auto-handoff.ts` (8 محاولات + كنس ساعي) · `client.ts` (legacy · v1) |
 | باب الوكلاء (Hermes) | `src/modules/agent-door/` — `tools.ts` (11 أداة · مخططات حرفية) · `door.ts` · `drafts.ts` · `status.ts` |
 | المزوّد الخارجي (الوكيل الذكي) | `src/modules/ai/router.ts` (`isHermesSelected` · `isHermesPersonaMode`) · `stages/*` · `hermes-diagnostics.ts` — الشخصيات المحلية بتقود الصوت بكل مزوّد · ⚠️ بلا تحويل تلقائي للموظف على المسار الخارجي |
+| مدة الاحتفاظ بالحمولة الخام | `src/modules/channels/webhook-retention.ts` — كنس ساعي من المجدول · `WEBHOOK_PAYLOAD_RETENTION_DAYS` (30 · `0` مطفي) · الصف يبقى (عدم التكرار) |
 | العقود | `contracts/` (الأصل) · `tests/contracts-*.test.ts` |
 | المسارات | `/api/v1/*` (القدرة · حملات الكليبر · أحداث الأنظمة) · `/api/agent/tools` · `/api/agent/call` · `/api/webhooks/oms/[key]` · `/api/integrations/*` |
 | الواجهة | `settings/integrations` · `settings/agents` · `settings/ai` · بطاقة الـ OMS بصفحة الطلب · تبويب الامتثال بالمنتج · بطاقة الموافقة بالمحادثة |
@@ -104,4 +105,4 @@ npm run build
 - ⚠️ سيستم 7 على Node 20 (انتهى دعمه نيسان 2026 — بلا تحديثات أمان).
   🔧 نقل الـ Dockerfile والـ CI لـ Node 22 بطلب دمج لحاله (الكود متجرّب على 22 محليًا · الـ OMS على 24).
 - ⚠️ الريبوهات عامة · 3 نسخ من الـ OMS — التصحيح فوق بجدول الريبوهات.
-- تحقق حي مع الأنظمة بعد النشر (روابط وتوكنات حقيقية) · سيستم 6 (الأزمات) غير مبني · وسائط واتساب الواردة · مدة احتفاظ `WebhookEvent.payload`.
+- تحقق حي مع الأنظمة بعد النشر (روابط وتوكنات حقيقية) · سيستم 6 (الأزمات) غير مبني.

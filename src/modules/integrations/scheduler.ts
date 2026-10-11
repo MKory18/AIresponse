@@ -64,6 +64,13 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
   // OMS كان واقف ← إعادة بنفس المفتاح.
   if (hourly) await sweepStuckOmsHandoffs(db, now).catch((err) => log.error({ err }, "oms_handoff_sweep_failed"));
 
+  // مدة الاحتفاظ بحمولة أحداث القنوات الخام (أرقام · نصوص · رمز النقرة):
+  // كنس عام مش لكل مساحة — `WebhookEvent.workspaceId` ممكن يكون فاضي.
+  if (hourly) {
+    const { purgeOldWebhookPayloads } = await import("@/modules/channels/webhook-retention");
+    await purgeOldWebhookPayloads(db, now).catch((err) => log.error({ err }, "webhook_payload_purge_failed"));
+  }
+
   const conns = (await (db as unknown as { integrationConnection?: { findMany: (a: unknown) => Promise<unknown> } }).integrationConnection?.findMany({
     where: { enabled: true },
     select: { workspaceId: true, system: true, enabled: true },
