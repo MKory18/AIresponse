@@ -33,9 +33,6 @@ export default function ChannelsPage() {
   const [oauthConfigured, setOauthConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
-  // Hermes external-persona mode: per-page persona binding must not silently
-  // change replies (server also refuses it) — the selects stay disabled.
-  const [hermesMode, setHermesMode] = useState(false);
   const [pendingPages, setPendingPages] = useState<{ id: string; name: string }[]>([]);
   const [selectionToken, setSelectionToken] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
@@ -47,10 +44,9 @@ export default function ChannelsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [connRes, personaRes, statusRes] = await Promise.all([
+      const [connRes, personaRes] = await Promise.all([
         fetch("/api/channels/facebook"),
         fetch("/api/personas"),
-        fetch("/api/ai/status").catch(() => null),
       ]);
       if (connRes.ok) {
         const data = await connRes.json();
@@ -63,12 +59,6 @@ export default function ChannelsPage() {
         const data = await personaRes.json();
         const list = (data.items ?? data.personas ?? []) as PersonaOption[];
         setPersonas(list.map((p) => ({ id: p.id, name: p.name })));
-      }
-      try {
-        const st = statusRes && statusRes.ok ? await statusRes.json() : null;
-        setHermesMode(st?.effectiveProvider?.name === "hermes");
-      } catch {
-        setHermesMode(false);
       }
     } catch {
       setError("تعذّر تحميل القنوات المربوطة");
@@ -253,9 +243,7 @@ export default function ChannelsPage() {
             <select
               value={personaDrafts[c.pageId!] ?? c.aiPersonaId ?? ""}
               onChange={(e) => setPersonaDrafts((prev) => ({ ...prev, [c.pageId!]: e.target.value }))}
-              disabled={hermesMode}
-              title={hermesMode ? "شخصية الرد تُدار في Hermes" : undefined}
-              className="h-9 min-w-40 flex-1 rounded-xl border border-line bg-surface px-2.5 text-xs font-medium text-ink outline-none focus:border-brand-400 disabled:opacity-50"
+              className="h-9 min-w-40 flex-1 rounded-xl border border-line bg-surface px-2.5 text-xs font-medium text-ink outline-none focus:border-brand-400"
               aria-label={t.inbox.aiPersonaLabel}
             >
               <option value="">الافتراضية للمساحة</option>
@@ -270,16 +258,11 @@ export default function ChannelsPage() {
               variant="secondary"
               onClick={() => savePersona(c.pageId!)}
               loading={savingPersona === c.pageId}
-              disabled={savingPersona === c.pageId || hermesMode}
+              disabled={savingPersona === c.pageId}
             >
               {t.common.save}
             </Button>
           </div>
-          {hermesMode && (
-            <p className="mt-2 rounded-lg bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-700 ring-1 ring-inset ring-sky-500/20 dark:text-sky-300">
-              ربط الشخصيات المحلية معطّل — شخصية الرد تُدار داخل Hermes.
-            </p>
-          )}
           <div className="mt-3 flex gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => testConnection(c.pageId!)} loading={testing === c.pageId} disabled={testing === c.pageId}>
               {testing === c.pageId ? "جارٍ الاختبار…" : "اختبار الاتصال"}

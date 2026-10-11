@@ -405,7 +405,7 @@ export function resolveAIProvider(opts: {
     const key = opts.hermesKey?.trim();
     if (!base || !key) {
       throw new AIProviderError(
-        `AI_NOT_CONFIGURED: AI_PROVIDER="hermes" is configured but HERMES_BASE_URL or HERMES_API_KEY is missing. Set both (HERMES_BASE_URL like http://127.0.0.1:8642/v1, HERMES_API_KEY = Hermes API_SERVER_KEY). Refusing mock fallback — no fake replies will be sent.`
+        `AI_NOT_CONFIGURED: AI_PROVIDER="hermes" is configured but HERMES_BASE_URL or HERMES_API_KEY is missing. Set both (HERMES_BASE_URL like http://127.0.0.1:8642/v1, HERMES_API_KEY = the gateway API key). Refusing mock fallback — no fake replies will be sent.`
       );
     }
     return new OpenAICompatibleProvider({

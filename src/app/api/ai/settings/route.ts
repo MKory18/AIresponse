@@ -64,14 +64,14 @@ export const PATCH = createHandler(
         const sync = validateHermesEndpoint(body.customBaseUrl, { allowPrivateNetwork });
         if (!sync.ok) {
           throw new AppError(
-            `عنوان Hermes مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة`,
+            `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة`,
             422,
             "ENDPOINT_REJECTED"
           );
         }
         const dns = await assertHermesEndpointResolves(body.customBaseUrl, { allowPrivateNetwork });
         if (!dns.ok) {
-          throw new AppError(`عنوان Hermes مرفوض (${dns.reason}) — تحقق من العنوان وأن DNS يحله لوجهة مسموحة`, 422, "ENDPOINT_REJECTED");
+          throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — تحقق من العنوان وأن DNS يحله لوجهة مسموحة`, 422, "ENDPOINT_REJECTED");
         }
       } else {
         const sync = validateEndpointUrl(body.customBaseUrl);

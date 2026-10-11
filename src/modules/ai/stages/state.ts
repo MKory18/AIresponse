@@ -68,10 +68,10 @@ export interface GatingState {
   persona: PersonaConfig;
   activePersona: { id: string | null; name: string; source: string; version: number | null };
   /**
-   * Hermes external-persona mode: the resolved reply provider IS Hermes, so
-   * reply personality is owned externally. Local persona rows/templates must
-   * not shape replies, confidence handoffs and auto-handoffs are suspended,
-   * and failures stay OPEN without HumanHandoff records.
+   * External-provider reply path (Hermes): the SELECTED local persona still
+   * drives voice (the gateway carries no personaId parameter). This flag only
+   * suspends AUTOMATIC handoffs — activating a persona never reintroduces
+   * them, and failures keep conversations OPEN with no HumanHandoff records.
    */
   hermesPersona: boolean;
   customer: Customer;

@@ -1,7 +1,6 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { rollbackVersion } from "@/modules/ai/persona-versions";
-import { assertLocalPersonaMutable } from "@/modules/ai/persona-control";
 
 type Params = { id: string; version: string };
 
@@ -17,7 +16,5 @@ export const POST = createHandler({ permission: "personas.write" }, async ({ aut
     const { AppError } = await import("@/core/errors");
     throw new AppError("Invalid version", 422, "VALIDATION_ERROR");
   }
-  // Rollback restores live instructions — refused while Hermes owns replies.
-  await assertLocalPersonaMutable(auth!.workspaceId);
   return ok(await rollbackVersion(prisma, auth!, id, v));
 });

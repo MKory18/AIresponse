@@ -58,26 +58,13 @@ export default function PersonasPage() {
   const [error, setError] = useState<string | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<{ personaId: string; version: number; name: string } | null>(null);
   const [versionBusy, setVersionBusy] = useState<string | null>(null);
-  // Hermes external-persona mode: reply personality is owned by the Hermes
-  // agent — local persona edits must not silently change replies. Mutations
-  // stay disabled here (server also refuses them); history remains readable.
-  const [hermesMode, setHermesMode] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [personasRes, statusRes] = await Promise.all([
-        fetch("/api/personas"),
-        fetch("/api/ai/status").catch(() => null),
-      ]);
+      const personasRes = await fetch("/api/personas");
       if (!personasRes.ok) throw new Error();
       setPersonas((await personasRes.json()).items);
       setError(null);
-      try {
-        const st = statusRes && statusRes.ok ? await statusRes.json() : null;
-        setHermesMode(st?.effectiveProvider?.name === "hermes");
-      } catch {
-        setHermesMode(false);
-      }
     } catch {
       setError("تعذّر تحميل الشخصيات");
     } finally {
@@ -227,16 +214,11 @@ export default function PersonasPage() {
         title={t.pages.personasTitle}
         description={t.pages.personasDesc}
         actions={
-          <Button size="sm" onClick={startCreate} disabled={hermesMode} title={hermesMode ? "شخصية الرد تُدار في Hermes" : undefined}>
+          <Button size="sm" onClick={startCreate}>
             <Plus size={14} /> شخصية جديدة
           </Button>
         }
       />
-      {hermesMode && (
-        <GlassCard className="border-sky-500/25 bg-sky-500/[0.07] px-4 py-3 text-xs leading-relaxed text-sky-800 ring-1 ring-inset ring-sky-500/20 dark:text-sky-200" role="note">
-          شخصية الرد تُدار الآن داخل <span dir="ltr" className="num font-bold">Hermes</span> — تعديل الشخصيات المحلية أو تفعيلها أو نشر إصداراتها لن يغيّر ردود العملاء. السجل أدناه للقراءة فقط. لإعادة التحكم المحلي بدّل المزود عن <span dir="ltr" className="num">hermes</span> من إعدادات الذكاء الاصطناعي.
-        </GlassCard>
-      )}
 
       {loading && (
         <div className="space-y-2.5">
@@ -262,7 +244,7 @@ export default function PersonasPage() {
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ink">
                     {p.name}
-                    {p.isActive && <Badge tone="DELIVERED" dot>نشطة</Badge>}
+                    {p.isActive && <Badge tone="DELIVERED" dot>الافتراضية للمساحة</Badge>}
                     <span className="num text-[11px] font-medium text-ink-muted">v{p.version ?? 1}</span>
                   </p>
                   <p className="num mt-1 text-xs text-ink-muted">
@@ -272,17 +254,17 @@ export default function PersonasPage() {
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {!p.isActive && (
-                  <Button size="sm" variant="success" onClick={() => activate(p)} disabled={hermesMode}>
-                    <Power size={13} /> تفعيل
+                  <Button size="sm" variant="success" onClick={() => activate(p)}>
+                    <Power size={13} /> تعيين كافتراضية
                   </Button>
                 )}
-                <Button size="sm" variant="secondary" onClick={() => startEdit(p)} disabled={hermesMode}>
+                <Button size="sm" variant="secondary" onClick={() => startEdit(p)}>
                   <Pencil size={13} /> {t.common.edit}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => loadVersions(p.id)}>
                   الإصدارات
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => snapshot(p.id)} disabled={hermesMode}>
+                <Button size="sm" variant="ghost" onClick={() => snapshot(p.id)}>
                   مسودة من الحالية
                 </Button>
               </div>
@@ -296,8 +278,8 @@ export default function PersonasPage() {
                     <div key={v.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-2/60 px-3 py-2 text-xs">
                       <span className="text-ink">v{v.version} · {v.status} · {v.name}</span>
                       <span className="flex gap-1.5">
-                        {v.status === "DRAFT" && <Button size="sm" variant="secondary" disabled={versionBusy !== null || hermesMode} loading={versionBusy === `publish:${p.id}:${v.version}`} onClick={() => publish(p.id, v.version)}>نشر</Button>}
-                        {(v.status === "PUBLISHED" || v.status === "ROLLED_BACK") && <Button size="sm" variant="ghost" disabled={versionBusy !== null || hermesMode} onClick={() => setRollbackTarget({ personaId: p.id, version: v.version, name: p.name })}>رجوع لهذا</Button>}
+                        {v.status === "DRAFT" && <Button size="sm" variant="secondary" disabled={versionBusy !== null} loading={versionBusy === `publish:${p.id}:${v.version}`} onClick={() => publish(p.id, v.version)}>نشر</Button>}
+                        {(v.status === "PUBLISHED" || v.status === "ROLLED_BACK") && <Button size="sm" variant="ghost" disabled={versionBusy !== null} onClick={() => setRollbackTarget({ personaId: p.id, version: v.version, name: p.name })}>رجوع لهذا</Button>}
                       </span>
                     </div>
                   ))}
@@ -315,7 +297,7 @@ export default function PersonasPage() {
             icon={<UserRound size={28} strokeWidth={1.5} />}
             title="لا توجد شخصيات بعد"
             description="أنشئ شخصية لتحديد نبرة المساعد وأسلوبه."
-            action={<Button size="sm" onClick={startCreate} disabled={hermesMode}><Plus size={14} /> شخصية جديدة</Button>}
+            action={<Button size="sm" onClick={startCreate}><Plus size={14} /> شخصية جديدة</Button>}
           />
         </GlassCard>
       )}
@@ -327,7 +309,7 @@ export default function PersonasPage() {
           </span>
           معاينة الرد (تجربة آمنة — لا يُرسل أي شيء للفيسبوك)
         </h2>
-        <Button size="sm" variant="secondary" onClick={runPreview} loading={previewing} disabled={previewing || hermesMode} className="mt-3" title={hermesMode ? "المعاينة تستخدم شخصية Hermes الخارجية" : undefined}>
+        <Button size="sm" variant="secondary" onClick={runPreview} loading={previewing} disabled={previewing} className="mt-3">
           {!previewing && <Play size={13} />}
           {previewing ? "جارٍ التوليد…" : "تشغيل المعاينة على سؤال «بكم المنتج؟»"}
         </Button>

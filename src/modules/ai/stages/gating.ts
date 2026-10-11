@@ -87,14 +87,17 @@ export async function runGating(
     "ai_started"
   );
 
-  // 4. Config + customer + channel page + recent history: independent reads
-  // in parallel. History has no dependency on the others — serializing it
-  // wasted one full DB round-trip on every single AI turn (critical-path
-  // latency). Persona resolution is NOT here: in Hermes external-persona
-  // mode no local persona may influence the reply, so it is skipped
-  // entirely (no DB read); otherwise it resolves after provider selection.
-  const [settingsRaw, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
+  // 4. Config + persona (page-assigned → workspace default) + customer +
+  // channel page + recent history: independent reads in parallel. History has
+  // no dependency on the others — serializing it wasted one full DB round-trip
+  // on every single AI turn (critical-path latency). Persona resolution is
+  // ALWAYS active: the selected persona (channel → workspace default →
+  // builtin) drives reply voice in every provider mode, including Hermes —
+  // Hermes carries no personaId parameter, so local instructions travel in
+  // the request via the standard message builder.
+  const [settingsRaw, resolvedPersona, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
+    resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
     db.channel.findUnique({
       where: { id: conversation.channelId },
@@ -132,7 +135,7 @@ export async function runGating(
 
   // Fail-closed: a misconfigured real provider must never produce fake
   // replies. Surface AI_FAILED (job retry + audit) with zero outbound sends
-  // and zero order/memory writes. In Hermes external-persona mode no
+  // and zero order/memory writes. On the external-provider path (Hermes) no
   // HumanHandoff is created either — the conversation stays OPEN and the
   // failure remains visible and reprocessable.
   // P6: the workspace AISettings.provider choice is EFFECTIVE (not display-
@@ -182,39 +185,29 @@ export async function runGating(
     return { terminal: { status: "AI_FAILED", error: `PERMANENT: ${message_text}` } };
   }
 
-  // Persona resolution — SKIPPED in Hermes external-persona mode: reply
-  // personality is owned by the externally-configured Hermes agent, so no
-  // local Persona row, version, or template may influence the reply path.
-  // Telemetry carries nulls (never local persona ids) in this mode.
+  // External-provider reply path (Hermes): the selected local persona still
+  // drives voice (resolved below); automatic handoffs stay suspended.
   const hermesPersona = isHermesPersonaMode(provider);
-  let persona: PersonaConfig;
-  let activePersona: { id: string | null; name: string; source: string; version: number | null };
-  if (hermesPersona) {
-    persona = {
-      name: "Hermes", language: "ar", dialect: null, tone: "external", formality: "external",
-      responseLength: "external", emojiLevel: 0, salesStyle: "external",
-      systemInstructions: null, prohibitedPhrases: [], customRules: [],
-    };
-    activePersona = { id: null, name: "Hermes", source: "hermes", version: null };
-  } else {
-    const resolvedPersona = await timed("persona", () =>
-      resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId })
-    );
-    persona = {
-      name: resolvedPersona.name,
-      language: resolvedPersona.language,
-      dialect: resolvedPersona.dialect,
-      tone: resolvedPersona.tone,
-      formality: resolvedPersona.formality,
-      responseLength: resolvedPersona.responseLength,
-      emojiLevel: resolvedPersona.emojiLevel,
-      salesStyle: resolvedPersona.salesStyle,
-      systemInstructions: resolvedPersona.systemInstructions,
-      prohibitedPhrases: resolvedPersona.prohibitedPhrases,
-      customRules: resolvedPersona.customRules,
-    };
-    activePersona = { id: resolvedPersona.id, name: resolvedPersona.name, source: resolvedPersona.source, version: resolvedPersona.version };
-  }
+
+  // Persona resolution — ALWAYS active. The selected persona (channel →
+  // workspace default → builtin) drives reply voice in every provider mode:
+  // the external gateway carries no personaId parameter, so the published
+  // local instructions travel inside the request via the standard message
+  // builder (proven by tests). Telemetry records the real persona id/version.
+  const persona: PersonaConfig = {
+    name: resolvedPersona.name,
+    language: resolvedPersona.language,
+    dialect: resolvedPersona.dialect,
+    tone: resolvedPersona.tone,
+    formality: resolvedPersona.formality,
+    responseLength: resolvedPersona.responseLength,
+    emojiLevel: resolvedPersona.emojiLevel,
+    salesStyle: resolvedPersona.salesStyle,
+    systemInstructions: resolvedPersona.systemInstructions,
+    prohibitedPhrases: resolvedPersona.prohibitedPhrases,
+    customRules: resolvedPersona.customRules,
+  };
+  const activePersona = { id: resolvedPersona.id, name: resolvedPersona.name, source: resolvedPersona.source, version: resolvedPersona.version };
   // P1 privacy gate: customer PII leaves the process ONLY through
   // sendProtected* (per-call token vault, restored locally afterwards).
   const customerPII = {

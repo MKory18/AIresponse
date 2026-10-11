@@ -2,7 +2,6 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
-import { assertLocalPersonaMutable } from "@/modules/ai/persona-control";
 
 type Params = { id: string };
 
@@ -25,8 +24,6 @@ export const PATCH = createHandler(
       return Response.json({ error: "NOT_FOUND" }, { status: 404 });
     }
     if (body.personaId) {
-      // Binding a local persona changes reply personality (unassign/null stays allowed).
-      await assertLocalPersonaMutable(auth!.workspaceId);
       const persona = await prisma.persona.findFirst({
         where: { id: body.personaId, workspaceId: auth!.workspaceId },
       });

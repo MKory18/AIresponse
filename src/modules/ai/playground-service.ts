@@ -1,7 +1,7 @@
 import { AppError, NotFoundError } from "@/core/errors";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { getAIProvider } from "./provider";
-import { getWorkspaceProvider, loadAISettings, resolveModel, isHermesPersonaMode } from "./router";
+import { getWorkspaceProvider, loadAISettings, resolveModel } from "./router";
 import { resolveChannelPersona, type ResolvedPersona } from "./channel-persona";
 import {
   buildKnowledgeContext,
@@ -10,7 +10,6 @@ import {
 } from "./context-builder";
 import {
   coreSystemRules,
-  hermesExternalPersonaHeader,
   personaPrompt,
   trustedDataPrompt,
   wrapUntrustedCustomerContent,
@@ -329,32 +328,7 @@ export async function sendPlaygroundMessage(
   const modelCfg = resolveModel(settings as never, task);
   const model = session.model ?? modelCfg.model;
 
-  const system = isHermesPersonaMode(provider)
-    ? [
-        hermesExternalPersonaHeader(),
-        trustedDataPrompt({
-          product: productCtx.product
-            ? {
-                name: productCtx.product.name,
-                price: `${productCtx.product.price} ${productCtx.product.currency ?? ""}`.trim(),
-                currency: productCtx.product.currency ?? "",
-                stockStatus: productCtx.product.stockStatus,
-                shortDescription: productCtx.product.shortDescription,
-                benefits: productCtx.product.benefits,
-                usage: productCtx.product.usage,
-                warnings: productCtx.product.warnings,
-                objections: productCtx.product.objections,
-                salesNotes: productCtx.product.salesNotes,
-                faqs: productCtx.product.faqs,
-              }
-            : undefined,
-          knowledge: { faqs: knowledgeCtx.knowledge.faqs, documents: knowledgeCtx.knowledge.documents },
-          customer: opts?.customerName?.trim()
-            ? { name: opts.customerName.trim().slice(0, 100), page: null }
-            : undefined,
-        }),
-      ].join("\n\n")
-    : [
+  const system = [
     coreSystemRules(),
     personaPrompt(persona),
     trustedDataPrompt({
@@ -379,14 +353,10 @@ export async function sendPlaygroundMessage(
         : undefined,
     }),
   ].join("\n\n");
-  const userPrompt = isHermesPersonaMode(provider)
-    ? [wrapUntrustedCustomerContent(text, transcript), "اكتب الرد النهائي الآن بشخصيتك المضبوطة في Hermes، ملتزمًا بالبيانات الموثوقة أعلاه. أعد النص فقط."].join("\n\n")
-    : [
+  const userPrompt = [
     wrapUntrustedCustomerContent(text, transcript),
     responseInstruction(persona),
   ].join("\n\n");
-  // Persona-controlled guardrail inputs stay out of Hermes replies.
-  const playgroundPhrases = isHermesPersonaMode(provider) ? [] : persona.prohibitedPhrases;
 
   // P1 privacy gate: operator-typed test turns may paste real customer
   // data — external models receive tokens only (restored locally for the
@@ -411,7 +381,7 @@ export async function sendPlaygroundMessage(
   const guard = validateResponse({
     response: responseText,
     context: productCtx.product ? ({ product: productCtx.product } as never) : null,
-    prohibitedPhrases: playgroundPhrases,
+    prohibitedPhrases: persona.prohibitedPhrases,
   });
   if (!guard.valid) {
     // NO static customer-facing fallback — the application never invents a
@@ -422,7 +392,7 @@ export async function sendPlaygroundMessage(
     const retryGuard = validateResponse({
       response: retryText,
       context: productCtx.product ? ({ product: productCtx.product } as never) : null,
-      prohibitedPhrases: playgroundPhrases,
+      prohibitedPhrases: persona.prohibitedPhrases,
     });
     if (!retryGuard.valid || !retryText) {
       throw new AppError("تعذر توليد رد ملتزم بالقواعد — أعد المحاولة", 502, "GUARDRAIL_REJECTED");

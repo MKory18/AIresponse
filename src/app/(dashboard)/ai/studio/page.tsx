@@ -54,6 +54,16 @@ const TASK_AR: Record<string, string> = {
   RETRIEVAL: "الاسترجاع",
 };
 
+// Display names for provider ids — the internal "hermes" value never shows.
+const PROVIDER_AR: Record<string, string> = {
+  mock: "وهمي (تجريبي)",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  internal: "داخلي",
+  hermes: "الوكيل الذكي",
+};
+const providerLabel = (id: string | null | undefined) => (id ? PROVIDER_AR[id] ?? id : "—");
+
 export default function AIStudioPage() {
   const [data, setData] = useState<StatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,8 +139,8 @@ export default function AIStudioPage() {
           المزود الفعّال والمزودون
         </h2>
         <p className="mt-2 text-xs text-ink-muted">
-          الفعّال: <strong>{data.effectiveProvider?.name ?? "—"}</strong> ({data.effectiveProvider?.delivery ?? "—"}) — الحالة: <strong>{STATUS_AR[data.effectiveProvider?.status ?? ""] ?? data.effectiveProvider?.status ?? "—"}</strong>
-          {" "}· الاختيار المهيأ: {data.provider} {data.fallback.configured ? `· البديل: ${data.fallback.model} (عند الفشل فقط)` : "· بلا بديل مهيأ"}
+          الفعّال: <strong>{providerLabel(data.effectiveProvider?.name)}</strong> ({data.effectiveProvider?.delivery ?? "—"}) — الحالة: <strong>{STATUS_AR[data.effectiveProvider?.status ?? ""] ?? data.effectiveProvider?.status ?? "—"}</strong>
+          {" "}· الاختيار المهيأ: {providerLabel(data.provider)} {data.fallback.configured ? `· البديل: ${data.fallback.model} (عند الفشل فقط)` : "· بلا بديل مهيأ"}
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           {data.providers.map((p) => {
@@ -139,7 +149,7 @@ export default function AIStudioPage() {
             return (
               <div key={p.id} className="rounded-xl border border-line bg-surface-2/50 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <strong className="text-sm text-ink" dir="ltr">{p.id}</strong>
+                  <strong className="text-sm text-ink">{providerLabel(p.id)}</strong>
                   <Badge tone={STATUS_TONE[shown] ?? "CLOSED"} dot>
                     {STATUS_AR[shown] ?? shown}
                     {r?.status !== shown && <span className="ms-1 font-normal text-[10px]">(حالة محفوظة — لم يُختبر حيًا)</span>}

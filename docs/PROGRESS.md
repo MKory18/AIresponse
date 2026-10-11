@@ -743,3 +743,11 @@
 **الحذف المستقبلي الموثق (Migration مستقلة لاحقًا، ليست الآن):** جداول `Persona`/`PersonaVersion` وعمود `Channel.aiPersonaId` وحقول الثقة في `AISettings` (`confidenceExecute/confidenceRespond/humanHandoffThreshold`) — تُحذف فقط بعد فترة تشغيل مستقرة بوضع Hermes + نسخة احتياطية. **لم يُحذف شيء الآن.**
 
 **التحقق:** ملف `tests/hermes-persona-mode.test.ts` (13 اختبارًا عبر `processAIMessage` الفعلي) + كامل البطارية (test/typecheck/lint/scan:secrets/build). **لم يُنشأ commit** — بانتظار مراجعة المالك.
+
+## Local Personas Drive Replies — Hermes Brand Removed (11 تشرين الأول 2026)
+
+**التغيير:** الشخصيات المحلية (Persona/PersonaVersion) عادت تقود صوت الردود في **كل** أوضاع المزود بما فيها الخارجي: البوابة لا تحمل `personaId` (مثبت من العقد — OpenAI-compatible فقط)، فالتعليمات المنشورة تُحقن في الطلب عبر بانِي الرسائل القياسي. تعليق التحويل التلقائي باقٍ في مسار المزود الخارجي (تفعيل الشخصية لا يعيد إنشاء Handoff، والفشل يُبقي OPEN). الـ fallback الصريح المهيأ يعمل ويُسجَّل (`fallbackAttempted` يُصحَّح حتى عند فشله).
+**إزالة القيود:** حُذف حارس 409 (`persona-control.ts`) وفُتحت كل مسارات Personas والقنوات؛ الواجهات (personas/channels/settings-ai) بلا تعطيل، مع شارة «الافتراضية للمساحة» وتمييز ربط القناة.
+**إخفاء الاسم:** لا «Hermes» في أي نص مرئي (تسميات عامة: الوكيل الذكي/مزوّد الذكاء الاصطناعي/الشخصية النشطة) — وبقيت القيمة الداخلية `hermes` و`HERMES_*` والمسارات والمصادقة والاختبارات والسجلات كما هي.
+**الأولوية المثبتة:** القناة → افتراضية المساحة → المضمنة، والإصدار المنشور يُسجَّل في التتبع.
+**التحقق:** `persona-management.test.ts` (مسارات حقيقية 201/200 + Playground بنفس الشخصية + مسح نصوص) + تحديث `hermes-persona-mode.test.ts`. **لم يُنشأ commit** — بانتظار مراجعة المالك.
