@@ -23,6 +23,11 @@ export const JOB_TYPES = [
   // P9 — Campaigns (durable start + bounded ticks).
   "run_campaign",
   "campaign_tick",
+  // P12 — الربط مع المنظومة (ترحيل تلقائي للـ OMS · تحقق رمز الكليبر ·
+  // إعادة قراءة قواعد الادعاءات من سيستم 1).
+  "handoff_order_to_oms",
+  "validate_attribution_code",
+  "refresh_product_compliance",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
@@ -56,8 +61,11 @@ export async function enqueueJob(
     // (PENDING/PROCESSING) job per idempotencyKey. Losing the insert race is
     // success — the winner's job will process the work idempotently.
     if ((err as { code?: string }).code === "P2002" && params.idempotencyKey) {
-      const existing = await (db as any).backgroundJob.findUnique({
-        where: { idempotencyKey: params.idempotencyKey },
+      // findFirst مش findUnique: الفريد جزئي (للنشطة بس) بالـ SQL، ومش معرّف
+      // بمخطط Prisma — findUnique عليه بيرمي خطأ تحقق بدل ما يرجع الفائز.
+      const existing = await (db as any).backgroundJob.findFirst({
+        where: { idempotencyKey: params.idempotencyKey, status: { in: ["PENDING", "PROCESSING"] } },
+        orderBy: { createdAt: "desc" },
       });
       if (existing) {
         log.info({ jobId: existing.id, type: params.type }, "job_enqueue_deduplicated");

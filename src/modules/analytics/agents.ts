@@ -49,7 +49,8 @@ export async function getAgentAnalytics(db: Db, workspaceId: string, q: RangeQue
       select: { id: true, assignedAgentId: true, createdAt: true },
     }),
     db.message.findMany({
-      where: { workspaceId, direction: "OUTBOUND", isNote: false, createdAt: range, senderId: { not: null }, senderType: "HUMAN" },
+      // P12: رسائل الحملات بتنحفظ HUMAN بمرسل «campaign-system» — مش موظف ولا رد.
+      where: { workspaceId, direction: "OUTBOUND", isNote: false, createdAt: range, senderId: { not: null, notIn: ["campaign-system"] }, senderType: "HUMAN" },
       select: { senderId: true, senderType: true },
     }),
     db.humanHandoff.findMany({

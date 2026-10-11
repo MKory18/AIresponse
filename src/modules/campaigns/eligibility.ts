@@ -23,6 +23,10 @@ export async function checkRecipientEligibility(
     channelType: string;
     channelId?: string | null;
     requireTemplate: boolean;
+    /** P12 — سقف التكرار (أيام): رسالة حملة مرسلة خلالها = استبعاد. */
+    frequencyCapDays?: number | null;
+    /** P12 — صف المستلم الحالي (لا يُحسب على نفسه). */
+    recipientId?: string | null;
   }
 ): Promise<RecipientCheck> {
   const customer = await db.customer.findUnique({ where: { id: input.customerId } });
@@ -32,6 +36,24 @@ export async function checkRecipientEligibility(
   if (customer.isBlacklisted) return { ok: false, reason: "BLACKLISTED" };
   if (customer.marketingConsent === "OPTED_OUT" || customer.marketingOptOutAt) return { ok: false, reason: "OPTED_OUT" };
   if (customer.marketingConsent !== "OPTED_IN") return { ok: false, reason: "NO_CONSENT" };
+
+  // P12 — سقف التكرار لحظة الإرسال (حملتان بنفس اليوم لا تتجاوزانه).
+  if (input.frequencyCapDays && input.frequencyCapDays > 0) {
+    const since = new Date(Date.now() - input.frequencyCapDays * 24 * 3600_000);
+    const recent = await (db as unknown as {
+      campaignRecipient: { findFirst: (a: unknown) => Promise<{ id: string } | null> };
+    }).campaignRecipient.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        customerId: input.customerId,
+        status: "SENT",
+        sentAt: { gte: since },
+        ...(input.recipientId ? { NOT: { id: input.recipientId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (recent) return { ok: false, reason: "FREQUENCY_CAP" };
+  }
 
   // قناة الاتصال: هوية موثوقة على نوع قناة الحملة — وجود رقم/معرف آخر لا يكفي.
   const identity = await db.channelIdentity.findFirst({

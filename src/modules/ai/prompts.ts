@@ -110,6 +110,8 @@ export function trustedDataPrompt(data: {
     objections: string[];
     salesNotes: string | null;
     faqs: { question: string; answer: string }[];
+    /** P12 — قواعد الادعاءات من سيستم 1. */
+    compliance?: { allowedClaims: string[]; bannedClaims: string[] } | null;
   };
   knowledge?: { faqs: { question: string; answer: string }[]; documents: { content: string }[] };
   media?: { title: string | null; url: string }[];
@@ -153,6 +155,13 @@ export function trustedDataPrompt(data: {
         p.objections.length ? `ردود على الاعتراضات: ${p.objections.join(" | ")}` : null,
         p.salesNotes ? `ملاحظات بيع: ${p.salesNotes}` : null,
         ...p.faqs.map((f) => `س: ${f.question} → ج: ${f.answer}`),
+        // P12 — قواعد الامتثال من سيستم 1: المسموح هو كل ما يُقال عن الفائدة، والممنوع لا يُكتب أبدًا.
+        p.compliance?.allowedClaims?.length
+          ? `الادعاءات المسموحة فقط (الامتثال): ${p.compliance.allowedClaims.join("، ")}`
+          : null,
+        p.compliance?.bannedClaims?.length
+          ? `ادعاءات ممنوعة منعًا باتًا — لا تكتبها ولا ما يشبهها: ${p.compliance.bannedClaims.join("، ")}`
+          : null,
       ]
         .filter(Boolean)
         .join("\n")

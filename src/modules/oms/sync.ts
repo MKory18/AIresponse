@@ -1,3 +1,4 @@
+import { checkSystemUrl } from "@/modules/integrations/connections";
 import { AppError } from "@/core/errors";
 import { decryptSecret } from "@/core/crypto";
 import { recordAudit } from "@/modules/audit/service";
@@ -15,7 +16,7 @@ export interface OmsSyncResult {
 async function getOmsConnection(db: Db, workspaceId: string) {
   const conn = await (db as any).omsConnection?.findUnique?.({ where: { workspaceId } });
   return conn as
-    | { id: string; baseUrl: string; tokenEncrypted: string; isActive: boolean }
+    | { id: string; baseUrl: string; tokenEncrypted: string; isActive: boolean; mode?: string; apiVersion?: string }
     | null;
 }
 
@@ -25,7 +26,21 @@ export async function buildOmsClient(db: Db, workspaceId: string) {
   if (!conn || !conn.isActive) {
     throw new AppError("OMS connection not configured", 422, "OMS_NOT_CONFIGURED");
   }
-  return createOmsClient({ baseUrl: conn.baseUrl, token: decryptSecret(conn.tokenEncrypted) });
+  // P12: الوضع اليدوي = لا باب API بالـ OMS — لا نداء بتوكن بديل.
+  if (conn.mode === "manual") {
+    throw new AppError("OMS sync needs the OMS API door (connection is in manual mode)", 409, "OMS_MANUAL_MODE");
+  }
+  // P12: اسم عام صار يشير لعنوان داخلي (DNS rebinding) = رفض قبل ما يطلع
+  // التوكن أو بيانات الزبون. (الروابط القديمة الخاصة بنفس السيرفر ما بتتأثر.)
+  const dns = await checkSystemUrl(conn.baseUrl);
+  if (!dns.ok && dns.reason === "DNS_NOT_GLOBAL_UNICAST") {
+    throw new AppError("رابط الـ OMS صار يشير لعنوان داخلي محجوب — انرفض النداء", 422, "OMS_URL_REJECTED");
+  }
+  return createOmsClient({
+    baseUrl: conn.baseUrl,
+    token: decryptSecret(conn.tokenEncrypted),
+    apiVersion: conn.apiVersion === "v1" ? "v1" : "legacy",
+  });
 }
 
 /**
@@ -223,7 +238,10 @@ export async function syncCustomersFromOms(db: Db, ctx: ActorContext, phones: st
   return result;
 }
 
-/** Upserts the OMS connection for a workspace (token stored encrypted). */
+/**
+ * Upserts the OMS connection for a workspace (token stored encrypted).
+ * @deprecated P12 — المسار يستخدم saveOmsConnection (connection.ts) بالحقول الجديدة.
+ */
 export async function upsertOmsConnection(
   db: Db,
   ctx: ActorContext,

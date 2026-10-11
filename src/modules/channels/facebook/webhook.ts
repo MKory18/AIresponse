@@ -1,6 +1,6 @@
 import { enqueueJob } from "@/modules/jobs/service";
 import { childLogger } from "@/core/logger";
-import { deriveEventId } from "./normalizer";
+import { deriveEventId, extractFacebookReferralSignals, type MetaWebhookPayload } from "./normalizer";
 import { normalizeFeedComments } from "./comments";
 import { FacebookChannelAdapter } from "./adapter";
 import { getChannelAdapter } from "../registry";
@@ -132,7 +132,10 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
     log.info({ pageId, commentCount }, "facebook.comments.persisted");
   }
 
-  if (normalized.length > 0) {
+  // P12: إحالات بلا رسالة (زبون قديم كبس إعلانًا/رابط رمز) — لمسة إسناد فقط.
+  const referralSignals = extractFacebookReferralSignals(payload as MetaWebhookPayload, pageId, externalEventId);
+
+  if (normalized.length > 0 || referralSignals.length > 0) {
     await enqueueJob(db, {
       workspaceId,
       type: "process_webhook_event",
@@ -141,6 +144,7 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
         workspaceId,
         channelAccountId: account.id,
         messages: normalized,
+        ...(referralSignals.length > 0 ? { referralSignals } : {}),
       },
     });
   } else {

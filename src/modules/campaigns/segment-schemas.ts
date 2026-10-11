@@ -24,6 +24,27 @@ export const segmentConditionSchema = z.discriminatedUnion("field", [
   z.object({ field: z.literal("orders.status"), op: cmp, value: strVal }).strict(),
   z.object({ field: z.literal("conversation.lastCustomerMessage"), op: z.enum(["WITHIN_DAYS", "OLDER_THAN_DAYS"]), days }).strict(),
   z.object({ field: z.literal("conversation.noReply"), op: z.enum(["EQ"]), value: z.boolean() }).strict(),
+  // P12 — شرائح الكليبر (عقد الكليبر IN03/LG07) — إضافات مغلقة بنفس الأسلوب:
+  // راسل برمز خلال [minDays, maxDays] يوم (رمز معيّن/بادئة/أي رمز صالح).
+  z.object({
+    field: z.literal("attribution.code"),
+    op: z.enum(["ANY", "EQ", "PREFIX"]),
+    value: z.string().regex(/^[A-Z0-9]{1,12}$/).optional(),
+    minDays: z.number().int().min(0).max(90),
+    maxDays: z.number().int().min(1).max(90),
+  }).strict(),
+  // ما طلب خلال آخر N يوم.
+  z.object({ field: z.literal("orders.noneWithinDays"), op: z.enum(["EQ"]), days }).strict(),
+  // عنده طلب بحالة من القائمة تغيّرت خلال [minDays, maxDays] (انلغى قبل الشحن · استلم من 30 يوم).
+  z.object({
+    field: z.literal("orders.statusBetweenDays"),
+    op: z.enum(["IN"]),
+    value: z.array(z.string()).min(1).max(9),
+    minDays: z.number().int().min(0).max(365),
+    maxDays: days,
+  }).strict(),
+  // سقف التكرار: ما وصلته رسالة حملة خلال آخر N يوم.
+  z.object({ field: z.literal("campaign.notReceivedWithinDays"), op: z.enum(["EQ"]), days }).strict(),
 ]);
 export type SegmentCondition = z.infer<typeof segmentConditionSchema>;
 
@@ -63,5 +84,7 @@ export const EXCLUSION_REASONS = [
   "CHANNEL_NOT_READY",
   "NO_CONVERSATION_ALLOWED",
   "TEMPLATE_REQUIRED",
+  // P12 — سقف التكرار (وصلته رسالة حملة خلال المدة المحددة).
+  "FREQUENCY_CAP",
 ] as const;
 export type ExclusionReason = (typeof EXCLUSION_REASONS)[number];

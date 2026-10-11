@@ -15,6 +15,7 @@ import { runJobs } from "../src/modules/jobs/handlers";
 import { processDueFollowUps } from "../src/modules/automation/followup-service";
 import { registerAutomationBridge } from "../src/modules/automation/engine";
 import { registerWorkflowBridge } from "../src/modules/automation/workflow-bridge";
+import { runIntegrationScheduler } from "../src/modules/integrations/scheduler";
 import { childLogger } from "../src/core/logger";
 
 const log = childLogger("worker");
@@ -54,6 +55,12 @@ async function cycle(): Promise<void> {
       } catch (err) {
         followUpOutcome = "failed";
         log.error({ err }, "worker_followups_failed");
+      }
+      // P12 — صندوق الصادر للأنظمة + الإنذارات والتقارير الدورية (idempotent).
+      try {
+        await runIntegrationScheduler(prisma);
+      } catch (err) {
+        log.error({ err }, "worker_integrations_failed");
       }
       cycles += 1;
       if (cycles % HEARTBEAT_EVERY_CYCLES === 0) {

@@ -57,7 +57,12 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
       type: m.mediaType,
       text: m.text,
       mediaUrl: m.mediaUrl,
-      metadata: { rawEventId: m.rawEventId, phoneNumberId: m.phoneNumberId },
+      metadata: {
+        rawEventId: m.rawEventId,
+        phoneNumberId: m.phoneNumberId,
+        // P12 — إحالة إعلان واتساب (تُحفظ مشفّرة بلمسة الإسناد، ولا يُحفظ ctwa_clid مع الرسالة).
+        ...(m.referral ? { referral: m.referral } : {}),
+      },
       sentAt: m.timestamp,
       channelId: this.ctx.channelId,
     }));

@@ -213,6 +213,34 @@ export async function createOrderFromDraft(
     // sales hooks are best-effort — never break order creation
   }
 
+  // P12 — لقطة الإسناد على الطلب (رقم الإعلان · رمز الكليبر · القناة) من
+  // الحلقة الفعّالة لحظة الإنشاء، ثم ترحيل تلقائي للـ OMS إذا مفعّل بالـ API.
+  // الاتنين best-effort: فشلهم ما بيكسر طلب انحفظ (الترحيل اليدوي متاح دايمًا).
+  try {
+    const { snapshotOrderAttribution } = await import("@/modules/integrations/attribution");
+    const conv = draft.conversationId
+      ? ((await db.conversation.findUnique({ where: { id: draft.conversationId }, select: { channelId: true } })) as { channelId?: string } | null)
+      : null;
+    const channel = conv?.channelId
+      ? ((await db.channel.findUnique({ where: { id: conv.channelId }, select: { type: true } })) as { type?: string } | null)
+      : null;
+    await snapshotOrderAttribution(db, {
+      id: order.id,
+      workspaceId: ctx.workspaceId,
+      conversationId: draft.conversationId,
+      createdAt: (order as { createdAt?: Date }).createdAt ?? new Date(),
+      channelType: channel?.type ?? null,
+    });
+  } catch {
+    // الإسناد معلومة إضافية — غيابها ما بيوقف الطلب
+  }
+  try {
+    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
+    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, order.id);
+  } catch {
+    // الترحيل التلقائي بيتأجل للزر اليدوي بصفحة الطلب
+  }
+
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,

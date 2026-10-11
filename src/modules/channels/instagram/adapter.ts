@@ -55,7 +55,7 @@ export class InstagramChannelAdapter implements ChannelAdapter {
         type: (m.mediaType === "TEXT" ? "TEXT" : m.mediaType === "FILE" ? "DOCUMENT" : m.mediaType) as NormalizedIncomingMessage["type"],
         text: m.text,
         mediaUrl: m.mediaUrl,
-        metadata: { rawEventId: m.rawEventId },
+        metadata: { rawEventId: m.rawEventId, ...(m.referral ? { referral: m.referral } : {}) },
         sentAt: m.timestamp,
         channelId: this.ctx.channelId,
       })

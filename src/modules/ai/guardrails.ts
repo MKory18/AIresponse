@@ -1,6 +1,7 @@
 ﻿import { looksLikeInjection } from "./intent";
 import { findPhoneCandidates } from "./privacy-gate";
 import type { AIContext } from "./context-builder";
+import { findBannedClaims } from "@/modules/integrations/compliance";
 
 export interface GuardrailResult {
   valid: boolean;
@@ -105,6 +106,12 @@ export function validateResponse(params: {
   // 6. Medical/therapeutic claims are never allowed.
   if (/(يعالج|يشفي|علاج|مرض|cure|treats)/.test(response)) {
     violations.push("MEDICAL_CLAIM");
+  }
+
+  // 6b. P12 — ادعاءات ممنوعة من سيستم 1 للمنتج (مطابقة بعد تطبيع العربي).
+  const banned = context?.product?.compliance?.bannedClaims ?? [];
+  if (banned.length > 0 && findBannedClaims(response, banned).length > 0) {
+    violations.push("BANNED_CLAIM");
   }
 
   // 7. Messenger style: keep it short.

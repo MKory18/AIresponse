@@ -47,13 +47,24 @@ export interface ProcessedIncoming {
  * P1: moved verbatim from service.ts (no logic change).
  */
 export async function processIncomingMessage(db: Db, input: IncomingMessageInput): Promise<ProcessedIncoming> {
+  // P12: الإحالة تُقرأ من الخام مرة وحدة، وكل ما يُخزَّن (هوية القناة ونص
+  // الرسالة) بلا ctwa_clid — رمز النقرة يُحفظ مشفّرًا بلمسة الإسناد فقط.
+  const { parseReferral, safeReferralForStorage } = await import("@/modules/integrations/inbound-hooks");
+  const referral = parseReferral(input.metadata);
+  const storedMetadata: Record<string, unknown> = { ...(input.metadata ?? {}) };
+  if ("referral" in storedMetadata) {
+    const safe = safeReferralForStorage(storedMetadata.referral);
+    if (safe) storedMetadata.referral = safe;
+    else delete storedMetadata.referral;
+  }
+
   const { customerId, created: customerCreated } = await resolveCustomerByChannelIdentity(db, {
     workspaceId: input.workspaceId,
     channelType: input.channelType,
     externalUserId: input.externalUserId,
     displayName: input.externalUserName,
     avatarUrl: input.externalAvatarUrl,
-    metadata: input.metadata,
+    metadata: input.metadata ? storedMetadata : input.metadata,
   });
 
   // P8 — مصدر الإعلان: يُلتقط مرة واحدة فقط من إحالة موثوقة صريحة قادمة
@@ -208,7 +219,7 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
         externalMessageId: input.externalMessageId || null,
         externalEventId: input.externalEventId || null,
         provider: input.provider,
-        metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+        metadata: storedMetadata as Prisma.InputJsonValue,
       deliveryStatus: "DELIVERED",
       createdAt: now,
       },
@@ -248,6 +259,26 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     where: { id: customerId },
     data: { lastContactAt: now },
   });
+
+  // P12 — الإسناد (إعلان/رمز) وإلغاء الاشتراك بكلمة صريحة — بعد الحفظ،
+  // ولا يوقف الرسالة أبدًا (الفشل يُسجّل فقط).
+  try {
+    const { onInboundCustomerMessage } = await import("@/modules/integrations/inbound-hooks");
+    await onInboundCustomerMessage(db, {
+      workspaceId: input.workspaceId,
+      customerId,
+      conversationId: conversation.id,
+      channelType: input.channelType,
+      messageId: message.id,
+      externalEventId: input.externalEventId,
+      externalUserId: input.externalUserId,
+      text: input.text ?? null,
+      referral,
+      occurredAt: now,
+    });
+  } catch (err) {
+    childLogger("pipeline").error({ err }, "integration_inbound_hook_failed");
+  }
 
   const payload = {
     conversationId: conversation.id,
