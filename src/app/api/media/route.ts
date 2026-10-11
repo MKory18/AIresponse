@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { listMedia } from "@/modules/media/service";
+import { mediaFitsChannel } from "@/modules/media/channel-limits";
 
 // Dedicated query schema: category is validated against the Prisma
 // MediaCategory enum so invalid values are rejected with 422 instead of
@@ -53,7 +54,16 @@ export const GET = createHandler(
     }
     return ok({
       ...result,
-      items: result.items.map((a) => ({ ...a, products: linksByAsset.get(a.id) ?? [] })),
+      items: result.items.map((a) => {
+        // Suitability for WhatsApp, computed where the table lives: the
+        // library warns on files the channel would refuse (see media page).
+        const fit = mediaFitsChannel(a, "WHATSAPP");
+        return {
+          ...a,
+          products: linksByAsset.get(a.id) ?? [],
+          whatsapp: fit.ok ? { ok: true as const } : { ok: false as const, reason: fit.reason },
+        };
+      }),
     });
   }
 );

@@ -59,8 +59,10 @@ export const postMessageSchema = z
     text: z.string().trim().min(1).max(4000).optional(),
     type: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "DOCUMENT"]).optional(),
     mediaUrl: z.string().url().max(2048).optional(),
+    /** Library asset to attach — resolved server-side, never a pasted URL. */
+    mediaId: z.string().cuid().optional(),
   })
-  .refine((data) => data.text || data.mediaUrl, { message: "text or mediaUrl is required" });
+  .refine((data) => data.text || data.mediaUrl || data.mediaId, { message: "text or mediaUrl or mediaId is required" });
 
 export const assignSchema = z.object({
   agentId: z.string().cuid().nullable().or(z.literal("@me")),

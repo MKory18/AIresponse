@@ -474,10 +474,17 @@ async function sendAI(
   if (params.dryRun) return null;
   const { dispatchOutbound } = await import("@/modules/channels/outbound");
   let mediaId: string | null = null;
+  let mediaSkipped: string | undefined;
   if (params.sendMedia && params.productId) {
-    const { findProductMedia } = await import("@/modules/media/service");
-    const media = await findProductMedia(db, params.workspaceId, params.productId, 1);
-    if (media.length > 0) mediaId = media[0].id;
+    const { pickUnsentProductImage } = await import("@/modules/media/service");
+    const picked = await pickUnsentProductImage(db, params.workspaceId, params.conversationId, params.productId);
+    if (picked.skipped) {
+      // Prepared and refused before anything leaves: no image at all is
+      // better than the wrong one, a repeat, or one the channel refuses.
+      mediaSkipped = picked.skipped;
+    } else {
+      mediaId = picked.mediaId;
+    }
   }
   const result = await dispatchOutbound(db, {
     workspaceId: params.workspaceId,
@@ -485,6 +492,7 @@ async function sendAI(
     sourceMessageId: params.sourceMessageId ?? "n/a",
     text: params.text,
     mediaId: mediaId ?? undefined,
+    mediaSkipped,
   });
   return { id: result.messageId, deliveryStatus: result.deliveryStatus };
 }

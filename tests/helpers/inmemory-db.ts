@@ -730,6 +730,22 @@ export function createFakeDb() {
     return row;
   };
 
+  // Hydrate the join-table read: real Prisma resolves
+  // `include: { mediaAsset: true }` to the linked row; the generic fake
+  // answers `[]`. Without this, any code reading through ProductMedia
+  // sees nothing in tests while production sees the asset.
+  const productMediaModel = db.productMedia as any;
+  const baseProductMediaFindMany = productMediaModel.findMany.bind(productMediaModel);
+  productMediaModel.findMany = async (args: any) => {
+    const rows = (await baseProductMediaFindMany(args)) as any[];
+    if (args?.include?.mediaAsset) {
+      for (const row of rows) {
+        row.mediaAsset = mediaAsset.find((m) => m.id === row.mediaAssetId) ?? null;
+      }
+    }
+    return rows;
+  };
+
   const docModel = db.knowledgeDocument as any;
   const baseDocFindUnique = docModel.findUnique.bind(docModel);
   docModel.findUnique = async (args: any) => {

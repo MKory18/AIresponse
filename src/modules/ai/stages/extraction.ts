@@ -20,6 +20,7 @@ import { extractionResultSchema, validateStructured, type ExtractionResult, type
 import { heuristicIntent, looksLikeInjection } from "../intent";
 import { saveMemories, loadMemory } from "../memory";
 import { buildAIContext } from "../context-builder";
+import { wantsMedia } from "@/modules/media/request";
 import type { VectorStore } from "@/modules/knowledge/vector-store";
 import { PgVectorStore } from "@/modules/knowledge/vector-store";
 import { prisma } from "@/core/db/prisma";
@@ -221,7 +222,7 @@ export async function runExtraction(
   const responseModelCfg = resolveModel(settings, "RESPONSE");
 
   // 8. Deterministic response plan (rules, not generation — spec §17).
-  const plan = buildPlan(extraction, context);
+  const plan = buildPlan(extraction, context, customerText);
   if (orderResult?.handled && orderResult.action !== "NONE") {
     plan.goal = "complete_order";
     plan.needsClarification = orderResult.action === "ASK_MISSING_FIELD";
@@ -449,7 +450,11 @@ async function resolveProductId(db: Db, workspaceId: string, extraction: Extract
   return product?.id ?? null;
 }
 
-function buildPlan(extraction: ExtractionResult, context: Awaited<ReturnType<typeof buildAIContext>>): ResponsePlan {
+function buildPlan(
+  extraction: ExtractionResult,
+  context: Awaited<ReturnType<typeof buildAIContext>>,
+  customerText = ""
+): ResponsePlan {
   const goalMap: Record<string, string> = {
     GREETING: "greet",
     PRODUCT_QUESTION: "answer_product",
@@ -474,11 +479,17 @@ function buildPlan(extraction: ExtractionResult, context: Awaited<ReturnType<typ
     extraction.requestedAction === "CLARIFY" ||
     (extraction.intent === "ORDER_CREATE" && extraction.missingFields.length > 0) ||
     extraction.intent === "UNKNOWN";
+  // The customer's own words AND the extracted entities: «ورجيني ياه»
+  // carries no entity, and an entity can match a word never written.
+  // Video asks count too — the pipeline answers every visual ask with
+  // the product's photo (see selection), never with silence.
+  const asked = wantsMedia(customerText);
+  const entitiesAsk = /شكل|صورة|صور|كيف يبدو/.test(JSON.stringify(extraction.entities));
   return {
     goal: goalMap[extraction.intent] ?? "clarify",
     needsClarification,
     missingFields: extraction.missingFields,
-    sendMedia: /شكل|صورة|صور|كيف يبدو/.test(JSON.stringify(extraction.entities)),
+    sendMedia: asked !== null || entitiesAsk,
     useFeedback: extraction.intent === "FEEDBACK_REQUEST",
     knowledgeSources: ["product", "faq", "policy"],
   };

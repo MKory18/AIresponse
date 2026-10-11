@@ -36,6 +36,7 @@ export const POST = createHandler(
       userId: auth!.userId,
       text: body.text ?? `[${body.type ?? "ATTACHMENT"}] ${body.mediaUrl ?? ""}`.trim(),
       idempotencyKey: body.idempotencyKey,
+      mediaId: body.mediaId ?? undefined,
     });
     // Honest statuses: the UI must never show "sent" before Graph confirms it.
     if (result.deliveryStatus === "FAILED") {
