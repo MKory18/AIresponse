@@ -19,7 +19,7 @@ export const POST = createHandler({ body: linkSchema, permission: "orders.write"
   return ok(await linkManualOmsOrder(prisma, { userId: auth!.userId, workspaceId: auth!.workspaceId }, orderId, body.omsOrderNumber));
 });
 
-/** فك ربط يدوي خاطئ (فقط قبل أن يؤكده الـ OMS بأحداثه). */
+/** فك ربط يدوي خاطئ (الربط اليدوي بيضل قابل للفك — ترحيل الـ API مقفول). */
 export const DELETE = createHandler({ permission: "orders.write" }, async ({ auth, params }) => {
   const { orderId } = params as Params;
   await unlinkManualOmsOrder(prisma, { userId: auth!.userId, workspaceId: auth!.workspaceId }, orderId);

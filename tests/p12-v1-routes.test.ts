@@ -265,11 +265,23 @@ describe("P12 POST /api/v1/webhooks/[system] — أحداث سيستم 1 الم�
     expect(res.headers.get("x-request-id")).toBe("s1-req-1");
     expect(await json(res)).toEqual({ ok: true, request_id: "s1-req-1" });
     expect(jobs()).toHaveLength(1);
-    expect(jobs()[0]).toMatchObject({ workspaceId: WS, payload: { productRef: "pf_2031" }, idempotencyKey: "compliance:pf_2031:evt_s1_0001" });
+    expect(jobs()[0]).toMatchObject({ workspaceId: WS, payload: { productRef: "pf_2031" }, idempotencyKey: `compliance:${WS}:pf_2031:evt_s1_0001` });
     const ev = db()._stores.webhookEvent;
     expect(ev).toHaveLength(1);
-    expect(ev[0]).toMatchObject({ source: "zaki:s1", externalEventId: "evt_s1_0001", workspaceId: WS });
+    expect(ev[0]).toMatchObject({ source: `zaki:s1:${WS}`, externalEventId: "evt_s1_0001", workspaceId: WS });
     expect(ev[0].processedAt).toBeTruthy();
+  });
+
+  it("نفس الحدث لمساحتين (سيستم 1 وحدة) = كل مساحة بتعالجه — المكرر لكل مساحة لحالها", async () => {
+    const secretB = (await saveIntegrationConnection(asDb(), ctxB, "s1", { baseUrl: "https://s1.zakai.io", token: "s1-token-b", generateEventsSecret: true })).generatedEventsSecret!;
+    expect((await signed(envelope())).status).toBe(200);
+    const b = await signed(envelope(), { ws: "other", secret: secretB });
+    expect(b.status).toBe(200);
+    expect(await json(b)).toEqual({ ok: true, request_id: "s1-req-1" });
+    expect(jobs().map((j) => j.workspaceId).sort()).toEqual([WS, WS_B].sort());
+    const again = await signed(envelope(), { ws: "other", secret: secretB });
+    expect(await json(again)).toMatchObject({ duplicate: true });
+    expect(jobs()).toHaveLength(2);
   });
 
   it("event_id مكرر = 200 duplicate بلا معالجة ثانية", async () => {
@@ -388,6 +400,17 @@ describe("P12 POST /api/webhooks/oms/[key] — أحداث تطبيقات الـ 
     expect(await json(res)).toMatchObject({ ok: true, outcome: "applied", orderId: shippedOrder.id, appliedLocalStatus: "OUT_FOR_DELIVERY", duplicate: false, stale: false });
     expect(order(shippedOrder.id)).toMatchObject({ status: "OUT_FOR_DELIVERY", omsStatus: "SHIPPED" });
     expect(db()._stores.omsConnection[0].lastWebhookAt).toBeTruthy();
+  });
+
+  it("طلب ملتقط بيتعاد بـ X-Zaki-Delivery جديد (غير موقّع) خلال 5 دقايق = مكرر بلا أثر", async () => {
+    const raw = event("order.delivered", { orderId: "cm_oms_1" });
+    const first = await send(raw, { delivery: "dlv_real" });
+    expect(await json(first)).toMatchObject({ outcome: "applied", duplicate: false });
+    const auditsBefore = db()._stores.auditLog.length;
+    const replay = await send(raw, { delivery: "dlv_replayed_new_id" });
+    expect(replay.status).toBe(200);
+    expect(await json(replay)).toMatchObject({ outcome: "applied", duplicate: true, appliedLocalStatus: null });
+    expect(db()._stores.auditLog.length).toBe(auditsBefore);
   });
 
   it("نفس X-Zaki-Delivery = 200 مكرر بلا معالجة ثانية", async () => {

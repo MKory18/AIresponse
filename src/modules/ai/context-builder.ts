@@ -63,9 +63,11 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
   let compliance: { allowedClaims: string[]; bannedClaims: string[]; verdict: string | null } | null = null;
   try {
     const { getProductCompliance } = await import("@/modules/integrations/compliance");
-    const c = await getProductCompliance(db, product.id);
+    // نسخة لمرجع تاني (المرجع تغيّر) ما بتنطبق — بنعاملها كأنها مش موجودة.
+    const ref = (product as { s1ProductRef?: string | null }).s1ProductRef?.trim() || null;
+    const c = await getProductCompliance(db, product.id, ref);
     if (c) compliance = { allowedClaims: c.allowedClaims, bannedClaims: c.bannedClaims, verdict: c.verdict };
-    else if ((product as { s1ProductRef?: string | null }).s1ProductRef) {
+    else if (ref) {
       // مربوط بسيستم 1 وما في نسخة قواعد لسا: نطلب قراءة فورية بالخلفية (مرة
       // بالساعة) — الرد الحالي بيمشي بالحارس العام لحد ما توصل القواعد.
       const { enqueueJob } = await import("@/modules/jobs/service");

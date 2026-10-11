@@ -7,6 +7,7 @@ import { createOmsClient } from "./client";
 import type { OmsApiVersion, OmsOrderPayload } from "./client";
 import { revealRef } from "@/modules/integrations/attribution";
 import { conversationRef } from "@/modules/integrations/format";
+import { checkSystemUrl } from "@/modules/integrations/connections";
 
 /**
  * Hands a CONFIRMED local order to the OMS. Idempotent at two layers:
@@ -59,6 +60,21 @@ export async function handoffOrderToOms(
   // الواجهة تعرض نص الإدخال الجاهز وربط رقم الـ OMS.
   if (conn.mode === "manual") {
     throw new AppError("OMS handoff is in manual mode — use the OMS intake text", 409, "OMS_MANUAL_MODE");
+  }
+  // P12: فحص الرابط مع DNS عند كل ترحيل (اتصالات ما قبل P12 ما انفحصت عند
+  // الحفظ): رابط داخلي/محجوب = ولا توكن ولا بيانات زبون بتطلع. فشل حل مؤقت =
+  // OMS_UNREACHABLE (المهمة بتعيد)، والرفض الأمني نهائي لحد ما ينصلح الرابط.
+  const urlCheck = await checkSystemUrl(String(conn.baseUrl ?? ""));
+  if (!urlCheck.ok) {
+    const code = urlCheck.transient ? "OMS_UNREACHABLE" : "OMS_URL_REJECTED";
+    await (db as any).omsConnection
+      ?.update?.({ where: { workspaceId: ctx.workspaceId }, data: { lastErrorAt: new Date(), lastError: `handoff: ${code} (${urlCheck.reason})` } })
+      ?.catch?.(() => undefined);
+    throw new AppError(
+      urlCheck.transient ? "تعذر الوصول لاسم الـ OMS (DNS) — بنعيد المحاولة" : `رابط الـ OMS مرفوض (${urlCheck.reason}) — ما انبعت شي`,
+      urlCheck.transient ? 503 : 422,
+      code
+    );
   }
   const apiVersion: OmsApiVersion = conn.apiVersion === "v1" ? "v1" : "legacy";
   const o = order as typeof order & {

@@ -130,6 +130,7 @@ type TouchRow = {
   ctwaClidEnc: string | null;
   refCode: string | null;
   codeStatus: string | null;
+  codeWindowDays?: number | null;
   pageId: string | null;
   psidEnc: string | null;
   wabaId: string | null;
@@ -289,7 +290,7 @@ function codeUsable(row: TouchRow): boolean {
 
 /**
  * إسناد طلب: بداية آخر حلقة قبل لحظة الطلب داخل المحادثة. لا لمسة (أو
- * أقدم من 28 يوم) = NONE — بلا تخمين.
+ * أقدم من 28 يوم، أو من نافذة رمز الكليبر إذا أقصر) = NONE — بلا تخمين.
  */
 export async function resolveOrderAttribution(
   db: Db,
@@ -306,7 +307,10 @@ export async function resolveOrderAttribution(
   const row = starts.find((r) => r.kind === "AD" || codeUsable(r));
   if (!row) return NONE;
   const touchAt = new Date(row.occurredAt);
-  if (at.getTime() - touchAt.getTime() > MAX_ATTRIBUTION_AGE_DAYS * 24 * 3600_000) return NONE;
+  // نافذة الرمز من الكليبر (window_days) إذا أقصر من الحد العام — رمز حملة
+  // نافذتها 7 أيام ما بياخد طلب بعد 20 يوم.
+  const win = row.kind === "CODE" && Number.isInteger(row.codeWindowDays) && (row.codeWindowDays ?? 0) > 0 ? Math.min(row.codeWindowDays!, MAX_ATTRIBUTION_AGE_DAYS) : MAX_ATTRIBUTION_AGE_DAYS;
+  if (at.getTime() - touchAt.getTime() > win * 24 * 3600_000) return NONE;
   if (row.kind === "AD") {
     return {
       method: "AD",

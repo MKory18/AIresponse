@@ -50,7 +50,8 @@ export function OmsCard({ view, appUrl, onSaved }: { view: OmsView; appUrl: stri
   const toast = useToast();
   const [baseUrl, setBaseUrl] = useState(view.baseUrl ?? "");
   const [mode, setMode] = useState<OmsView["mode"]>(view.configured ? view.mode : "manual");
-  const [apiVersion, setApiVersion] = useState<OmsView["apiVersion"]>(view.apiVersion);
+  // اتصال جديد = عقد v1 (مع الإسناد) — legacy بس لاتصال قديم محفوظ عليه.
+  const [apiVersion, setApiVersion] = useState<OmsView["apiVersion"]>(view.configured ? view.apiVersion : "v1");
   const [token, setToken] = useState("");
   const [secret, setSecret] = useState("");
   const [autoHandoff, setAutoHandoff] = useState(view.autoHandoff);
@@ -62,7 +63,7 @@ export function OmsCard({ view, appUrl, onSaved }: { view: OmsView; appUrl: stri
   useEffect(() => {
     setBaseUrl(view.baseUrl ?? "");
     setMode(view.configured ? view.mode : "manual");
-    setApiVersion(view.apiVersion);
+    setApiVersion(view.configured ? view.apiVersion : "v1");
     setAutoHandoff(view.autoHandoff);
     setIsActive(view.configured ? view.isActive : true);
   }, [view]);
@@ -173,6 +174,20 @@ export function OmsCard({ view, appUrl, onSaved }: { view: OmsView; appUrl: stri
               بتحدّث الطلب هون لحالها. البنود المنتظرة بتظهر بطابور المالك وبتنبيه Hermes. ولما ينبنى الباب بالـ OMS (برومبت GLM جاهز بالتوثيق) بدّل لـ API.
             </>
           }
+        />
+      )}
+      {mode === "manual" && (
+        <RiskWithFix
+          risk="رقم طلب الـ OMS بينكتب يدويًا — رقم غلط بيربط الطلب بطلب زبون تاني"
+          detail="أحداث الطلب التاني (شحن · تسليم · مرتجع) كانت رح تسوق حالة طلبنا."
+          fix="الربط ما بيكمل إلا إذا عملة ومجموع ووقت أول حدث مطابقين لطلبنا؛ غير هيك بيبين بالأحمر بصفحة الطلب وبطابور المالك وبينفك بزر. انسخ الرقم من صفحة الطلب بالـ OMS دايمًا."
+        />
+      )}
+      {mode === "manual" && (
+        <RiskWithFix
+          risk="شاشة «إدخال الطلب بالذكاء» بالـ OMS بتبعت النص لموديل خارجي"
+          detail="إذا OPENROUTER_API_KEY مضبوط بخادم الـ OMS، النص الملصوق (اسم الزبون · رقمه · عنوانه) بيروح لموديل مجاني برّا قبل المحلّل المحلي — عكس قاعدة «ولا بيانات زبون لموديل خارجي»."
+          fix="شيل OPENROUTER_API_KEY من بيئة الـ OMS: المحلّل الحتمي هناك بيشتغل لحاله، ونص الإدخال من الردود مصمَّم لصيغته. الحل الدائم: باب /api/v1 بالـ OMS (بلا أي موديل بالنص)."
         />
       )}
       <RiskWithFix

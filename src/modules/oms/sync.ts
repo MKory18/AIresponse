@@ -30,11 +30,13 @@ export async function buildOmsClient(db: Db, workspaceId: string) {
   if (conn.mode === "manual") {
     throw new AppError("OMS sync needs the OMS API door (connection is in manual mode)", 409, "OMS_MANUAL_MODE");
   }
-  // P12: اسم عام صار يشير لعنوان داخلي (DNS rebinding) = رفض قبل ما يطلع
-  // التوكن أو بيانات الزبون. (الروابط القديمة الخاصة بنفس السيرفر ما بتتأثر.)
-  const dns = await checkSystemUrl(conn.baseUrl);
-  if (!dns.ok && dns.reason === "DNS_NOT_GLOBAL_UNICAST") {
-    throw new AppError("رابط الـ OMS صار يشير لعنوان داخلي محجوب — انرفض النداء", 422, "OMS_URL_REJECTED");
+  // P12: نفس فحص روابط الأنظمة عند كل نداء (رابط داخلي · http عام · اسم صار
+  // يشير لعنوان محجوب) = رفض قبل ما يطلع التوكن. رابط خاص قديم (نفس السيرفر)
+  // بيحتاج INTEGRATIONS_ALLOW_PRIVATE_NETWORK=1 صريح ببيئة الخادم.
+  const check = await checkSystemUrl(conn.baseUrl);
+  if (!check.ok) {
+    if (check.transient) throw new AppError("تعذر الوصول لاسم الـ OMS (DNS)", 503, "OMS_UNREACHABLE");
+    throw new AppError(`رابط الـ OMS مرفوض (${check.reason}) — انرفض النداء`, 422, "OMS_URL_REJECTED");
   }
   return createOmsClient({
     baseUrl: conn.baseUrl,

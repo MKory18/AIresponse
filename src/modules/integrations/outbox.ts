@@ -5,11 +5,19 @@ import { recordAudit } from "@/modules/audit/service";
 import { NotFoundError } from "@/core/errors";
 import {
   OUTBOUND_EVENT_TYPES,
+  SYSTEM_SPECS,
   targetsForEvent,
   type GenericSystem,
   type OutboundEventType,
 } from "./systems";
-import { checkSystemUrl, effectiveEventsUrl, getDecryptedConnection, markConnectionResult, validateSystemUrl } from "./connections";
+import {
+  checkSystemUrl,
+  effectiveEventsUrl,
+  getDecryptedConnection,
+  markConnectionResult,
+  validateSystemUrl,
+  type DecryptedConnection,
+} from "./connections";
 import { findPii } from "./pii-guard";
 import { isoInZone } from "./format";
 import { newEventId, newRequestId, signZakiPayload, unixSeconds } from "./signing";
@@ -187,7 +195,9 @@ export async function emitIntegrationEvent(db: Db, input: EmitEventInput): Promi
             method: "POST",
             url,
             body,
-            dedupeKey: `${system}:${input.type}:${input.dedupeKey}`,
+            // المساحة جزء من المفتاح (الفريد عالمي): مساحتين بنفس اليوم/الساعة
+            // ما بيبلعوا أحداث بعض.
+            dedupeKey: deliveryDedupeKey(input.workspaceId, system, input.type, input.dedupeKey),
             status: "PENDING",
             nextAttemptAt: new Date(),
           },
@@ -204,11 +214,16 @@ export async function emitIntegrationEvent(db: Db, input: EmitEventInput): Promi
   }
 }
 
+/** مفتاح عدم التكرار المخزّن: مساحة · نظام · نوع · مفتاح الحدث. */
+export function deliveryDedupeKey(workspaceId: string, system: string, type: string, key: string): string {
+  return `${workspaceId}:${system}:${type}:${key}`;
+}
+
 /** هل الحدث (بمفتاحه) بصندوق الصادر لهالنظام — جديد أو من محاولة سابقة؟ */
 export async function eventQueued(db: Db, workspaceId: string, system: GenericSystem, type: OutboundEventType, dedupeKey: string): Promise<boolean> {
   const model = deliveries(db);
   if (!model) return false;
-  const row = await model.findFirst({ where: { workspaceId, dedupeKey: `${system}:${type}:${dedupeKey}` } });
+  const row = await model.findFirst({ where: { workspaceId, dedupeKey: deliveryDedupeKey(workspaceId, system, type, dedupeKey) } });
   return Boolean(row);
 }
 
@@ -248,7 +263,7 @@ export async function enqueueSystemCall(db: Db, input: SystemCallInput): Promise
           url,
           body: JSON.stringify(input.body),
           idempotencyKey: input.idempotencyKey,
-          dedupeKey: `${input.system}:${input.type}:${input.dedupeKey}`,
+          dedupeKey: deliveryDedupeKey(input.workspaceId, input.system, input.type, input.dedupeKey),
           status: "PENDING",
           nextAttemptAt: new Date(),
         },
@@ -288,6 +303,26 @@ export interface DeliverResult {
   cancelled: number;
 }
 
+/**
+ * الرابط من إعداد الاتصال «الحالي» لحظة الإرسال (مش المخزّن وقت الكتابة):
+ * النظام انتقل لعنوان جديد وتغيّر توكنه = الإعادات تروح للعنوان الجديد —
+ * ولا مرة التوكن الجديد لعنوان قديم. الحدث: رابط الاستقبال الفعلي؛ النداء:
+ * الأصل الحالي + مسار النداء من العقد. null = ما في رابط صالح الآن.
+ */
+export function currentDeliveryUrl(conn: DecryptedConnection, row: Pick<DeliveryRow, "kind" | "type" | "method" | "url">): string | null {
+  if (row.kind === "event") return effectiveEventsUrl(conn.system, conn.baseUrl, conn.eventsUrl);
+  if (!conn.baseUrl) return null;
+  const base = conn.baseUrl.replace(/\/+$/, "");
+  const call = SYSTEM_SPECS[conn.system].calls.find((c) => c.name === row.type && c.method === row.method);
+  if (call && !call.path.includes("{")) return `${base}${call.path}`;
+  // نداء بمسار متغيّر: نفس الأصل بس — أصل تغيّر = ما منعرف المسار الجديد.
+  try {
+    return new URL(row.url).origin === new URL(base).origin ? row.url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** يرسل صفًا واحدًا (بعد حجزه). يرجّع نتيجته. */
 async function deliverRow(db: Db, row: DeliveryRow, fetchImpl: typeof fetch): Promise<"OK" | "RETRY" | "FAILED" | "CANCELLED"> {
   const model = deliveries(db)!;
@@ -298,7 +333,14 @@ async function deliverRow(db: Db, row: DeliveryRow, fetchImpl: typeof fetch): Pr
     await model.update({ where: { id: row.id }, data: { status: "CANCELLED", error: "CONNECTION_DISABLED", nextAttemptAt: null } });
     return "CANCELLED";
   }
-  const urlCheck = await checkSystemUrl(row.url);
+  const url = currentDeliveryUrl(conn, row);
+  if (!url || !validateSystemUrl(url).ok) {
+    await model.update({ where: { id: row.id }, data: { status: "CANCELLED", attempts: attempt, error: "CONNECTION_URL_MISSING", nextAttemptAt: null } });
+    return "CANCELLED";
+  }
+  // السجل بيبيّن لوين راح فعلًا.
+  if (url !== row.url) await model.update({ where: { id: row.id }, data: { url } });
+  const urlCheck = await checkSystemUrl(url);
   if (!urlCheck.ok) {
     if (urlCheck.transient) {
       await model.update({ where: { id: row.id }, data: nextTry(attempt, "DNS_RESOLUTION_FAILED", null) });
@@ -336,7 +378,7 @@ async function deliverRow(db: Db, row: DeliveryRow, fetchImpl: typeof fetch): Pr
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   try {
-    const res = await fetchImpl(row.url, {
+    const res = await fetchImpl(url, {
       method: row.method,
       headers,
       body: row.body,

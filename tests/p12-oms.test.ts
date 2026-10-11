@@ -13,7 +13,7 @@ import {
   omsStatusForAppEvent,
   type OmsAppEnvelope,
 } from "@/modules/oms/app-webhook";
-import { buildOmsIntake, formatOmsIntakeText, linkManualOmsOrder, sourceLabel, unlinkManualOmsOrder } from "@/modules/oms/manual";
+import { buildOmsIntake, formatOmsIntakeText, linkManualOmsOrder, normalizeOmsOrderNumber, sourceLabel, unlinkManualOmsOrder } from "@/modules/oms/manual";
 import { OMS_NO_TOKEN, getOmsConnectionView, probeOmsConnection, saveOmsConnection } from "@/modules/oms/connection";
 import { AUTO_HANDOFF_ACTOR, handleAutoHandoffJob, maybeEnqueueAutoHandoff } from "@/modules/oms/auto-handoff";
 import { OmsClient, setOmsClientFactory, toV1OrderBody, type OmsOrderPayload } from "@/modules/oms/client";
@@ -227,7 +227,7 @@ describe("P12 handleOmsAppWebhook — مطابقة · ربط · مرآة الح�
   });
 
   it("الربط اليدوي بالرقم: أول حدث يكمّل معرّف الـ OMS ثم المطابقة بالمعرّف وحده", async () => {
-    const o = await seedOrder(db, { omsOrderNumber: "A-1001", handoffMode: "manual" });
+    const o = await seedOrder(db, { omsOrderNumber: "A-1001", handoffMode: "manual", createdAt: new Date("2026-10-11T07:00:00.000Z") });
     const first = await handleOmsAppWebhook(asDb(db), {
       connection: conn,
       envelope: env("order.confirmed", { orderId: "cm_real_9", orderNumber: "A-1001" }, "2026-10-11T08:00:00.000Z"),
@@ -508,8 +508,8 @@ describe("P12 OMS manual — نص شاشة «إدخال الطلب بالذكا�
     expect(valueOf(r.text, "الرقم:")).toMatch(/^0930000/); // هاتف الزبون الموثوق يغلب هاتف المسودة
     expect(valueOf(r.text, "اسم الصفحة:")).toBe("واتساب · رمز K7Q2");
     expect(r).toMatchObject({ linked: false, omsOrderNumber: null, orderNumber: "ORD-XYZ" });
-    await linkManualOmsOrder(asDb(db), ctx, o.id, "1001");
-    expect(await buildOmsIntake(asDb(db), WS, o.id)).toMatchObject({ linked: true, omsOrderNumber: "1001" });
+    await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1001");
+    expect(await buildOmsIntake(asDb(db), WS, o.id)).toMatchObject({ linked: true, omsOrderNumber: "SY-2026-1001" });
   });
 });
 
@@ -519,76 +519,90 @@ describe("P12 OMS manual — ربط رقم الـ OMS وفكّه", () => {
     db = fake();
   });
 
-  it("صيغة الرقم: حرف/رقم أولًا ثم [A-Za-z0-9-_/] حتى 40 — والمسافات حول الرقم تُقص", async () => {
+  it("صيغة الرقم = صيغة الـ OMS (SY-2026-0148) · توحيد: مسافات · # · حروف صغيرة · أرقام عربية · شرطات بديلة", async () => {
     const o = await seedOrder(db);
-    for (const bad of ["", "1", "-100", "#100", "100 1", "ر١٠٠", "a".repeat(41)]) {
+    for (const bad of ["", "1", "1001", "78120", "-100", "SY-26-0148", "SY-2026-014", "SY_2026_0148", "ر١٠٠", "ORD/2026-15_a", `${"A".repeat(11)}-2026-0148`]) {
       await expect(linkManualOmsOrder(asDb(db), ctx, o.id, bad)).rejects.toMatchObject({ code: "INVALID_OMS_ORDER_NUMBER" });
     }
     expect(orderRow(db, o.id).omsOrderNumber).toBeNull();
-    const ok = await linkManualOmsOrder(asDb(db), ctx, o.id, "  ORD/2026-15_a  ");
-    expect(ok).toEqual({ orderId: o.id, omsOrderNumber: "ORD/2026-15_a", changed: true });
+    const ok = await linkManualOmsOrder(asDb(db), ctx, o.id, "  #sy-2026-0148  ");
+    expect(ok).toEqual({ orderId: o.id, omsOrderNumber: "SY-2026-0148", changed: true });
+    expect(normalizeOmsOrderNumber("\u200fJO–٢٠٢٦–٠٠٠٧")).toBe("JO-2026-0007");
     const o2 = await seedOrder(db);
-    expect((await linkManualOmsOrder(asDb(db), ctx, o2.id, "a".repeat(40))).changed).toBe(true);
+    expect((await linkManualOmsOrder(asDb(db), ctx, o2.id, "JO–٢٠٢٦–٠٠٠٧")).omsOrderNumber).toBe("JO-2026-0007");
   });
 
   it("ربط ناجح: الرقم + وضع يدوي + وقت الترحيل + حالة NEW + سجل؛ ونفس الرقم مرة تانية = بلا تغيير", async () => {
     const o = await seedOrder(db);
-    await linkManualOmsOrder(asDb(db), ctx, o.id, "1001");
+    await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1001");
     const row = orderRow(db, o.id);
-    expect(row).toMatchObject({ omsOrderNumber: "1001", handoffMode: "manual", omsStatus: "NEW" });
+    expect(row).toMatchObject({ omsOrderNumber: "SY-2026-1001", handoffMode: "manual", omsStatus: "NEW" });
     expect(row.handedOffAt).toBeTruthy();
     expect(row.omsOrderId).toBeNull();
     const audit = audits(db, "oms.order_linked_manual");
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ userId: "owner-1", entityId: o.id, metadata: { omsOrderNumber: "1001", previous: null } });
-    expect(await linkManualOmsOrder(asDb(db), ctx, o.id, "1001")).toMatchObject({ changed: false });
+    expect(audit[0]).toMatchObject({ userId: "owner-1", entityId: o.id, metadata: { omsOrderNumber: "SY-2026-1001", previous: null } });
+    expect(await linkManualOmsOrder(asDb(db), ctx, o.id, "sy-2026-1001")).toMatchObject({ changed: false });
     expect(audits(db, "oms.order_linked_manual")).toHaveLength(1);
-    // تصحيح الرقم قبل القفل مسموح والسجل يحفظ السابق.
-    await linkManualOmsOrder(asDb(db), ctx, o.id, "1002");
-    expect(orderRow(db, o.id).omsOrderNumber).toBe("1002");
-    expect(audits(db, "oms.order_linked_manual")[1].metadata).toMatchObject({ omsOrderNumber: "1002", previous: "1001" });
+    // تصحيح الرقم قبل أول حدث مسموح والسجل يحفظ السابق.
+    await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1002");
+    expect(orderRow(db, o.id).omsOrderNumber).toBe("SY-2026-1002");
+    expect(audits(db, "oms.order_linked_manual")[1].metadata).toMatchObject({ omsOrderNumber: "SY-2026-1002", previous: "SY-2026-1001" });
   });
 
   it("رقم محجوز لطلب تاني بنفس المساحة = OMS_ORDER_NUMBER_TAKEN (ومسموح بمساحة أخرى)", async () => {
     const a = await seedOrder(db);
     const b = await seedOrder(db);
-    await linkManualOmsOrder(asDb(db), ctx, a.id, "1001");
-    await expect(linkManualOmsOrder(asDb(db), ctx, b.id, "1001")).rejects.toMatchObject({ code: "OMS_ORDER_NUMBER_TAKEN", statusCode: 409 });
+    await linkManualOmsOrder(asDb(db), ctx, a.id, "SY-2026-1001");
+    await expect(linkManualOmsOrder(asDb(db), ctx, b.id, "SY-2026-1001")).rejects.toMatchObject({ code: "OMS_ORDER_NUMBER_TAKEN", statusCode: 409 });
     expect(orderRow(db, b.id).omsOrderNumber).toBeNull();
     const foreign = await seedOrder(db, { workspaceId: WS_B });
-    expect((await linkManualOmsOrder(asDb(db), ctxB, foreign.id, "1001")).changed).toBe(true);
+    expect((await linkManualOmsOrder(asDb(db), ctxB, foreign.id, "SY-2026-1001")).changed).toBe(true);
   });
 
   it("طلب غير مؤكد لا يُربط · طلب مساحة أخرى = غير موجود", async () => {
     const pending = await seedOrder(db, { confirmationStatus: "PENDING", status: "NEW" });
-    await expect(linkManualOmsOrder(asDb(db), ctx, pending.id, "1001")).rejects.toMatchObject({ code: "ORDER_NOT_CONFIRMED" });
+    await expect(linkManualOmsOrder(asDb(db), ctx, pending.id, "SY-2026-1001")).rejects.toMatchObject({ code: "ORDER_NOT_CONFIRMED" });
     const foreign = await seedOrder(db, { workspaceId: WS_B });
-    await expect(linkManualOmsOrder(asDb(db), ctx, foreign.id, "1001")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(linkManualOmsOrder(asDb(db), ctx, foreign.id, "SY-2026-1001")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("بعد ما أكّد الـ OMS الربط بمعرّفه: لا تغيير ولا فك يدوي (OMS_LINK_LOCKED)", async () => {
-    const o = await seedOrder(db);
-    await linkManualOmsOrder(asDb(db), ctx, o.id, "1001");
-    await handleOmsAppWebhook(asDb(db), { connection: conn, envelope: env("order.confirmed", { orderId: "cm_lock", orderNumber: "1001" }), deliveryId: "lock-1" });
+  it("بعد ما أكمل حدث الـ OMS المعرّف: تغيير الرقم مقفول — بس الربط اليدوي بينفك (رقم غلط) وبينربط من جديد", async () => {
+    const o = await seedOrder(db, { createdAt: new Date(Date.now() - 60 * 60_000) });
+    await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1001");
+    await handleOmsAppWebhook(asDb(db), { connection: conn, envelope: env("order.confirmed", { orderId: "cm_lock", orderNumber: "SY-2026-1001" }), deliveryId: "lock-1" });
     expect(orderRow(db, o.id).omsOrderId).toBe("cm_lock");
-    await expect(linkManualOmsOrder(asDb(db), ctx, o.id, "1002")).rejects.toMatchObject({ code: "OMS_LINK_LOCKED", statusCode: 409 });
-    await expect(unlinkManualOmsOrder(asDb(db), ctx, o.id)).rejects.toMatchObject({ code: "OMS_LINK_LOCKED" });
-    expect(orderRow(db, o.id).omsOrderNumber).toBe("1001");
-    // نفس الرقم بعد القفل = لا تغيير (لا خطأ).
-    expect(await linkManualOmsOrder(asDb(db), ctx, o.id, "1001")).toMatchObject({ changed: false });
+    await expect(linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1002")).rejects.toMatchObject({ code: "OMS_LINK_LOCKED", statusCode: 409 });
+    // نفس الرقم بعد اكتمال الربط = لا تغيير (لا خطأ).
+    expect(await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1001")).toMatchObject({ changed: false });
+    // ربط يدوي = بيضل قابل للفك حتى بعد اكتمال المعرّف (الرقم كتبه موظف).
+    await unlinkManualOmsOrder(asDb(db), ctx, o.id);
+    expect(orderRow(db, o.id)).toMatchObject({ omsOrderId: null, omsOrderNumber: null, handoffMode: null, omsStatus: null });
+    expect(audits(db, "oms.order_unlinked_manual")[0].metadata).toMatchObject({ omsOrderNumber: "SY-2026-1001", hadOmsId: true, omsStatus: "CONFIRMED" });
+    // أحداث الرقم الغلط بعد الفك ما بتلمس الطلب.
+    const after = await handleOmsAppWebhook(asDb(db), { connection: conn, envelope: env("order.shipped", { orderId: "cm_lock", orderNumber: "SY-2026-1001" }), deliveryId: "lock-2" });
+    expect(after).toEqual({ outcome: "ignored", reason: "UNKNOWN_ORDER" });
+    expect(orderRow(db, o.id).status).toBe("CONFIRMED");
+    expect((await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1002")).changed).toBe(true);
   });
 
-  it("الفك قبل القفل يمسح الربط والسجل يحفظ الرقم؛ طلب غير مربوط = لا شيء", async () => {
+  it("ترحيل API (معرّف من رد الـ OMS نفسه) ما بينفك يدويًا (OMS_LINK_LOCKED)", async () => {
+    const o = await seedOrder(db, { omsOrderId: "cm_api_1", omsOrderNumber: "SY-2026-3001", handoffMode: "api" });
+    await expect(unlinkManualOmsOrder(asDb(db), ctx, o.id)).rejects.toMatchObject({ code: "OMS_LINK_LOCKED" });
+    expect(orderRow(db, o.id).omsOrderId).toBe("cm_api_1");
+  });
+
+  it("الفك يمسح الربط والسجل يحفظ الرقم والحالة؛ طلب غير مربوط = لا شيء", async () => {
     const o = await seedOrder(db);
     await unlinkManualOmsOrder(asDb(db), ctx, o.id);
     expect(audits(db, "oms.order_unlinked_manual")).toHaveLength(0);
-    await linkManualOmsOrder(asDb(db), ctx, o.id, "1001");
+    await linkManualOmsOrder(asDb(db), ctx, o.id, "SY-2026-1001");
     await unlinkManualOmsOrder(asDb(db), ctx, o.id);
-    expect(orderRow(db, o.id)).toMatchObject({ omsOrderNumber: null, handoffMode: null, handedOffAt: null, omsStatus: null });
-    expect(audits(db, "oms.order_unlinked_manual")[0].metadata).toEqual({ omsOrderNumber: "1001" });
+    expect(orderRow(db, o.id)).toMatchObject({ omsOrderId: null, omsOrderNumber: null, handoffMode: null, handedOffAt: null, omsStatus: null });
+    expect(audits(db, "oms.order_unlinked_manual")[0].metadata).toEqual({ omsOrderNumber: "SY-2026-1001", hadOmsId: false, localStatus: "CONFIRMED", omsStatus: "NEW" });
     // بعد الفك الرقم متاح لطلب آخر.
     const other = await seedOrder(db);
-    expect((await linkManualOmsOrder(asDb(db), ctx, other.id, "1001")).changed).toBe(true);
+    expect((await linkManualOmsOrder(asDb(db), ctx, other.id, "SY-2026-1001")).changed).toBe(true);
   });
 });
 

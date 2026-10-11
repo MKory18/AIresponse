@@ -39,6 +39,7 @@ function complianceModel(db: Db) {
       findUnique: (a: unknown) => Promise<unknown>;
       upsert: (a: unknown) => Promise<unknown>;
       updateMany: (a: unknown) => Promise<unknown>;
+      deleteMany: (a: unknown) => Promise<unknown>;
     };
   }).productCompliance;
 }
@@ -85,9 +86,15 @@ export function toComplianceView(row: ComplianceRow | null, now = new Date()): C
   };
 }
 
-export async function getProductCompliance(db: Db, productId: string): Promise<ComplianceView | null> {
+/**
+ * نسخة قواعد المنتج. expectedRef (مرجع المنتج الحالي) = نسخة لمرجع تاني
+ * (قديم/غلط) ما بتنطبق ← null: قواعد منتج تاني ما بتوصل للذكاء ولا للشاشة.
+ */
+export async function getProductCompliance(db: Db, productId: string, expectedRef?: string | null): Promise<ComplianceView | null> {
   try {
     const row = (await complianceModel(db).findUnique({ where: { productId } })) as ComplianceRow | null;
+    const want = expectedRef?.trim();
+    if (row && want && row.productRef !== want) return null;
     return toComplianceView(row);
   } catch {
     return null;
@@ -115,6 +122,9 @@ export async function refreshProductCompliance(db: Db, workspaceId: string, prod
     await complianceModel(db).updateMany({ where: { productId }, data: { lastError: "BAD_RESPONSE" } }).catch(() => undefined);
     return { ok: false, error: "BAD_RESPONSE" };
   }
+  // المرجع تغيّر وإحنا عم نقرأ (حفظ مرجع جديد بنفس اللحظة) = لا نكتب قواعد المرجع القديم.
+  const current = (await db.product.findUnique({ where: { id: productId } })) as ProductRow | null;
+  if ((current?.s1ProductRef?.trim() || null) !== ref) return { ok: false, error: "REF_CHANGED" };
   const d = parsed.data;
   const sourceUpdatedAt = d.updated_at && !Number.isNaN(new Date(d.updated_at).getTime()) ? new Date(d.updated_at) : null;
   const clean = (arr: string[]) => [...new Set(arr.map((s) => s.trim()).filter(Boolean))];
@@ -158,7 +168,7 @@ export async function refreshComplianceJob(db: Db, workspaceId: string, payload:
     try {
       const r = await refreshProductCompliance(db, workspaceId, p.id);
       // سيستم 1 واقف: نعيد المحاولة؛ منتج بلا مرجع/اتصال: لا معنى للإعادة.
-      if (!r.ok && r.error !== "NO_S1_REF" && r.error !== "S1_NOT_CONNECTED" && r.error !== "BAD_RESPONSE") failed += 1;
+      if (!r.ok && r.error !== "NO_S1_REF" && r.error !== "S1_NOT_CONNECTED" && r.error !== "BAD_RESPONSE" && r.error !== "REF_CHANGED") failed += 1;
     } catch (err) {
       log.warn({ err, productId: p.id }, "compliance_refresh_failed");
       failed += 1;
@@ -176,28 +186,51 @@ export async function onComplianceUpdated(db: Db, workspaceId: string, eventId: 
     workspaceId,
     type: "refresh_product_compliance",
     payload: { productRef: ref },
-    idempotencyKey: `compliance:${ref}:${eventId}`,
+    // المساحة بالمفتاح: نفس حدث سيستم 1 لمساحتين = مهمتين (فريد المهام النشطة عالمي).
+    idempotencyKey: `compliance:${workspaceId}:${ref}:${eventId}`,
   });
   return true;
 }
 
-/** ربط منتج بمرجعه بسيستم 1 (من شاشة المنتج) ثم قراءة فورية. */
-export async function setProductS1Ref(db: Db, ctx: ActorContext, productId: string, ref: string | null): Promise<ComplianceView | null> {
+/**
+ * ربط منتج بمرجعه بسيستم 1 (من شاشة المنتج) ثم قراءة فورية. تغيير المرجع
+ * أو مسحه بيشيل نسخة القواعد القديمة فورًا (قواعد منتج تاني ما بتضل شغّالة
+ * تحت اسم هالمنتج)، وخطأ القراءة بيرجع للشاشة بدل «انقرأت» كاذبة.
+ */
+export async function setProductS1Ref(
+  db: Db,
+  ctx: ActorContext,
+  productId: string,
+  ref: string | null
+): Promise<{ compliance: ComplianceView | null; refreshError: string | null }> {
   const product = (await db.product.findUnique({ where: { id: productId } })) as ProductRow | null;
   if (!product || product.workspaceId !== ctx.workspaceId) throw new NotFoundError("Product");
   const value = ref?.trim() || null;
   if (value && !/^[A-Za-z0-9_\-]{2,64}$/.test(value)) throw new AppError("مرجع سيستم 1 غير صالح", 422, "INVALID_S1_REF");
+  const previous = product.s1ProductRef?.trim() || null;
   await db.product.update({ where: { id: productId }, data: { s1ProductRef: value } as never });
+  if (previous !== value) {
+    await complianceModel(db)
+      .deleteMany({ where: { productId } })
+      .catch((err) => log.warn({ err, productId }, "compliance_stale_delete_failed"));
+  }
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,
     action: "product.s1_ref_set",
     entityType: "Product",
     entityId: productId,
-    metadata: { s1ProductRef: value },
+    metadata: { s1ProductRef: value, previous },
   });
-  if (value) await refreshProductCompliance(db, ctx.workspaceId, productId).catch(() => undefined);
-  return getProductCompliance(db, productId);
+  let refreshError: string | null = null;
+  if (value) {
+    const r = await refreshProductCompliance(db, ctx.workspaceId, productId).catch((err) => ({
+      ok: false as const,
+      error: err instanceof AppError ? err.code : "REFRESH_FAILED",
+    }));
+    if (!r.ok) refreshError = r.error ?? "REFRESH_FAILED";
+  }
+  return { compliance: await getProductCompliance(db, productId, value), refreshError };
 }
 
 function normalizeForMatch(text: string): string {

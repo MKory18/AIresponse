@@ -78,6 +78,11 @@ export async function statusSummary(db: Db, workspaceId: string, tz: string, now
       } as never,
     });
     if (waiting > 0) warnings.push(`الـ OMS بوضع يدوي — ${waiting} طلب مؤكد بانتظار النسخ للـ OMS`);
+  } else {
+    // وضع API: طلب مؤكد من أكتر من 15 دقيقة وما انرحّل = الترحيل واقف (OMS واقف
+    // أو رفض) أو بانتظار زر الترحيل.
+    const stuck = await db.order.count({ where: pendingApiHandoffWhere(workspaceId, now) as never });
+    if (stuck > 0) warnings.push(`${stuck} طلب مؤكد ما انرحّل للـ OMS من أكتر من 15 دقيقة — راجع صفحة الطلب`);
   }
   if (level !== "ok") warnings.push(level === "critical" ? "إنذار قدرة حرج: الرسائل بلا رد فوق الحد بكثير" : "إنذار قدرة: الرسائل بلا رد فوق الحد");
   const failed = await (db as unknown as { integrationDelivery?: { count: (a: unknown) => Promise<number> } }).integrationDelivery?.count({
@@ -130,6 +135,18 @@ export async function statusSummary(db: Db, workspaceId: string, tz: string, now
     last_sync: lastSync,
     counters,
     warnings_ar: warnings,
+  };
+}
+
+/** طلبات وضع API مؤكدة وما انرحّلت من أكتر من 15 دقيقة (بلا الملغاة). */
+function pendingApiHandoffWhere(workspaceId: string, now: Date) {
+  return {
+    workspaceId,
+    confirmationStatus: { in: ["CONFIRMED_BY_CUSTOMER", "CONFIRMED_BY_AGENT"] },
+    omsOrderId: null,
+    status: { notIn: ["CANCELLED", "FAILED"] },
+    updatedAt: { lt: new Date(now.getTime() - 15 * 60_000) },
+    createdAt: { gte: new Date(now.getTime() - 14 * 24 * 3600_000) },
   };
 }
 
@@ -193,6 +210,39 @@ export async function ownerQueue(db: Db, workspaceId: string, now = new Date(), 
     })) as Array<{ id: string; orderNumber: string; createdAt: Date | string }>;
     for (const o of pending) {
       items.push({ type: "oms.manual_handoff", title_ar: redactContacts(`انسخ الطلب ${o.orderNumber} للـ OMS`), age_hours: hours(o.createdAt), url: link(`/orders/${o.id}`) });
+    }
+    // ربط يدوي برقم ما طابق أحداث الـ OMS (رقم غلط على الأغلب).
+    const mismatches = (await (db as unknown as { auditLog?: { findMany: (a: unknown) => Promise<unknown> } }).auditLog?.findMany({
+      where: { workspaceId, action: "oms.manual_link_mismatch", createdAt: { gte: new Date(now.getTime() - 7 * 24 * 3600_000) } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { entityId: true, metadata: true, createdAt: true },
+    })) as Array<{ entityId: string; metadata: { omsOrderNumber?: string } | null; createdAt: Date | string }> | undefined;
+    const seenMismatch = new Set<string>();
+    for (const m of mismatches ?? []) {
+      if (seenMismatch.has(m.entityId)) continue;
+      seenMismatch.add(m.entityId);
+      const o = (await db.order.findFirst({
+        where: { id: m.entityId, workspaceId, omsOrderId: null, omsOrderNumber: m.metadata?.omsOrderNumber ?? "__none__" } as never,
+        select: { id: true, orderNumber: true },
+      })) as { id: string; orderNumber: string } | null;
+      if (!o) continue;
+      items.push({
+        type: "oms.link_mismatch",
+        title_ar: redactContacts(`رقم الـ OMS للطلب ${o.orderNumber} ما بيطابق — راجع الرقم`),
+        age_hours: hours(m.createdAt),
+        url: link(`/orders/${o.id}`),
+      });
+    }
+  } else if (oms?.isActive) {
+    const pending = (await db.order.findMany({
+      where: pendingApiHandoffWhere(workspaceId, now) as never,
+      orderBy: { createdAt: "asc" },
+      take: 20,
+      select: { id: true, orderNumber: true, createdAt: true },
+    })) as Array<{ id: string; orderNumber: string; createdAt: Date | string }>;
+    for (const o of pending) {
+      items.push({ type: "oms.handoff_pending", title_ar: redactContacts(`الطلب ${o.orderNumber} ما انرحّل للـ OMS`), age_hours: hours(o.createdAt), url: link(`/orders/${o.id}`) });
     }
   }
   items.sort((a, b) => b.age_hours - a.age_hours);

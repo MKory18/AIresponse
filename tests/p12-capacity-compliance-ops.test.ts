@@ -429,7 +429,7 @@ describe("P12 compliance — قراءة القواعد من سيستم 1 وحف�
     expect(await onComplianceUpdated(asDb(db), WS, "evt_s1_1", { product_ref: "pf_2031" })).toBe(true);
     const jobs = db._stores.backgroundJob.filter((j) => j.type === "refresh_product_compliance");
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({ workspaceId: WS, payload: { productRef: "pf_2031" }, idempotencyKey: "compliance:pf_2031:evt_s1_1" });
+    expect(jobs[0]).toMatchObject({ workspaceId: WS, payload: { productRef: "pf_2031" }, idempotencyKey: `compliance:${WS}:pf_2031:evt_s1_1` });
     await expect(onComplianceUpdated(asDb(db), WS, "evt_s1_2", {})).rejects.toMatchObject({ code: "VALIDATION_FAILED", statusCode: 422 });
     await expect(onComplianceUpdated(asDb(db), WS, "evt_s1_3", { product_ref: "x".repeat(65) })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
   });
@@ -449,8 +449,9 @@ describe("P12 compliance — قراءة القواعد من سيستم 1 وحف�
     const p = (await db.product.create({ data: { workspaceId: WS, sku: "P-3", name: "منتج", price: 1 } } as never)) as Row;
     await expect(setProductS1Ref(asDb(db), ctx, p.id, "pf 1/../x")).rejects.toMatchObject({ code: "INVALID_S1_REF" });
     stubS1(() => Response.json({ ...S1_JSON, product_ref: "pf_77" }));
-    const view = await setProductS1Ref(asDb(db), ctx, p.id, " pf_77 ");
+    const { compliance: view, refreshError } = await setProductS1Ref(asDb(db), ctx, p.id, " pf_77 ");
     expect(db._stores.product.find((x) => x.id === p.id)!.s1ProductRef).toBe("pf_77");
+    expect(refreshError).toBeNull();
     expect(view).toMatchObject({ productRef: "pf_77", bannedClaims: ["يعالج الصدفية", "نتيجة مضمونة"] });
   });
 });
@@ -637,7 +638,8 @@ describe("P12 ops-signals — المالية · الأزمات · المهام �
     const now = new Date("2026-10-11T06:00:00Z"); // 09:00 عمّان
     expect(await enqueueDailyUsageReport(asDb(db), WS, now)).toBe(true);
     const [row] = calls("finance");
-    expect(row).toMatchObject({ type: "usage-costs", url: "https://finance.zakai.io/api/v1/usage-costs", idempotencyKey: "replies-usage-2026-10-10" });
+    expect(row).toMatchObject({ type: "usage-costs", url: "https://finance.zakai.io/api/v1/usage-costs" });
+    expect(row.idempotencyKey).toMatch(/^replies-usage-[a-p]{6}-2026-10-10$/);
     expect(bodyOf(row)).toEqual({
       system: "replies",
       date: "2026-10-10",
@@ -736,7 +738,8 @@ describe("P12 ops-signals — المالية · الأزمات · المهام �
     expect(body.summary).toContain("السعر 3");
     expect(body.summary).toContain("التوصيل 2");
     expect(body.summary).not.toContain("الشكاوى");
-    expect(body.external_ref).toMatch(/^rep-idea-2026-w\d+$/);
+    expect(body.external_ref).toMatch(/^rep-idea-[a-p]{6}-2026-w\d+$/);
+    expect(row.idempotencyKey).toBe(body.external_ref);
     expect(findPii(body)).toEqual([]);
     expect(await enqueueWeeklyQuestionsIdea(asDb(fake()), WS, now)).toBe(false);
   });
@@ -855,7 +858,7 @@ describe("P12 runIntegrationScheduler — الإيقاع والشروط", () => 
     const db = fake();
     await saveIntegrationConnection(asDb(db), ctx, "clipper", { baseUrl: "https://clipper.zakai.io", token: "clp-token-1", generateEventsSecret: true });
     const camp = (id: string, o: Row) =>
-      db._stores.campaign.push({ id, workspaceId: WS, segmentId: "s", channelType: "WHATSAPP", status: "COMPLETED", approvedAt: now, externalSystem: "clipper", externalRef: `ref-${id}`, finalResultsSentAt: null, updatedAt: new Date(now.getTime() - 73 * HOUR), ...o });
+      db._stores.campaign.push({ id, workspaceId: WS, segmentId: "s", channelType: "WHATSAPP", status: "COMPLETED", approvedAt: now, externalSystem: "clipper", externalRef: `rt_${id.replace(/0+/g, "")}`, finalResultsSentAt: null, updatedAt: new Date(now.getTime() - 73 * HOUR), ...o });
     camp("cold0000000000000000000001", {});
     camp("crecent00000000000000000002", { updatedAt: new Date(now.getTime() - 10 * HOUR) });
     camp("crunning0000000000000000003", { status: "RUNNING" });
@@ -864,7 +867,7 @@ describe("P12 runIntegrationScheduler — الإيقاع والشروط", () => 
     await runIntegrationScheduler(asDb(db), now);
     const results = deliveries(db, { type: "retarget.result" }).map((d) => bodyOf(d).data);
     expect(results.map((r) => r.campaign_id)).toEqual(["rep_rt_cold0000000000000000000001"]);
-    expect(results[0]).toMatchObject({ final: true, status: "completed", external_ref: "ref-cold0000000000000000000001" });
+    expect(results[0]).toMatchObject({ final: true, status: "completed", external_ref: "rt_cold1" });
     resetIntegrationScheduler();
     vi.setSystemTime(now.getTime() + 2 * HOUR);
     await runIntegrationScheduler(asDb(db), new Date());

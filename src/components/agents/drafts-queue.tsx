@@ -7,7 +7,7 @@ import { GlassCard } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
-import { HealthPill, InfoNote, RiskNote, SectionHead, apiJson, fmtDateTime, type Health } from "@/components/integrations/ui";
+import { FixNote, HealthPill, RiskNote, SectionHead, apiJson, fmtDateTime, type Health } from "@/components/integrations/ui";
 
 interface DraftView {
   id: string;
@@ -26,6 +26,7 @@ interface DraftView {
 
 const STATUS: Record<string, { health: Health; label: string }> = {
   PENDING: { health: "warn", label: "بانتظارك" },
+  DECIDING: { health: "warn", label: "عم تنقرر" },
   APPROVED: { health: "ok", label: "معتمدة" },
   EDITED: { health: "ok", label: "معتمدة بتعديل" },
   REJECTED: { health: "off", label: "مرفوضة" },
@@ -62,6 +63,12 @@ function ReplyTemplateBody({ d, edits, setEdits, editable }: { d: DraftView; edi
           <p className="mt-1 text-ink-muted">{p.answer}</p>
         </div>
       )}
+      {editable && (
+        <>
+          <RiskNote title="السؤال والجواب كتبهم الموديل — بعد الاعتماد بيصيروا جواب فعّال بيستخدمه الذكاء بردوده على الزبائن (مؤتمت)" />
+          <FixNote>اقرأ الجواب كلمة كلمة وعدّله هون قبل «اعتماد» — الحارس بيرفض أرقام الهواتف والادعاءات الممنوعة من سيستم 1 بس، مش الأسعار أو الوعود الغلط.</FixNote>
+        </>
+      )}
     </div>
   );
 }
@@ -76,14 +83,23 @@ function RetargetBody({ d }: { d: DraftView }) {
         <li>القالب: <span dir="ltr" className="font-mono text-ink">{spec.templateRef}</span></li>
         <li>سقف التكرار: رسالة كل {spec.frequencyCapDays ?? 7} يوم للشخص</li>
         <li>المؤهلين وقت المسودة: <span className="num font-semibold text-ink">{d.payload.eligibleCount ?? "—"}</span></li>
-        {d.payload.productCode && <li>المنتج: {d.payload.productCode}</li>}
+        {d.payload.productCode && (
+          <li>
+            المنتج: <span className="font-semibold text-ink">{d.payload.productCode}</span>
+            {seg.kind === "messaged_no_order" ? " (رمز كليبر لهالمنتج بس)" : " (طلبات فيها هالمنتج بس)"}
+          </li>
+        )}
       </ul>
       {d.payload.offerNote && (
-        <RiskNote title="ملاحظة العرض كتبها الموديل — راجعها قبل الاعتماد">
-          <span className="font-normal">{String(d.payload.offerNote)}</span>
-        </RiskNote>
+        <>
+          <RiskNote title="ملاحظة العرض كتبها الموديل">
+            <span className="font-normal">{String(d.payload.offerNote)}</span>
+          </RiskNote>
+          <FixNote>راجعها قبل الاعتماد — العرض الفعلي هو نص قالب واتساب المعتمد، مش هالملاحظة.</FixNote>
+        </>
       )}
-      <InfoNote>الاعتماد هون بيعمل حملة «جاهزة» بس — ولا رسالة بتطلع قبل اعتمادها بصفحة الحملات (للموافقين على الرسائل فقط وبقالب واتساب معتمد).</InfoNote>
+      <RiskNote title="حملة رسائل لزبائن — بعد اعتماد إرسالها بصفحة الحملات بتطلع لحالها (مؤتمت)" />
+      <FixNote>الاعتماد هون بيعمل حملة «جاهزة» بس، ولا رسالة بتطلع قبل اعتمادها بصفحة الحملات (للموافقين على الرسائل فقط وبقالب واتساب معتمد) — راجع الجمهور والقالب هناك.</FixNote>
     </div>
   );
 }

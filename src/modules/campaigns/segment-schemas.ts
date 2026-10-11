@@ -32,6 +32,8 @@ export const segmentConditionSchema = z.discriminatedUnion("field", [
     value: z.string().regex(/^[A-Z0-9]{1,12}$/).optional(),
     minDays: z.number().int().min(0).max(90),
     maxDays: z.number().int().min(1).max(90),
+    // رمز منتج معيّن (من تحقق الكليبر) — شريحة منتج مش «أي رمز».
+    productCode: z.string().regex(/^[A-Za-z0-9_\-]{1,64}$/).optional(),
   }).strict(),
   // ما طلب خلال آخر N يوم.
   z.object({ field: z.literal("orders.noneWithinDays"), op: z.enum(["EQ"]), days }).strict(),
@@ -42,6 +44,8 @@ export const segmentConditionSchema = z.discriminatedUnion("field", [
     value: z.array(z.string()).min(1).max(9),
     minDays: z.number().int().min(0).max(365),
     maxDays: days,
+    // طلب فيه هالمنتج بالذات (معرّف المنتج بالردود).
+    productId: z.string().min(1).max(64).optional(),
   }).strict(),
   // سقف التكرار: ما وصلته رسالة حملة خلال آخر N يوم.
   z.object({ field: z.literal("campaign.notReceivedWithinDays"), op: z.enum(["EQ"]), days }).strict(),

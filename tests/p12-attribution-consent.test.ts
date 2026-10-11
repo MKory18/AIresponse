@@ -818,7 +818,7 @@ describe("P12 clipper — تحقق الرمز ثم conversation.coded مرة ل�
     expect(touchRows(db)[0]).toMatchObject({ codeStatus: "VALID", codeProductCode: "TW-500", codeCampaignRef: "cmp_9", codeWindowDays: 14, episodeStart: true });
     const rows = deliveries(db, "conversation.coded");
     expect(rows).toHaveLength(1);
-    expect(rows[0].dedupeKey).toBe(`clipper:conversation.coded:coded:${t.id}`);
+    expect(rows[0].dedupeKey).toBe(`${WS}:clipper:conversation.coded:coded:${t.id}`);
     const data = bodyOf(rows[0]).data;
     expect(data).toEqual({ code: "K7Q2", channel: "whatsapp", conversation_ref: conversationRef(s.conversation.id) });
     expect(EVENT_SCHEMAS["conversation.coded"].safeParse(data).success).toBe(true);
@@ -1248,6 +1248,35 @@ describe("P12 segments — شروط الكليبر الجديدة", () => {
     expect((await evalIds(db, [{ field: "orders.statusBetweenDays", op: "IN", value: ["CANCELLED"], minDays: 1, maxDays: 7 }])).eligible).toEqual([cancelled]);
     expect((await evalIds(db, [{ field: "orders.statusBetweenDays", op: "IN", value: ["DELIVERED"], minDays: 30, maxDays: 45 }])).eligible).toEqual([old]);
     expect(cancelledNow).toBeTruthy();
+  });
+
+  it("حصر بالمنتج: orders.statusBetweenDays.productId · attribution.code.productCode (من تحقق الكليبر)", async () => {
+    const db = fake();
+    const ok = (c: Row) => segmentDefinitionSchema.safeParse(def([c])).success;
+    expect(ok({ field: "orders.statusBetweenDays", op: "IN", value: ["DELIVERED"], minDays: 30, maxDays: 45, productId: "p-1" })).toBe(true);
+    expect(ok({ field: "attribution.code", op: "ANY", minDays: 1, maxDays: 7, productCode: "TIN01" })).toBe(true);
+    expect(ok({ field: "attribution.code", op: "ANY", minDays: 1, maxDays: 7, productCode: "TIN 01" })).toBe(false);
+    const withOrder = async (productId: string) => {
+      const s = await seedConv(db, { customer: opted });
+      db._stores.order.push({ id: `o-${nodeCrypto.randomBytes(4).toString("hex")}`, workspaceId: WS, customerId: s.customer.id, orderNumber: `N-${Math.random()}`, status: "DELIVERED", createdAt: new Date(Date.now() - 40 * DAY), updatedAt: new Date(Date.now() - 35 * DAY), items: [{ productId }] });
+      return s.customer.id as string;
+    };
+    const tin = await withOrder("p-tin");
+    const soap = await withOrder("p-soap");
+    expect((await evalIds(db, [{ field: "orders.statusBetweenDays", op: "IN", value: ["DELIVERED"], minDays: 30, maxDays: 45 }])).eligible.sort()).toEqual([tin, soap].sort());
+    expect((await evalIds(db, [{ field: "orders.statusBetweenDays", op: "IN", value: ["DELIVERED"], minDays: 30, maxDays: 45, productId: "p-tin" }])).eligible).toEqual([tin]);
+    const coded = async (productCode: string | null) => {
+      const s = await seedConv(db, { customer: opted });
+      const [t] = await capture(db, s, { at: new Date(Date.now() - 2 * DAY), key: `pc${s.customer.id}`, text: "رمز K7Q2" });
+      if (productCode) await markCodeVerification(asDb(db), t.id, { valid: true, productCode });
+      return s.customer.id as string;
+    };
+    const tinCode = await coded("TIN01");
+    const soapCode = await coded("SOAP1");
+    const unverified = await coded(null);
+    const any = (await evalIds(db, [{ field: "attribution.code", op: "ANY", minDays: 1, maxDays: 7 }])).eligible;
+    expect(any).toEqual(expect.arrayContaining([tinCode, soapCode, unverified]));
+    expect((await evalIds(db, [{ field: "attribution.code", op: "ANY", minDays: 1, maxDays: 7, productCode: "TIN01" }])).eligible).toEqual([tinCode]);
   });
 
   it("campaign.notReceivedWithinDays = استبعاد FREQUENCY_CAP لمن وصلته حملة (SENT) خلال المدة فقط", async () => {

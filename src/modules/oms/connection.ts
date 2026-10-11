@@ -202,8 +202,17 @@ export async function probeOmsConnection(db: Db, workspaceId: string, fetchImpl:
   const row = (await model(db).findUnique({ where: { workspaceId } })) as OmsConnRow | null;
   if (!row) throw new AppError("الـ OMS غير مضبوط", 422, "OMS_NOT_CONFIGURED");
   const dns = await checkSystemUrl(row.baseUrl);
-  if (!dns.ok && dns.reason === "DNS_NOT_GLOBAL_UNICAST") {
-    return { reachable: false, status: null, doorAvailable: null, detail: "رابط الـ OMS صار يشير لعنوان داخلي محجوب — ما انبعت التوكن" };
+  if (!dns.ok) {
+    if (dns.transient) return { reachable: false, status: null, doorAvailable: null, detail: "تعذر حل اسم الـ OMS (DNS) — جرّب كمان شوي" };
+    return {
+      reachable: false,
+      status: null,
+      doorAvailable: null,
+      detail:
+        dns.reason === "DNS_NOT_GLOBAL_UNICAST"
+          ? "رابط الـ OMS صار يشير لعنوان داخلي محجوب — ما انبعت التوكن"
+          : `رابط الـ OMS مرفوض (${dns.reason}) — ما انبعت التوكن`,
+    };
   }
   const base = row.baseUrl.replace(/\/+$/, "");
   const call = async (path: string, auth: boolean) => {

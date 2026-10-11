@@ -73,9 +73,12 @@ export async function POST(
   if (findPii(env.data).length > 0) {
     return v1Error(422, "PII_BLOCKED", "الحدث فيه بيانات شخصية — مرفوض", requestId);
   }
+  // عدم التكرار لكل مساحة: نفس الحدث من نفس النظام لمساحتين = حدثين (كل
+  // مساحة بتعيد قراءة قواعدها) — مش «مكرر» للتانية.
+  const source = `zaki:${system}:${ws.id}`;
   try {
     await prisma.webhookEvent.create({
-      data: { workspaceId: ws.id, channelType: "ZAKI", externalEventId: env.event_id, source: `zaki:${system}`, payload: env as object },
+      data: { workspaceId: ws.id, channelType: "ZAKI", externalEventId: env.event_id, source, payload: env as object },
     });
   } catch (err) {
     if ((err as { code?: string })?.code === "P2002") {
@@ -87,11 +90,11 @@ export async function POST(
     if (system === "s1" && env.type === "compliance.updated") {
       await onComplianceUpdated(db, ws.id, env.event_id, env.data);
     }
-    await prisma.webhookEvent.updateMany({ where: { source: `zaki:${system}`, externalEventId: env.event_id }, data: { processedAt: new Date() } });
+    await prisma.webhookEvent.updateMany({ where: { source, externalEventId: env.event_id }, data: { processedAt: new Date() } });
     return NextResponse.json({ ok: true, request_id: requestId }, { headers: { "x-request-id": requestId } });
   } catch (err) {
     // نشيل سجل الحدث غير المعالج حتى إعادة الإرسال تنعالج من جديد.
-    await prisma.webhookEvent.deleteMany({ where: { source: `zaki:${system}`, externalEventId: env.event_id, processedAt: null } }).catch(() => undefined);
+    await prisma.webhookEvent.deleteMany({ where: { source, externalEventId: env.event_id, processedAt: null } }).catch(() => undefined);
     // خطأ بالحدث نفسه (حقل ناقص مثلًا) = 4xx نهائي: الإعادة ما بتصلّحه.
     if (err instanceof AppError && err.statusCode < 500) {
       log.warn({ system, code: err.code }, "zaki_webhook_rejected_payload");

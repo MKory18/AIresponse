@@ -48,14 +48,30 @@ export interface PiiFinding {
   kind: "PERSONAL_KEY" | "PHONE" | "EMAIL";
 }
 
+/** صيغ المعرّفات المعتمة المعروفة (مولّدة عندنا أو من Prisma) — مستثناة كليًا. */
+const KNOWN_OPAQUE: RegExp[] = [
+  /^c[a-z0-9]{20,32}$/, // cuid (Prisma)
+  /^rep_rt_[a-z0-9]{8,40}$/, // حملة إعادة تواصل
+  /^hrm_[0-9a-f]{20}$/, // مرجع مسودة Hermes
+  /^(cv|agt)_[a-p]{6,16}$/, // مراجع بحروف فقط
+];
+
 /**
- * مرجع معتم تحت مفتاح معرّف (…_id · …_ref · id · ref) ويبلش بحرف — مثل
- * cuid أو rep_rt_… أو cv_…: الهاتف ما بيبلش بحرف أبدًا، فهاد مش هاتف حتى لو
- * جوّاه أرقام متتالية. (بدون هالاستثناء ~10% من المراجع كانت بتنمنع غلط.)
+ * مرجع معتم تحت مفتاح معرّف (…_id · …_ref · id · ref): صيغة معروفة (cuid ·
+ * rep_rt_ · hrm_ …) مستثناة كليًا؛ مرجع غريب (مثل external_ref من الكليبر)
+ * بيبلش بحرف ومستثنى بس إذا ما فيه 9 أرقام متتالية — «p0791234567» مش مرجع،
+ * هاد رقم هاتف ورا حرف. (بدون الاستثناء ~10% من المراجع كانت بتنمنع غلط.)
  */
 function isOpaqueRef(key: string, v: string): boolean {
   const idKey = key === "id" || key === "ref" || key.endsWith("_id") || key.endsWith("_ref");
-  return idKey && /^[A-Za-z][A-Za-z0-9_\-]{1,79}$/.test(v);
+  if (!idKey) return false;
+  if (KNOWN_OPAQUE.some((re) => re.test(v))) return true;
+  return /^[A-Za-z][A-Za-z0-9_\-]{1,79}$/.test(v) && !/\d{9,}/.test(v);
+}
+
+/** مفاتيح روابط: معرّفات cuid جوّا المسار/الاستعلام مش أرقام هواتف. */
+function isUrlKey(key: string): boolean {
+  return key === "url" || key === "href" || key === "link" || key.endsWith("_url");
 }
 
 function scanString(value: string, path: string, key: string, out: PiiFinding[]): void {
@@ -66,6 +82,13 @@ function scanString(value: string, path: string, key: string, out: PiiFinding[])
   }
   if (ID_KEYS.has(key) && /^\d{1,30}$/.test(v)) return; // معرّف رقمي صافٍ تحت مفتاحه
   if (isOpaqueRef(key, v)) return;
+  if (isUrlKey(key)) {
+    // رابط مراجعة/صفحة: نشيل معرّفات cuid وبعدين نفحص الباقي (wa.me/9639… بينمسك).
+    const rest = v.replace(/c[a-z0-9]{20,32}/g, "/");
+    const m = rest.match(PHONE_RE);
+    if (m && m[0].replace(/\D/g, "").length >= 7) out.push({ path, kind: "PHONE" });
+    return;
+  }
   // المبالغ دائمًا بكسر عشري ("1500.00") والتواريخ ISO لا تُعد هواتف — أما
   // نص أرقام صافٍ بلا كسر (0936654998) فيُفحص كهاتف.
   if (/^-?\d{1,9}\.\d{1,4}$/.test(v)) return;

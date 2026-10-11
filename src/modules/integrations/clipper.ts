@@ -13,6 +13,7 @@ import { emitIntegrationEvent, eventQueued } from "./outbox";
 import { conversationRef } from "./format";
 import { markCodeVerification, codeLooksReal } from "./attribution";
 import { getIntegrationSettings } from "./settings";
+import { findPii } from "./pii-guard";
 
 /**
  * P12 — الكليبر (عقد الكليبر IN02–IN04 · LG04 · LG07):
@@ -91,10 +92,59 @@ export async function afterCodeCaptured(db: Db, workspaceId: string, touchId: st
       type: "validate_attribution_code",
       payload: { touchId },
       idempotencyKey: `code-validate:${touchId}`,
+      maxAttempts: CODE_VALIDATION_MAX_ATTEMPTS,
     });
   } catch (err) {
     log.warn({ err, touchId }, "code_validation_enqueue_failed");
   }
+}
+
+/** ميزانية تحقق الرمز (≈ 35 دقيقة) قبل ما يستلمه الكنس الساعي. */
+export const CODE_VALIDATION_MAX_ATTEMPTS = 8;
+const CODE_SWEEP_HOURS = 72;
+const CODE_SWEEP_TOUCH_DAYS = 7;
+
+/**
+ * كنس ساعي: تحقق رموز فشل لأن الكليبر كان واقف (المهمة استنفدت محاولاتها)
+ * ← مهمة جديدة، طالما الرمز لسا «غير متحقق» واللمسة أحدث من 7 أيام. بلاها
+ * انقطاع دقيقتين كان يخلّي الرمز غير متحقق للأبد وconversation.coded ما بيطلع.
+ */
+export async function sweepUnverifiedCodes(db: Db, workspaceId: string, now = new Date()): Promise<number> {
+  const failed = (await db.backgroundJob.findMany({
+    where: {
+      workspaceId,
+      type: "validate_attribution_code",
+      status: "FAILED",
+      finishedAt: { gte: new Date(now.getTime() - CODE_SWEEP_HOURS * 3600_000) },
+    } as never,
+    orderBy: { finishedAt: "desc" },
+    take: 300,
+  })) as Array<{ payload: unknown }>;
+  const { enqueueJob } = await import("@/modules/jobs/service");
+  const seen = new Set<string>();
+  let n = 0;
+  for (const job of failed) {
+    const touchId = String((job.payload as { touchId?: unknown } | null)?.touchId ?? "");
+    if (!touchId || seen.has(touchId)) continue;
+    seen.add(touchId);
+    const touch = (await (db as unknown as { attributionTouch?: { findFirst: (a: unknown) => Promise<unknown> } }).attributionTouch?.findFirst({
+      where: { id: touchId, workspaceId },
+    })) as { codeStatus: string | null; occurredAt: Date | string; kind: string } | null | undefined;
+    if (!touch || touch.kind !== "CODE") continue;
+    if (touch.codeStatus && touch.codeStatus !== "UNVERIFIED") continue;
+    if (now.getTime() - new Date(touch.occurredAt).getTime() > CODE_SWEEP_TOUCH_DAYS * 24 * 3600_000) continue;
+    const res = await enqueueJob(db, {
+      workspaceId,
+      type: "validate_attribution_code",
+      payload: { touchId },
+      idempotencyKey: `code-validate:${touchId}`,
+      maxAttempts: CODE_VALIDATION_MAX_ATTEMPTS,
+    }).catch(() => null);
+    if (res && !res.deduplicated) n += 1;
+    if (n >= 100) break;
+  }
+  if (n > 0) log.info({ workspaceId, requeued: n }, "code_validation_sweep_requeued");
+  return n;
 }
 
 // ─────────────────────────── حملات إعادة التواصل ───────────────────────────
@@ -102,7 +152,13 @@ export async function afterCodeCaptured(db: Db, workspaceId: string, touchId: st
 export const SEGMENT_KINDS = ["messaged_no_order", "cancelled_before_shipping", "repeat_product"] as const;
 
 export const retargetRequestSchema = z.object({
-  external_ref: z.string().min(1).max(64),
+  // نفس حارس البيانات الي بيمر منه retarget.result: مرجع بيشبه رقم هاتف كان
+  // رح ينقبل هون وينمنع حدث نتيجته للأبد بصمت — منرفضه من الأول (422).
+  external_ref: z
+    .string()
+    .min(1)
+    .max(64)
+    .refine((v) => findPii({ external_ref: v }).length === 0, { message: "external_ref فيه سلسلة أرقام بشكل رقم هاتف" }),
   channel: z.enum(["whatsapp", "messenger", "instagram", "telegram"]),
   segment: z.object({
     kind: z.enum(SEGMENT_KINDS),
@@ -125,20 +181,48 @@ const CHANNEL_TYPE: Record<RetargetRequest["channel"], string> = {
   telegram: "TELEGRAM",
 };
 
+/** حصر الشريحة بمنتج (مسودات Hermes بـ product_code): معرّفه بالردود + رمزه. */
+export interface RetargetProductScope {
+  productId: string;
+  productCode: string;
+}
+
 /** تعريف الشريحة من نوع الكليبر — دائمًا مقصور على الموافقين + سقف التكرار. */
-export function segmentForRetarget(req: RetargetRequest): SegmentDefinition {
+export function segmentForRetarget(req: RetargetRequest, product?: RetargetProductScope | null): SegmentDefinition {
   const [minD, maxD] = req.segment.days ?? (req.segment.kind === "repeat_product" ? [30, 45] : [1, 7]);
   const conditions: SegmentDefinition["conditions"] = [
     { field: "customer.marketingConsent", op: "EQ", value: "OPTED_IN" },
   ];
   if (req.segment.kind === "messaged_no_order") {
     const prefix = req.segment.code_prefix ? req.segment.code_prefix.toUpperCase() : null;
-    conditions.push({ field: "attribution.code", op: prefix ? "PREFIX" : "ANY", ...(prefix ? { value: prefix } : {}), minDays: minD, maxDays: Math.min(maxD, 90) });
+    conditions.push({
+      field: "attribution.code",
+      op: prefix ? "PREFIX" : "ANY",
+      ...(prefix ? { value: prefix } : {}),
+      minDays: minD,
+      maxDays: Math.min(maxD, 90),
+      // رمز الكليبر لهالمنتج بالذات (من تحقق الرمز) — مش أي رمز.
+      ...(product ? { productCode: product.productCode } : {}),
+    });
     conditions.push({ field: "orders.noneWithinDays", op: "EQ", days: Math.max(maxD, 1) });
   } else if (req.segment.kind === "cancelled_before_shipping") {
-    conditions.push({ field: "orders.statusBetweenDays", op: "IN", value: ["CANCELLED"], minDays: minD, maxDays: Math.max(maxD, 1) });
+    conditions.push({
+      field: "orders.statusBetweenDays",
+      op: "IN",
+      value: ["CANCELLED"],
+      minDays: minD,
+      maxDays: Math.max(maxD, 1),
+      ...(product ? { productId: product.productId } : {}),
+    });
   } else {
-    conditions.push({ field: "orders.statusBetweenDays", op: "IN", value: ["DELIVERED"], minDays: minD, maxDays: Math.max(maxD, 1) });
+    conditions.push({
+      field: "orders.statusBetweenDays",
+      op: "IN",
+      value: ["DELIVERED"],
+      minDays: minD,
+      maxDays: Math.max(maxD, 1),
+      ...(product ? { productId: product.productId } : {}),
+    });
   }
   const cap = req.frequency_cap?.per_person_days;
   if (cap) conditions.push({ field: "campaign.notReceivedWithinDays", op: "EQ", days: cap });
@@ -200,6 +284,8 @@ export interface RetargetSpec {
   frequencyCapDays?: number;
   approvedBy: string;
   note?: string | null;
+  /** حصر بمنتج (مسودات Hermes) — نفس الحصر وقت المسودة ووقت الاعتماد. */
+  product?: RetargetProductScope | null;
 }
 
 /**
@@ -227,22 +313,25 @@ export async function buildRetargetCampaign(
     select: { id: true },
   });
   if (!channel) throw new AppError(`ما في قناة ${spec.channel} متصلة`, 422, "CHANNEL_NOT_CONNECTED");
-  const definition = segmentForRetarget({
-    external_ref: spec.externalRef,
-    channel: spec.channel,
-    segment: spec.segment,
-    template_ref: spec.templateRef,
-    ...(spec.frequencyCapDays ? { frequency_cap: { per_person_days: spec.frequencyCapDays } } : {}),
-    opt_in_required: true,
-    approved_by: spec.approvedBy,
-    approved_at: new Date().toISOString(),
-  });
+  const definition = segmentForRetarget(
+    {
+      external_ref: spec.externalRef,
+      channel: spec.channel,
+      segment: spec.segment,
+      template_ref: spec.templateRef,
+      ...(spec.frequencyCapDays ? { frequency_cap: { per_person_days: spec.frequencyCapDays } } : {}),
+      opt_in_required: true,
+      approved_by: spec.approvedBy,
+      approved_at: new Date().toISOString(),
+    },
+    spec.product ?? null
+  );
   const label = input.source === "clipper" ? "كليبر" : "Hermes";
   const segment = (await db.audienceSegment.create({
     data: {
       workspaceId: input.workspaceId,
       name: `${label} · ${spec.externalRef}`.slice(0, 120),
-      description: `شريحة ${spec.segment.kind} — مصدرها ${label}`,
+      description: `شريحة ${spec.segment.kind}${spec.product ? ` · منتج ${spec.product.productCode}` : ""} — مصدرها ${label}`,
       definition: definition as never,
       createdBy: input.actor,
     },

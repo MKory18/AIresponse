@@ -1,6 +1,6 @@
 import { childLogger } from "@/core/logger";
 import type { Db } from "@/modules/customers/service";
-import { dateInZone, decimalString } from "./format";
+import { dateInZone, decimalString, opaqueTag } from "./format";
 import { enqueueSystemCall } from "./outbox";
 import { getIntegrationSettings } from "./settings";
 import { timezoneOffsetMinutes } from "@/core/analytics/time";
@@ -11,7 +11,8 @@ import { timezoneOffsetMinutes } from "@/core/analytics/time";
  * - الأزمات: توكن قناة انتهى أو قرب ينتهي (POST /api/v1/alerts).
  * - المهام: تحويلات بشرية متأخرة (POST /api/v1/tasks) — مرة باليوم.
  * - مساحة العمل: أكثر أسئلة الزبائن بالأسبوع (POST /api/v1/ideas).
- * كل نداء بمفتاح عدم تكرار ثابت (يوم/أسبوع) — الإعادة لا تكرر عند المستقبِل.
+ * كل نداء بمفتاح عدم تكرار ثابت (وسم المساحة + يوم/أسبوع) — الإعادة لا تكرر
+ * عند المستقبِل، ومساحتين بنفس النظام ما بيتصادموا.
  */
 
 const log = childLogger("integrations.ops");
@@ -64,7 +65,8 @@ export async function enqueueDailyUsageReport(db: Db, workspaceId: string, now =
     type: "usage-costs",
     path: "/api/v1/usage-costs",
     body: { system: "replies", date: day, items },
-    idempotencyKey: `replies-usage-${day}`,
+    // وسم المساحة بالمفتاح: مساحتين بنفس شركة المالية ما بيبلعوا تقرير بعض.
+    idempotencyKey: `replies-usage-${opaqueTag("workspace", workspaceId)}-${day}`,
     dedupeKey: day,
   });
 }
@@ -89,13 +91,14 @@ export async function enqueueChannelHealthAlerts(db: Db, workspaceId: string, no
     if (hoursLeft > 72) continue;
     const type = channels.find((c) => c.id === a.channelId)?.type ?? "CHANNEL";
     const expired = hoursLeft <= 0;
+    const ref = `rep-ch-${opaqueTag("channel", a.channelId, 8)}-${day}`;
     const ok = await enqueueSystemCall(db, {
       workspaceId,
       system: "crisis",
       type: "alerts",
       path: "/api/v1/alerts",
       body: {
-        external_ref: `rep-ch-${a.channelId.slice(-10)}-${day}`,
+        external_ref: ref,
         type: expired ? "replies_channel_token_expired" : "replies_channel_token_expiring",
         severity: expired ? "high" : "medium",
         channel: type.toLowerCase(),
@@ -103,7 +106,7 @@ export async function enqueueChannelHealthAlerts(db: Db, workspaceId: string, no
           ? `قناة ${type} انتهى توكنها — الردود عليها واقفة لحد إعادة الربط`
           : `قناة ${type} توكنها بينتهي خلال ${Math.max(1, Math.round(hoursLeft))} ساعة — جدّد الربط`,
       },
-      idempotencyKey: `rep-ch-${a.channelId.slice(-10)}-${day}`,
+      idempotencyKey: ref,
       dedupeKey: `${a.channelId}:${day}`,
     });
     if (ok) n += 1;
@@ -122,18 +125,19 @@ export async function enqueueOverdueHandoffTask(db: Db, workspaceId: string, now
   });
   if (overdue === 0) return false;
   const day = dateInZone(now, ws?.timezone);
+  const ref = `rep-handoff-${opaqueTag("workspace", workspaceId)}-${day}`;
   return enqueueSystemCall(db, {
     workspaceId,
     system: "tasks",
     type: "tasks",
     path: "/api/v1/tasks",
     body: {
-      external_ref: `rep-handoff-${day}`,
+      external_ref: ref,
       title: `تحويلات بشرية متأخرة بالردود: ${overdue} محادثة بانتظار موظف أكثر من ${slaMin} دقيقة`,
       assignee_role: "support_lead",
       due: day,
     },
-    idempotencyKey: `rep-handoff-${workspaceId.slice(-8)}-${day}`,
+    idempotencyKey: ref,
     dedupeKey: `handoff:${day}`,
   });
 }
@@ -173,18 +177,19 @@ export async function enqueueWeeklyQuestionsIdea(db: Db, workspaceId: string, no
   if (top.length === 0) return false;
   const week = `${now.getUTCFullYear()}-w${Math.ceil(((now.getTime() - Date.UTC(now.getUTCFullYear(), 0, 1)) / 86400000 + 1) / 7)}`;
   const summary = top.map(([k, v]) => `${INTENT_AR[k]} ${v}`).join(" · ");
+  const ref = `rep-idea-${opaqueTag("workspace", workspaceId)}-${week}`;
   return enqueueSystemCall(db, {
     workspaceId,
     system: "workspace",
     type: "ideas",
     path: "/api/v1/ideas",
     body: {
-      external_ref: `rep-idea-${week}`,
+      external_ref: ref,
       title: "أكثر أسئلة الزبائن هالأسبوع — جهّز ردود ومحتوى",
       summary: `مواضيع الأسئلة بالردود آخر 7 أيام: ${summary}`,
       tags: ["الردود", "أسئلة الزبائن"],
     },
-    idempotencyKey: `rep-idea-${workspaceId.slice(-8)}-${week}`,
+    idempotencyKey: ref,
     dedupeKey: `idea:${week}`,
   });
 }

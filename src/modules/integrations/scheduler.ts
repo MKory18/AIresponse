@@ -8,7 +8,8 @@ import {
   enqueueOverdueHandoffTask,
   enqueueWeeklyQuestionsIdea,
 } from "./ops-signals";
-import { emitRetargetResult } from "./clipper";
+import { emitRetargetResult, sweepUnverifiedCodes } from "./clipper";
+import { sweepStuckOmsHandoffs } from "@/modules/oms/auto-handoff";
 import { timezoneOffsetMinutes } from "@/core/analytics/time";
 
 /**
@@ -16,7 +17,8 @@ import { timezoneOffsetMinutes } from "@/core/analytics/time";
  * - كل دورة: إرسال المستحق من صندوق الصادر.
  * - كل 5 دقايق: تقييم قدرة الرد وإنذاراتها (للمساحات المربوطة فقط).
  * - كل ساعة: تقرير التكاليف اليومي · صحة القنوات · التحويلات المتأخرة ·
- *   فكرة الأسبوع · إعادة قراءة قواعد الامتثال القديمة · نتائج الحملات النهائية.
+ *   فكرة الأسبوع · إعادة قراءة قواعد الامتثال القديمة · نتائج الحملات النهائية ·
+ *   كنس الترحيل التلقائي للـ OMS وتحقق الرموز الي فشلت بانقطاع.
  * كل مهمة idempotent بمفاتيحها (يوم/ساعة/أسبوع) — عاملين بنفس الوقت ما بيكرروا.
  */
 
@@ -58,6 +60,10 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
   const hourly = due("hourly", HOUR, t);
   if (!fiveMin && !hourly) return;
 
+  // الـ OMS بجدوله الخاص (مش IntegrationConnection): ترحيل تلقائي فشل لأن الـ
+  // OMS كان واقف ← إعادة بنفس المفتاح.
+  if (hourly) await sweepStuckOmsHandoffs(db, now).catch((err) => log.error({ err }, "oms_handoff_sweep_failed"));
+
   const conns = (await (db as unknown as { integrationConnection?: { findMany: (a: unknown) => Promise<unknown> } }).integrationConnection?.findMany({
     where: { enabled: true },
     select: { workspaceId: true, system: true, enabled: true },
@@ -93,6 +99,7 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
     }
     if (systems.has("clipper")) {
       await sendFinalRetargetResults(db, workspaceId, now).catch((err) => log.error({ err, workspaceId }, "retarget_final_failed"));
+      await sweepUnverifiedCodes(db, workspaceId, now).catch((err) => log.error({ err, workspaceId }, "code_sweep_failed"));
     }
   }
 }

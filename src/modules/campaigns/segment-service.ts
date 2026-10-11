@@ -82,6 +82,7 @@ function conditionToWhere(c: SegmentCondition, now: Date): Prisma.CustomerWhereI
       };
       if (c.op === "EQ" && c.value) touch.refCode = c.value;
       if (c.op === "PREFIX" && c.value) touch.refCode = { startsWith: c.value };
+      if (c.productCode) touch.codeProductCode = c.productCode;
       return { attributionTouches: { some: touch } } as Prisma.CustomerWhereInput;
     }
     case "orders.noneWithinDays":
@@ -92,6 +93,7 @@ function conditionToWhere(c: SegmentCondition, now: Date): Prisma.CustomerWhereI
           some: {
             status: { in: c.value as never },
             updatedAt: { gte: daysBoundary(Math.max(c.maxDays, c.minDays), now), lte: daysBoundary(c.minDays, now) },
+            ...(c.productId ? { items: { some: { productId: c.productId } } } : {}),
           },
         },
       };

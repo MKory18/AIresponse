@@ -593,7 +593,8 @@ export const TOOLS: ToolDef[] = [
           {
             kind: S.str({ enum: SEGMENT_KINDS }),
             code_prefix: S.str({ pattern: "^[A-Za-z0-9]{1,12}$" }),
-            days: { type: "array", items: S.int(0, 365), minItems: 2, maxItems: 2 },
+            // [من, إلى] بالأيام — نفس حدود zod (الأول 0–90 · التاني 1–365 وأكبر من الأول).
+            days: { type: "array", items: [S.int(0, 90), S.int(1, 365)], minItems: 2, maxItems: 2, additionalItems: false },
           },
           ["kind"]
         ),
@@ -643,22 +644,38 @@ export const TOOLS: ToolDef[] = [
         ok: Boolean(connected) && decision.allowed,
         message_ar: connected ? "قناة واتساب متصلة" : "ما في قناة واتساب متصلة",
       });
-      if (input.product_code) await productIdFor(ctx.db, ctx.workspaceId, input.product_code);
+      // product_code بيحصر الجمهور فعليًا (مش بس عنوان): طلبات فيها المنتج ·
+      // أو رمز كليبر لهالمنتج — نفس الحصر بيمشي للحملة وقت الاعتماد.
+      const productId = input.product_code ? await productIdFor(ctx.db, ctx.workspaceId, input.product_code) : null;
+      const product = productId && input.product_code ? { productId, productCode: input.product_code } : null;
       const externalRef = hermesExternalRef(ctx.idempotencyKey ?? `dry:${JSON.stringify(input)}`);
       const freq = input.frequency_cap_days ?? 7;
-      const definition = segmentForRetarget({
-        external_ref: externalRef,
-        channel: "whatsapp",
-        segment: input.segment,
-        template_ref: input.template_ref,
-        frequency_cap: { per_person_days: freq },
-        opt_in_required: true,
-        approved_by: "hermes",
-        approved_at: ctx.now.toISOString(),
-      });
+      const definition = segmentForRetarget(
+        {
+          external_ref: externalRef,
+          channel: "whatsapp",
+          segment: input.segment,
+          template_ref: input.template_ref,
+          frequency_cap: { per_person_days: freq },
+          opt_in_required: true,
+          approved_by: "hermes",
+          approved_at: ctx.now.toISOString(),
+        },
+        product
+      );
       const evaluated = await evaluateSegment(ctx.db, { workspaceId: ctx.workspaceId, definition, channelType: "WHATSAPP", now: ctx.now });
       const eligible = evaluated.eligible.length;
       checks.push({ code: "OPT_IN_ONLY", ok: true, message_ar: "الشريحة مقصورة على الموافقين على الرسائل" });
+      if (product) {
+        checks.push({
+          code: "PRODUCT_SCOPE",
+          ok: true,
+          message_ar:
+            input.segment.kind === "messaged_no_order"
+              ? `بس الي راسلوا برمز كليبر للمنتج ${product.productCode}`
+              : `بس الي طلباتهم فيها المنتج ${product.productCode}`,
+        });
+      }
       checks.push({ code: "FREQUENCY_CAP", ok: true, message_ar: `ولا زبون بيوصله أكتر من رسالة حملة كل ${freq} يوم` });
       checks.push({ code: "AUDIENCE", ok: eligible > 0, message_ar: eligible > 0 ? `${eligible} زبون مؤهل الآن` : "ما في زبون مؤهل حاليًا" });
       const known = (await ctx.db.campaignContentVersion.findFirst({
@@ -698,6 +715,7 @@ export const TOOLS: ToolDef[] = [
           frequencyCapDays: freq,
           approvedBy: "hermes",
           note: (input.offer ? `مسودة Hermes — ${input.offer}` : "مسودة Hermes").slice(0, 500),
+          product,
         },
         productCode: input.product_code ?? null,
         offerNote: input.offer ?? null,

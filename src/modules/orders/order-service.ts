@@ -355,13 +355,19 @@ export async function listOrders(
   const hasMore = orders.length > limit;
   const page = hasMore ? orders.slice(0, limit) : orders;
   // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع بأي قائمة.
-  const items = page.map((o) => {
-    const { ctwaClidEnc: _c, psidEnc: _p, ...rest } = o as typeof o & { ctwaClidEnc?: unknown; psidEnc?: unknown };
-    void _c;
-    void _p;
-    return rest;
-  });
+  const items = page.map((o) => withoutClickSecrets(o));
   return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+}
+
+/**
+ * P12: طلب للمتصفح بلا معرّفات الإسناد المشفّرة (رمز النقرة · PSID) — كل
+ * رد API بيرجّع صف طلب لازم يمر من هون (القوائم · التفاصيل · التعديل).
+ */
+export function withoutClickSecrets<T extends object>(order: T): Omit<T, "ctwaClidEnc" | "psidEnc"> {
+  const { ctwaClidEnc: _c, psidEnc: _p, ...rest } = order as T & { ctwaClidEnc?: unknown; psidEnc?: unknown };
+  void _c;
+  void _p;
+  return rest as Omit<T, "ctwaClidEnc" | "psidEnc">;
 }
 
 // â”€â”€ Customer data merging (confidence-gated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

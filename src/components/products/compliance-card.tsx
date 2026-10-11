@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { FixNote, HealthPill, InfoNote, RiskNote, SectionHead, apiJson, fmtDateTime } from "@/components/integrations/ui";
+import { FixNote, HealthPill, RiskNote, SectionHead, apiJson, fmtDateTime } from "@/components/integrations/ui";
 
 interface ComplianceView {
   productRef: string;
@@ -59,7 +59,8 @@ export function ComplianceCard({ productId }: { productId: string }) {
       setData(r);
       setRef(r.s1ProductRef ?? "");
       if (r.refreshError) setRefreshError(r.refreshError);
-      else toast.show("انقرأت القواعد من سيستم 1");
+      else if (!r.s1ProductRef) toast.show("انشال ربط المنتج بسيستم 1");
+      else if (r.compliance) toast.show("انقرأت القواعد من سيستم 1");
     } catch (err) {
       toast.show(err instanceof Error ? err.message : "فشل", "error");
     } finally {
@@ -97,7 +98,9 @@ export function ComplianceCard({ productId }: { productId: string }) {
 
       {refreshError && (
         <div className="space-y-1.5">
-          <RiskNote title={`ما انقرأت القواعد (${refreshError})`}>النسخة السابقة (إذا موجودة) بتضل شغّالة.</RiskNote>
+          <RiskNote title={`ما انقرأت القواعد (${refreshError})`}>
+            {c ? "النسخة السابقة لنفس المرجع بتضل شغّالة." : "ما في قواعد خاصة بهالمنتج هلأ — الذكاء ماشي بالحارس العام بس."}
+          </RiskNote>
           <FixNote>تأكد إن سيستم 1 مربوط بصفحة «الربط مع الأنظمة» وإن المرجع صحيح، وبعدين «اقرأ الآن».</FixNote>
         </div>
       )}
@@ -108,7 +111,12 @@ export function ComplianceCard({ productId }: { productId: string }) {
           <FixNote>حط مرجعه فوق: الذكاء وقوالب Hermes بيلتزموا بقواعده حرفيًا (الحارس العام بيضل شغّال بكل الأحوال).</FixNote>
         </div>
       ) : !c ? (
-        <InfoNote>لسا ما في نسخة قواعد — «اقرأ الآن».</InfoNote>
+        refreshError ? null : (
+          <div className="space-y-1.5">
+            <RiskNote title="لسا ما في نسخة قواعد لهالمرجع — الذكاء ماشي بالحارس العام بس" />
+            <FixNote>«اقرأ الآن» — وإذا فشلت، تأكد من ربط سيستم 1 ومن المرجع.</FixNote>
+          </div>
+        )
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.05] p-3">

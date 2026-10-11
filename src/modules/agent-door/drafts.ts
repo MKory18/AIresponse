@@ -62,7 +62,7 @@ function model(db: Db) {
       findFirst: (a: unknown) => Promise<unknown>;
       findMany: (a: unknown) => Promise<unknown>;
       update: (a: unknown) => Promise<unknown>;
-      updateMany: (a: unknown) => Promise<unknown>;
+      updateMany: (a: unknown) => Promise<{ count: number }>;
       count: (a: unknown) => Promise<number>;
     };
   }).agentDraft;
@@ -106,6 +106,11 @@ export function toDraftView(row: DraftRow, now = new Date()): DraftView {
 
 /** مسودات انتهت مهلتها بلا قرار → EXPIRED (عند كل قراءة — لا مؤقت مخفي). */
 export async function expireStaleDrafts(db: Db, workspaceId: string, now = new Date()): Promise<void> {
+  // قرار انقطع بالنص (العملية وقفت بعد الحجز) ← يرجع «بانتظار» بعد 10 دقايق.
+  await model(db).updateMany({
+    where: { workspaceId, status: "DECIDING", updatedAt: { lt: new Date(now.getTime() - 10 * 60_000) } },
+    data: { status: "PENDING", decidedBy: null },
+  });
   await model(db).updateMany({
     where: { workspaceId, status: "PENDING", expiresAt: { lt: now } },
     data: { status: "EXPIRED" },
@@ -213,6 +218,14 @@ export async function decideAgentDraft(
   const needed: Permission = row.kind === "retarget_campaign" ? "campaigns.write" : "knowledge.write";
   if (!ctx.can(needed)) throw new AuthorizationError(`صلاحية ${needed} مطلوبة`);
 
+  // حجز ذري (PENDING ← DECIDING): موافقين اتنين بنفس اللحظة = واحد بس بيكمّل —
+  // التاني بياخد 409 بدل ما يعمل FAQ أو حملة تانية.
+  const claimed = await model(db).updateMany({
+    where: { id: draftId, workspaceId: ctx.workspaceId, status: "PENDING" },
+    data: { status: "DECIDING", decidedBy: ctx.userId },
+  });
+  if (claimed.count !== 1) throw new AppError("المسودة عم تنقرر أو انقررت — حدّث الصفحة", 409, "DRAFT_ALREADY_DECIDED");
+
   if (input.decision === "reject") {
     const updated = (await model(db).update({
       where: { id: draftId },
@@ -222,6 +235,24 @@ export async function decideAgentDraft(
     return toDraftView(updated);
   }
 
+  try {
+    return await approveClaimedDraft(db, ctx, row, input);
+  } catch (err) {
+    // فشل التنفيذ (ادعاء ممنوع · قناة مفصولة …) = المسودة بترجع «بانتظار» للتعديل أو الرفض.
+    await model(db)
+      .updateMany({ where: { id: draftId, status: "DECIDING" }, data: { status: "PENDING", decidedBy: null } })
+      .catch(() => undefined);
+    throw err;
+  }
+}
+
+async function approveClaimedDraft(
+  db: Db,
+  ctx: { userId: string; workspaceId: string },
+  row: DraftRow,
+  input: DecideInput
+): Promise<DraftView> {
+  const draftId = row.id;
   let resultRef: string;
   let status = "APPROVED";
   if (row.kind === "reply_template") {

@@ -78,7 +78,14 @@ function validate(schema: Row, value: unknown, path = "$"): string[] {
       if (!Array.isArray(value)) return [`${path}: not array`];
       if (schema.minItems !== undefined && value.length < schema.minItems) errs.push(`${path}: minItems`);
       if (schema.maxItems !== undefined && value.length > schema.maxItems) errs.push(`${path}: maxItems`);
-      value.forEach((v, i) => errs.push(...validate(schema.items, v, `${path}[${i}]`)));
+      // items مصفوفة = tuple (draft-07): كل خانة بمخططها، والزيادة ممنوعة مع additionalItems:false.
+      value.forEach((v, i) => {
+        if (Array.isArray(schema.items)) {
+          const item = (schema.items as Row[])[i];
+          if (item) errs.push(...validate(item, v, `${path}[${i}]`));
+          else if (schema.additionalItems === false) errs.push(`${path}[${i}]: additional item`);
+        } else errs.push(...validate(schema.items, v, `${path}[${i}]`));
+      });
       return errs;
     }
     case "string":
@@ -116,7 +123,14 @@ function literalProblems(schema: Row, path = "$"): string[] {
     for (const r of (schema.required as string[]) ?? []) if (!(r in props)) out.push(`${path}: required ${r} not in properties`);
     for (const [k, v] of Object.entries(props)) out.push(...literalProblems(v as Row, `${path}.${k}`));
   }
-  if (schema.type === "array") out.push(...literalProblems(schema.items as Row, `${path}[]`));
+  if (schema.type === "array") {
+    if (Array.isArray(schema.items)) {
+      // tuple: ajv الصارم بيطلب minItems = الطول و(maxItems = الطول أو additionalItems:false).
+      const n = (schema.items as Row[]).length;
+      if (schema.minItems !== n || (schema.maxItems !== n && schema.additionalItems !== false)) out.push(`${path}: loose tuple`);
+      (schema.items as Row[]).forEach((it, i) => out.push(...literalProblems(it, `${path}[${i}]`)));
+    } else out.push(...literalProblems(schema.items as Row, `${path}[]`));
+  }
   return out;
 }
 

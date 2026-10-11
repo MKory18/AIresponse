@@ -50,6 +50,9 @@ export interface DispatchOutboundParams {
   template?: { name: string; language: string; variables?: Record<string, string> } | null;
 }
 
+/** حالات «الرسالة طلعت فعلًا» — نهائية لعدم التكرار (SENT وما بعده من إشارات التسليم). */
+const ALREADY_SENT = new Set(["SENT", "DELIVERED", "READ"]);
+
 export interface DispatchOutboundResult {
   messageId: string;
   deliveryStatus: "SENT" | "FAILED" | "QUEUED" | "SKIPPED_DUPLICATE";
@@ -164,11 +167,13 @@ export async function dispatchOutbound(
     where: { outboundIdempotencyKey: outboundKey },
     select: { id: true, deliveryStatus: true, externalMessageId: true, metadata: true },
   });
-  if (existing && existing.deliveryStatus === "SENT") {
+  // P12: إشارات واتساب بتنقل الرسالة SENT ← DELIVERED ← READ — كلها «انبعتت»
+  // (وإلا إعادة المحاولة بتبعت للزبون نفس الرسالة مرتين).
+  if (existing && ALREADY_SENT.has(existing.deliveryStatus)) {
     return {
       messageId: existing.id,
       deliveryStatus: "SKIPPED_DUPLICATE",
-      existingStatus: "SENT",
+      existingStatus: existing.deliveryStatus,
       externalMessageId: existing.externalMessageId ?? undefined,
       durationMs: Date.now() - started,
     };
@@ -222,11 +227,11 @@ export async function dispatchOutbound(
       where: { outboundIdempotencyKey: outboundKey },
       select: { id: true, deliveryStatus: true, externalMessageId: true, metadata: true },
     });
-    if (raced && raced.deliveryStatus === "SENT") {
+    if (raced && ALREADY_SENT.has(raced.deliveryStatus)) {
       return {
         messageId: raced.id,
         deliveryStatus: "SKIPPED_DUPLICATE",
-        existingStatus: "SENT",
+        existingStatus: raced.deliveryStatus,
         externalMessageId: raced.externalMessageId ?? undefined,
         durationMs: Date.now() - started,
       };

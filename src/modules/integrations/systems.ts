@@ -142,7 +142,7 @@ export const SYSTEM_SPECS: Record<ZakiSystem, SystemSpec> = {
     nameAr: "المالية",
     summaryAr: "تقرير يومي بتكاليف الموديلات والسيرفر (usage-costs) — قيد مصروف بمصدره.",
     sendsEvents: [],
-    calls: [{ name: "usage-costs", method: "POST", path: "/api/v1/usage-costs", descAr: "تكاليف اليوم بمفتاح replies-usage-التاريخ" }],
+    calls: [{ name: "usage-costs", method: "POST", path: "/api/v1/usage-costs", descAr: "تكاليف اليوم بمفتاح replies-usage-وسم المساحة-التاريخ" }],
     inbound: [],
     needsToken: true,
     needsEventsSecret: false,
