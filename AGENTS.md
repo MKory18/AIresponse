@@ -82,6 +82,7 @@ npm run build
 | المزوّد الخارجي (الوكيل الذكي) | `src/modules/ai/router.ts` (`isHermesSelected` · `isHermesPersonaMode`) · `stages/*` · `hermes-diagnostics.ts` — الشخصيات المحلية بتقود الصوت بكل مزوّد · ⚠️ بلا تحويل تلقائي للموظف على المسار الخارجي |
 | وسائط القنوات الواردة | `src/modules/channels/whatsapp/media-download.ts` (معرّف ميتا ← رابط مؤقت ← بايتات ← مخزننا) · الصف من `channels/inbound-job.ts` بمفتاح `wa-media:مساحة:wamid` · الحذف بـ `media-retention.ts` |
 | خصوصية وسيط الزبون | تصنيف `CUSTOMER_INBOUND` + `MediaAsset.messageId` · `excludeCustomerInbound()` بـ `media/service.ts` **لازم ينضاف لأي استعلام وسائط جديد** · الاسم معتم دايمًا |
+| مدة الاحتفاظ بالحمولة الخام | `src/modules/channels/webhook-retention.ts` — كنس ساعي من المجدول · `WEBHOOK_PAYLOAD_RETENTION_DAYS` (30 · `0` مطفي) · الصف يبقى (عدم التكرار) |
 | العقود | `contracts/` (الأصل) · `tests/contracts-*.test.ts` |
 | المسارات | `/api/v1/*` (القدرة · حملات الكليبر · أحداث الأنظمة) · `/api/agent/tools` · `/api/agent/call` · `/api/webhooks/oms/[key]` · `/api/integrations/*` |
 | الواجهة | `settings/integrations` · `settings/agents` · `settings/ai` · بطاقة الـ OMS بصفحة الطلب · تبويب الامتثال بالمنتج · بطاقة الموافقة بالمحادثة |
@@ -105,4 +106,4 @@ npm run build
 - ⚠️ إدخال الطلبات بالذكاء بالـ OMS (`src/app/api/orders/ai-intake/route.ts`) بيبعت نص الطلب كامل (اسم · رقم · عنوان) لـ OpenRouter وبموديل مجاني افتراضيًا، وبيتخطّى إعدادات الذكاء بالـ OMS نفسه.
   🔧 يمرّ عبر `aiChat` بإعدادات الـ OMS بمزوّد `LOCAL` (GLM على سيرفراتك) — أو شيل `OPENROUTER_API_KEY` من بيئة الـ OMS لحد ما ينصلح.
 - ⚠️ الريبوهات عامة · 3 نسخ من الـ OMS — التصحيح فوق بجدول الريبوهات.
-- تحقق حي مع الأنظمة بعد النشر (روابط وتوكنات حقيقية) · سيستم 6 (الأزمات) غير مبني · مدة احتفاظ `WebhookEvent.payload`.
+- تحقق حي مع الأنظمة بعد النشر (روابط وتوكنات حقيقية) · سيستم 6 (الأزمات) غير مبني.

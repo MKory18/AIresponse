@@ -1436,11 +1436,16 @@ model WebhookEvent {
   processedAt     DateTime?
   error           String?
   createdAt       DateTime  @default(now())
+  // مدة الاحتفاظ: الحمولة الخام من ميتا (أرقام · نصوص · رمز النقرة) تُفرّغ
+  // بعد مدة الاحتفاظ، والصف يبقى لأن عدم تكرار الأحداث معتمد عليه
+  // (`source + externalEventId`). القيمة تُختم هون حتى الكنس ما يعيد نفس الصف.
+  payloadPurgedAt DateTime?
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
   @@unique([source, externalEventId])
   @@index([createdAt])
+  @@index([payloadPurgedAt, createdAt])
 }
 
 model SystemLog {

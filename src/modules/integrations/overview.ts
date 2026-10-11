@@ -34,9 +34,14 @@ export async function integrationsOverview(db: Db, workspaceId: string) {
   ]);
   const stats = await Promise.all(GENERIC_SYSTEMS.map((s) => deliveryStats(db, workspaceId, s)));
   const base = appUrl();
+  // مدة الاحتفاظ بحمولة أحداث القنوات الخام — إعداد خادم، بتظهر بالملاحظة
+  // الحمراء بالصفحة حتى المالك يشوف الرقم الفعلي مش الافتراضي.
+  const { retentionDays } = await import("@/modules/channels/webhook-retention");
+  const webhookPayloadRetentionDays = retentionDays();
   const slug = ws?.slug ?? "";
   return {
     appUrl: base || null,
+    webhookPayloadRetentionDays,
     systems: GENERIC_SYSTEMS.map((key, i) => {
       const spec = SYSTEM_SPECS[key];
       return {
