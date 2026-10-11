@@ -62,6 +62,9 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
         phoneNumberId: m.phoneNumberId,
         // P12 — إحالة إعلان واتساب (تُحفظ مشفّرة بلمسة الإسناد، ولا يُحفظ ctwa_clid مع الرسالة).
         ...(m.referral ? { referral: m.referral } : {}),
+        // الوسيط الوارد: المعرّف فقط (ميتا لا تبعت رابط) — مهمة التحميل
+        // تجيبه بتوكن القناة وتحوّله لرابط عندنا.
+        ...(m.media ? { waMedia: m.media } : {}),
       },
       sentAt: m.timestamp,
       channelId: this.ctx.channelId,

@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { RiskWithFix } from "@/components/integrations/ui";
 
 type LinkedProduct = { id: string; name: string; isPrimary: boolean };
 
@@ -224,6 +225,26 @@ export default function MediaPage() {
   return (
     <div className="page-wrap">
       <PageHeader title={t.media.title} description={t.pages.mediaDesc} />
+
+      {/* وسائط الزبون الواردة: مؤتمتة بالكامل — أحمر مع تصحيحه بالبرتقالي. */}
+      <RiskWithFix
+        risk="مؤتمت: وسائط الزبون الواردة بتتحذف نهائيًا بعد 180 يوم"
+        detail={
+          <>
+            صور الزبون ومستنداته وبصماته الصوتية الي بتوصل من واتساب <strong>ما بتظهر بهالمكتبة</strong> —
+            محصورة بمحادثتها وحدها، وما بتنحشر بردود الذكاء ولا بالحملات ولا بالمنتجات ولا برابط عام.
+            وبعد 180 يوم <strong>الملف بينحذف نهائيًا وما بيرجع</strong>، والرسالة بتحتفظ بعلامة «الوسيط انتهى».
+          </>
+        }
+        fix={
+          <>
+            المدة بإعداد الخادم <span dir="ltr" className="num">WA_MEDIA_RETENTION_DAYS</span> (افتراضي
+            <span dir="ltr" className="num"> 180</span> يوم). حطّها
+            <span dir="ltr" className="num"> 0</span> إذا بدك توقّف الحذف والملفات تبقى بلا مدة —
+            وإذا بدك وسيط معيّن يضل، نزّله واحفظه برا قبل ما تخلص المدة.
+          </>
+        }
+      />
 
       {/* Upload zone */}
       <GlassCard className="p-4">

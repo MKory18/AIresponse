@@ -3,7 +3,7 @@ import { NotFoundError } from "@/core/errors";
 import type { Db } from "@/modules/customers/service";
 import { retrieveKnowledge, type VectorStore } from "@/modules/knowledge/retriever";
 import { getApprovedFeedbackForProduct } from "@/modules/feedback/service";
-import { findProductMedia, findRelevantMedia } from "@/modules/media/service";
+import { excludeCustomerInbound, findProductMedia, findRelevantMedia } from "@/modules/media/service";
 
 /**
  * Knowledge source priority (higher source wins on conflict; enforced by only
@@ -139,7 +139,11 @@ export async function buildFeedbackContext(
   const feedbacks = await getApprovedFeedbackForProduct(db, workspaceId, productId, limit);
   const mediaIds = feedbacks.map((f) => f.mediaId).filter((id): id is string => Boolean(id));
   const mediaAssets = mediaIds.length
-    ? await db.mediaAsset.findMany({ where: { id: { in: mediaIds }, workspaceId }, select: { id: true, url: true } })
+    ? await db.mediaAsset.findMany({
+        // وسيط زبون ما بيوصل سياق الذكاء ولا لو انربط برأي بالغلط.
+        where: { id: { in: mediaIds }, workspaceId, ...excludeCustomerInbound() },
+        select: { id: true, url: true },
+      })
     : [];
   const mediaById = new Map(mediaAssets.map((m) => [m.id, m.url]));
   return {
