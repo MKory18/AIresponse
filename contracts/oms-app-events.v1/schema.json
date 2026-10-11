@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "zaki/oms-app-events.v1",
+  "title": "أحداث تطبيقات الـ OMS ← الأنظمة (v1)",
+  "description": "جسم POST اللي بيبعته الـ OMS (src/lib/apps/events.ts) لرابط ويبهوك كل تطبيق مثبّت: JSON.stringify({ event, at, data }). الرؤوس: X-Zaki-Event · X-Zaki-Delivery · X-Zaki-Timestamp (ميلي ثانية) · X-Zaki-Signature = sha256=<hex HMAC-SHA256(secret, \"<timestamp>.<body>\")>. الغلاف حرفي (أي حقل جديد فوقه = v2). داخل data: إضافة حقل اختياري مسموحة · حذف أو تغيير اسم أو نوع = v2.",
+  "type": "object",
+  "required": ["event", "at", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": ["order.created", "order.confirmed", "order.shipped", "order.delivered", "order.returned", "order.cancelled"]
+    },
+    "at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{3})?Z$"
+    },
+    "data": {
+      "type": "object",
+      "required": ["orderId", "orderNumber", "total", "currency"],
+      "additionalProperties": true,
+      "properties": {
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "orderNumber": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[A-Z0-9]{2,10}-[0-9]{4}-[0-9]{4,8}$" },
+            { "type": "null" }
+          ]
+        },
+        "total": { "type": "number", "minimum": 0 },
+        "currency": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[A-Z]{3}$" },
+            { "type": "null" }
+          ]
+        },
+        "confirmationStatus": { "type": "string", "enum": ["CONFIRMED", "CANCELLED"] },
+        "shippingStatus": { "type": "string", "enum": ["SHIPPED", "DELIVERED", "RETURNED", "CANCELLED"] },
+        "previousStatus": {
+          "anyOf": [
+            { "type": "string", "minLength": 1, "maxLength": 40 },
+            { "type": "null" }
+          ]
+        },
+        "trackingNumber": {
+          "anyOf": [
+            { "type": "string", "maxLength": 120 },
+            { "type": "null" }
+          ]
+        },
+        "quantity": { "type": "integer", "minimum": 0 },
+        "items": { "type": "integer", "minimum": 0 },
+        "pieces": { "type": "integer", "minimum": 0 },
+        "productId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "source": { "type": "string", "maxLength": 80 },
+        "storeId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "city": {
+          "anyOf": [
+            { "type": "string", "maxLength": 120 },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}
