@@ -13,7 +13,7 @@ permissions:
 jobs:
   verify:
     name: typecheck / lint / test / secrets / build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       # Format-valid dummies ONLY — the unit suite runs against the in-memory
@@ -56,7 +56,7 @@ jobs:
 
   migrate-check:
     name: prisma migrate deploy (real Postgres + pgvector)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
