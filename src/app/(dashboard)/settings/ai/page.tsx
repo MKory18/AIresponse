@@ -36,13 +36,18 @@ export default function AISettingsPage() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Live provider choice (drives the Hermes banner + disabled fields before save).
+  const [providerChoice, setProviderChoice] = useState<string | null>(null);
+  const hermesMode = (providerChoice ?? settings?.provider) === "hermes";
 
   const loadSettings = useCallback(async () => {
     setLoadError(null);
     try {
       const res = await fetch("/api/ai/settings");
       if (!res.ok) throw new Error();
-      setSettings(await res.json());
+      const data = (await res.json()) as Settings;
+      setSettings(data);
+      setProviderChoice(data.provider);
     } catch {
       setLoadError("تعذّر تحميل إعدادات الذكاء الاصطناعي");
     }
@@ -57,35 +62,35 @@ export default function AISettingsPage() {
     const form = new FormData(e.currentTarget);
     setSaving(true);
     setSaveError(null);
-    const num = (k: string) => Number(form.get(k));
+    // Disabled inputs are omitted from FormData — only send present values
+    // so saving in Hermes mode never zeroes/clears suspended fields.
+    const payload: Record<string, unknown> = {
+      provider: form.get("provider"),
+      classificationModel: form.get("classificationModel") || null,
+      extractionModel: form.get("extractionModel") || null,
+      responseModel: form.get("responseModel") || null,
+      visionModel: form.get("visionModel") || null,
+      summaryModel: form.get("summaryModel") || null,
+      embeddingModel: form.get("embeddingModel") || null,
+      customBaseUrl: form.get("customBaseUrl") || null,
+      aiEnabled: form.get("aiEnabled") === "on",
+      autoRespond: form.get("autoRespond") === "on",
+    };
+    for (const k of ["temperature", "maxTokens", "confidenceExecute", "confidenceRespond", "humanHandoffThreshold", "fallbackProvider", "fallbackModel"]) {
+      const v = form.get(k);
+      if (v !== null && v !== "") payload[k] = k === "fallbackProvider" || k === "fallbackModel" ? v : Number(v);
+    }
     try {
       const res = await fetch("/api/ai/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: form.get("provider"),
-          classificationModel: form.get("classificationModel") || null,
-          extractionModel: form.get("extractionModel") || null,
-          responseModel: form.get("responseModel") || null,
-          visionModel: form.get("visionModel") || null,
-          summaryModel: form.get("summaryModel") || null,
-          embeddingModel: form.get("embeddingModel") || null,
-          customBaseUrl: form.get("customBaseUrl") || null,
-          fallbackProvider: form.get("fallbackProvider") || null,
-          fallbackModel: form.get("fallbackModel") || null,
-          temperature: num("temperature"),
-          maxTokens: num("maxTokens"),
-          confidenceExecute: num("confidenceExecute"),
-          confidenceRespond: num("confidenceRespond"),
-          humanHandoffThreshold: num("humanHandoffThreshold"),
-          aiEnabled: form.get("aiEnabled") === "on",
-          autoRespond: form.get("autoRespond") === "on",
-        }),
+        body: JSON.stringify(payload),
       });
       setSaving(false);
       if (res.ok) {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
+        loadSettings();
       } else {
         const data = await res.json().catch(() => ({}));
         setSaveError(data.message ?? "فشل الحفظ — تحقق من الصلاحيات وحاول مجددًا");
@@ -145,9 +150,9 @@ export default function AISettingsPage() {
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="المزود">
-            <Select name="provider" defaultValue={settings.provider}>
+            <Select name="provider" value={providerChoice ?? settings.provider} onChange={(e) => setProviderChoice(e.target.value)}>
               {["mock", "openai", "openrouter", "internal", "hermes"].map((p) => (
-                <option key={p} value={p}>{p === "hermes" ? "hermes — Hermes Agent" : p}</option>
+                <option key={p} value={p}>{p === "hermes" ? "hermes — Hermes Agent (مصدر شخصية الرد)" : p}</option>
               ))}
             </Select>
           </Field>
@@ -167,10 +172,15 @@ export default function AISettingsPage() {
             <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://… (لـ Hermes محلي: فعّل HERMES_ALLOW_PRIVATE_NETWORK في الخادم)" />
           </Field>
           <p className="-mt-1 rounded-xl bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-700 ring-1 ring-inset ring-sky-500/25 dark:text-sky-300 md:col-span-2">
-            Hermes Agent: شغّل <span dir="ltr" className="num">hermes gateway</span> ثم ضع في الخادم <span dir="ltr" className="num">HERMES_BASE_URL=http://127.0.0.1:8642/v1</span> و <span dir="ltr" className="num">HERMES_API_KEY</span> (يساوي API_SERVER_KEY) واختر المزود <span dir="ltr" className="num">hermes</span> والنموذج <span dir="ltr" className="num">hermes-agent</span>. لإدخال عنوان محلي/داخلي هنا مباشرة يجب تفعيل <span dir="ltr" className="num">HERMES_ALLOW_PRIVATE_NETWORK=true</span> في بيئة الخادم أولًا. بعدها Hermes يستلم كل رسائل العملاء ويولّد الردود — مع بقاء حماية الأسعار والطلبات وتحويل الموظف (HUMAN_ACTIVE) كما هي.
+            Hermes Agent: شغّل <span dir="ltr" className="num">hermes gateway</span> ثم ضع في الخادم <span dir="ltr" className="num">HERMES_BASE_URL=http://127.0.0.1:8642/v1</span> و <span dir="ltr" className="num">HERMES_API_KEY</span> (يساوي API_SERVER_KEY) واختر المزود <span dir="ltr" className="num">hermes</span> والنموذج <span dir="ltr" className="num">hermes-agent</span>. لإدخال عنوان محلي/داخلي هنا مباشرة يجب تفعيل <span dir="ltr" className="num">HERMES_ALLOW_PRIVATE_NETWORK=true</span> في بيئة الخادم أولًا. بعدها Hermes يستلم كل رسائل العملاء ويولّد الردود بشخصيته المضبوطة فيه — مع بقاء حماية الأسعار والطلبات والخصوصية كما هي، وبدون تحويل تلقائي للموظف (المحادثات تبقى مفتوحة).
           </p>
+          {hermesMode && (
+            <p className="-mt-1 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300 md:col-span-2">
+              وضع Hermes نشط: شخصية الرد والثقة والتحويل التلقائي والبديل معطّلة هنا — Hermes يرد بشخصيته، والفشل يبقى ظاهرًا وقابلًا لإعادة المعالجة دون رد مخترع. الإيقاف الآمن عبر «تشغيل AI» / «الرد الآلي» أو تبديل المزود.
+            </p>
+          )}
           <Field label="مزود البديل (عند الفشل فقط)">
-            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>
+            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""} disabled={hermesMode} title={hermesMode ? "البديل معطّل في وضع Hermes" : undefined}>
               <option value="">بلا بديل</option>
               {["mock", "openai", "openrouter", "internal", "hermes"].map((p) => (
                 <option key={p} value={p}>{p}</option>
@@ -178,7 +188,7 @@ export default function AISettingsPage() {
             </Select>
           </Field>
           <Field label="نموذج البديل">
-            <Input name="fallbackModel" defaultValue={settings.fallbackModel ?? ""} dir="ltr" className="num" />
+            <Input name="fallbackModel" defaultValue={settings.fallbackModel ?? ""} dir="ltr" className="num" disabled={hermesMode} />
           </Field>
         </div>
       </GlassCard>
@@ -207,15 +217,20 @@ export default function AISettingsPage() {
           </span>
           الثقة والتحكم
         </h2>
+        {hermesMode && (
+          <p className="mt-2.5 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300">
+            عتبات الثقة والتحويل التلقائي لا تعمل في وضع Hermes — Hermes يرد دائمًا بشخصيته ولا يُمنع الرد لانخفاض الثقة.
+          </p>
+        )}
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <Field label="حد التنفيذ الآمن">
-            <Input name="confidenceExecute" type="number" step="0.05" min="0" max="1" defaultValue={settings.confidenceExecute} dir="ltr" className="num" />
+            <Input name="confidenceExecute" type="number" step="0.05" min="0" max="1" defaultValue={settings.confidenceExecute} dir="ltr" className="num" disabled={hermesMode} />
           </Field>
           <Field label="حد الرد المحدود">
-            <Input name="confidenceRespond" type="number" step="0.05" min="0" max="1" defaultValue={settings.confidenceRespond} dir="ltr" className="num" />
+            <Input name="confidenceRespond" type="number" step="0.05" min="0" max="1" defaultValue={settings.confidenceRespond} dir="ltr" className="num" disabled={hermesMode} />
           </Field>
           <Field label="تحويل للموظف تحت">
-            <Input name="humanHandoffThreshold" type="number" step="0.05" min="0" max="1" defaultValue={settings.humanHandoffThreshold} dir="ltr" className="num" />
+            <Input name="humanHandoffThreshold" type="number" step="0.05" min="0" max="1" defaultValue={settings.humanHandoffThreshold} dir="ltr" className="num" disabled={hermesMode} />
           </Field>
         </div>
         <div className="mt-4 flex flex-wrap gap-5">

@@ -725,3 +725,21 @@
 ### قرار P11
 
 **مغلق تقنيًا بانتظار مراجعة المالك — لا انتقال لـ P12.**
+
+## Hermes External Persona (11 تشرين الأول 2026) — شخصية الرد من Hermes
+
+**القرار المعماري:** عند اختيار المزود `hermes` (مساحة العمل أو `AI_PROVIDER`) تصبح شخصية الرد (الصوت/اللهجة/النبرة/الإقناع) مملوكة لوكيل Hermes المضبوط خارجيًا. Zaki AI يجهّز السياق والبيانات التجارية الموثوقة، يستلم الرد، يتحقق منه، ويرسله — دون حقن أي Persona محلية أو Prompt شخصية في طلبات Hermes.
+
+**ما تغيّر في مسار الرد (`gating → extraction → response`):**
+- `router.ts`: `isHermesSelected()` (نية الإعدادات) + `isHermesPersonaMode()` (المزود الفعلي) — تعريف واحد للوضع يتفق عليه المسار والواجهة والحراس.
+- `gating.ts`: تخطي `resolveChannelPersona` كليًا في وضع Hermes (لا قراءة Persona) + علّامة `hermesPersona` في الحالة + لا HumanHandoff عند تعذر الإعداد.
+- `extraction.ts`: تعليق `mustHandoff` (حقن/شكوى/طلب موظف/ثقة منخفضة) وتعليق HANDOFF الخاص بـ ORDER_BLOCKED (الطلب يبقى محظورًا بقواعد OrderService + audit، والرد يستمر) — المحادثة تبقى OPEN.
+- `response.ts`: النظام = ترويسة نقل (`hermesExternalPersonaHeader` — تأطير هيكلي يفوّض الصوت لـ Hermes) + البيانات التجارية الموثوقة فقط؛ لا `personaPrompt` ولا `responseInstruction` ولا `prohibitedPhrases` المحلية؛ لا fallback بديل (الفشل ظاهر وقابل لإعادة المعالجة بنفس idempotency)؛ لا Handoff عند الفشل؛ telemetry بـ `personaId/version = null`.
+- `playground-service.ts`: نفس القاعدة في التجربة اليدوية.
+- الاستخراج/التضمينات/المسودات/OMS/Privacy Gate/Guardrails/العزل/الصلاحيات: **بلا تغيير**.
+
+**تحييد Personas (بلا حذف جداول أو سجلات):** حارس خادمي `assertLocalPersonaMutable()` يرفض 409 كل ما يغيّر الشخصية الحية (تفعيل/نشر/رجوع/ربط قناة) في وضع Hermes — القراءة والمسودات والسجل باقية. الواجهات (personas/channels/settings-ai) تعرض لافتة وتعطّل الحقول الميتة (عتبات الثقة/البديل). aiEnabled/autoRespond وتبديل المزود تبقى مفاتيح إيقاف حية.
+
+**الحذف المستقبلي الموثق (Migration مستقلة لاحقًا، ليست الآن):** جداول `Persona`/`PersonaVersion` وعمود `Channel.aiPersonaId` وحقول الثقة في `AISettings` (`confidenceExecute/confidenceRespond/humanHandoffThreshold`) — تُحذف فقط بعد فترة تشغيل مستقرة بوضع Hermes + نسخة احتياطية. **لم يُحذف شيء الآن.**
+
+**التحقق:** ملف `tests/hermes-persona-mode.test.ts` (13 اختبارًا عبر `processAIMessage` الفعلي) + كامل البطارية (test/typecheck/lint/scan:secrets/build). **لم يُنشأ commit** — بانتظار مراجعة المالك.

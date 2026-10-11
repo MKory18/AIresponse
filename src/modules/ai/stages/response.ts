@@ -13,6 +13,7 @@ import { withRetry, logUsage, getFallbackModel, executeWithFallback } from "../r
 import {
   PROMPT_VERSIONS,
   coreSystemRules,
+  hermesExternalPersonaHeader,
   personaPrompt,
   trustedDataPrompt,
   responseInstruction,
@@ -45,6 +46,7 @@ export async function runResponse(
     message,
     conversation,
     persona,
+    hermesPersona,
     activePersona,
     customer,
     channelRow,
@@ -95,7 +97,59 @@ export async function runResponse(
   }
 
   // 10. Response generation (validated by guardrails; regenerate once, then safe fallback).
-  const system = [
+  // Hermes external-persona mode: NO local persona voice/style/prompt is
+  // injected — Hermes owns personality. Only the transport header (which
+  // defers voice to Hermes) plus trusted commercial data travel. The local
+  // responseInstruction (dialect/tone styling) and prohibitedPhrases (persona
+  // control) are persona artifacts and stay out of Hermes requests.
+  const system = hermesPersona
+    ? [
+        hermesExternalPersonaHeader(),
+        trustedDataPrompt({
+          product: context.product
+            ? {
+                name: context.product.name,
+                price: `${context.product.price} ${context.product.currency ?? ""}`.trim(),
+                currency: context.product.currency ?? "",
+                stockStatus: context.product.stockStatus,
+                shortDescription: context.product.shortDescription,
+                benefits: context.product.benefits,
+                usage: context.product.usage,
+                warnings: context.product.warnings,
+                objections: context.product.objections,
+                salesNotes: context.product.salesNotes,
+                faqs: context.product.faqs,
+              }
+            : undefined,
+          knowledge: { faqs: context.knowledge.faqs, documents: context.knowledge.documents },
+          media: context.media.map((m) => ({ title: m.title, url: m.url })),
+          feedback: plan.useFeedback ? context.feedback : [],
+          memory: memories.map((m) => ({
+            type: m.type,
+            content: m.value.length > 200 ? `${m.value.slice(0, 200)}…` : m.value,
+          })),
+          summary: conversation.summary,
+          orderSummary: orderResult?.summaryText ?? null,
+          sales: salesPlan
+            ? {
+                primary: salesPlan.primary
+                  ? { name: salesPlan.primary.name, quantity: salesPlan.primary.quantity, unitPrice: `${salesPlan.primary.unitPrice} ${salesPlan.primary.currency}`, subtotal: String(salesPlan.primary.subtotal) }
+                  : null,
+                offer: salesPlan.upsell
+                  ? { title: salesPlan.upsell.title, quantity: salesPlan.upsell.quantity, price: `${salesPlan.upsell.price} ${salesPlan.upsell.currency}`, saving: String(salesPlan.upsell.saving) }
+                  : null,
+                crossSell: salesPlan.crossSell.map((c) => ({ name: c.name, price: `${c.unitPrice} ${c.currency}` })),
+                objection: salesPlan.objection?.topic ?? null,
+                noOfferReason: salesPlan.noOfferReason,
+              }
+            : undefined,
+          customer: {
+            name: (customer as { name?: string | null }).name ?? null,
+            page: channelRow?.displayName ?? null,
+          },
+        }),
+      ].join("\n\n")
+    : [
     coreSystemRules(),
     personaPrompt(persona),
     trustedDataPrompt({
@@ -144,7 +198,13 @@ export async function runResponse(
     }),
   ].join("\n\n");
 
-  const userPrompt = [
+  const userPrompt = hermesPersona
+    ? [
+        extractionUser,
+        `النية: ${extraction.intent} (ثقة ${extraction.confidence})`,
+        `الخطة: ${JSON.stringify(plan)}`,
+      ].join("\n\n")
+    : [
     extractionUser,
     `النية: ${extraction.intent} (ثقة ${extraction.confidence})`,
     `الخطة: ${JSON.stringify(plan)}`,
@@ -156,7 +216,12 @@ export async function runResponse(
   let responseTokens = { promptTokens: 0, completionTokens: 0, latencyMs: 0 };
   // P6: explicit opt-in fallback — used ONLY after a retryable primary
   // failure, through the same privacy gate (both calls are sendProtected*).
-  const fallbackModel = getFallbackModel(gate.settings);
+  // DISABLED in Hermes external-persona mode: a substitute model would hide
+  // the Hermes failure behind a different voice. Failures stay visible and
+  // reprocessable instead (same idempotency key, no duplicate sends).
+  const fallbackModel = hermesPersona ? null : getFallbackModel(gate.settings);
+  // Persona-controlled guardrail inputs stay out of Hermes replies.
+  const personaPhrases = hermesPersona ? [] : persona.prohibitedPhrases;
   let fallbackUsed = false;
   // P6: the recorded model is the one that ACTUALLY generated the text.
   let effectiveModel = responseModelCfg.model;
@@ -204,7 +269,7 @@ export async function runResponse(
     const check = validateResponse({
       response: responseText,
       context,
-      prohibitedPhrases: persona.prohibitedPhrases,
+      prohibitedPhrases: personaPhrases,
       allowFeedbackQuote: plan.useFeedback,
       trustedContacts,
       allowedNumbers,
@@ -223,7 +288,7 @@ export async function runResponse(
       const retryCheck = validateResponse({
         response: retry.text.trim(),
         context,
-        prohibitedPhrases: persona.prohibitedPhrases,
+        prohibitedPhrases: personaPhrases,
         allowFeedbackQuote: plan.useFeedback,
         trustedContacts,
         allowedNumbers,
@@ -235,6 +300,9 @@ export async function runResponse(
     }
   } catch (err) {
     // AI failure: never fabricate. Keep the message; surface AI_FAILED.
+    // Hermes external-persona mode: NO HumanHandoff record — the
+    // conversation stays OPEN and the failure is reprocessable via job
+    // retry under the same idempotency key (no duplicate sends).
     // Record usage + create a visible handoff so the failure never disappears.
     // Error category (TRANSIENT vs PERMANENT) tells operators whether a retry
     // can succeed or configuration must be corrected first — either way the
@@ -271,15 +339,17 @@ export async function runResponse(
       error: categorized,
     });
     if (!params.dryRun) {
-      const { createHandoff } = await import("@/modules/handoffs/handoff-service");
-      await createHandoff(db, {
-        workspaceId: params.workspaceId,
-        conversationId: conversation.id,
-        customerId: customer.id,
-        reason: "AI_FAILURE",
-        metadata: { messageId: message.id, error: err instanceof Error ? err.message : String(err) },
-        actorUserId: "ai-agent",
-      });
+      if (!hermesPersona) {
+        const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+        await createHandoff(db, {
+          workspaceId: params.workspaceId,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          reason: "AI_FAILURE",
+          metadata: { messageId: message.id, error: err instanceof Error ? err.message : String(err) },
+          actorUserId: "ai-agent",
+        });
+      }
       // State machine: alert only — the thread stays AI_ACTIVE so the next
       // inbound (or job retry) is processed by AI again. Ownership changes
       // exclusively via manual takeover.

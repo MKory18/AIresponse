@@ -9,7 +9,7 @@
 import { childLogger } from "@/core/logger";
 import { NotFoundError } from "@/core/errors";
 import type { AIProvider } from "../provider";
-import { loadAISettings, logUsage, getWorkspaceProvider, type AISettingsLike } from "../router";
+import { loadAISettings, logUsage, getWorkspaceProvider, isHermesSelected, isHermesPersonaMode, type AISettingsLike } from "../router";
 import { PROMPT_VERSIONS, type PersonaConfig } from "../prompts";
 import { resolveChannelPersona } from "../channel-persona";
 import { recordAudit } from "@/modules/audit/service";
@@ -87,13 +87,14 @@ export async function runGating(
     "ai_started"
   );
 
-  // 4. Config + persona (page-assigned → workspace default) + customer +
-  // channel page + recent history: independent reads in parallel. History has
-  // no dependency on the others — serializing it wasted one full DB round-trip
-  // on every single AI turn (critical-path latency).
-  const [settingsRaw, resolvedPersona, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
+  // 4. Config + customer + channel page + recent history: independent reads
+  // in parallel. History has no dependency on the others — serializing it
+  // wasted one full DB round-trip on every single AI turn (critical-path
+  // latency). Persona resolution is NOT here: in Hermes external-persona
+  // mode no local persona may influence the reply, so it is skipped
+  // entirely (no DB read); otherwise it resolves after provider selection.
+  const [settingsRaw, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
-    resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
     db.channel.findUnique({
       where: { id: conversation.channelId },
@@ -127,25 +128,13 @@ export async function runGating(
     }
     return { terminal: { status: "AI_DISABLED" } };
   }
-  const persona: PersonaConfig = {
-    name: resolvedPersona.name,
-    language: resolvedPersona.language,
-    dialect: resolvedPersona.dialect,
-    tone: resolvedPersona.tone,
-    formality: resolvedPersona.formality,
-    responseLength: resolvedPersona.responseLength,
-    emojiLevel: resolvedPersona.emojiLevel,
-    salesStyle: resolvedPersona.salesStyle,
-    systemInstructions: resolvedPersona.systemInstructions,
-    prohibitedPhrases: resolvedPersona.prohibitedPhrases,
-    customRules: resolvedPersona.customRules,
-  };
-  const activePersona = { id: resolvedPersona.id, name: resolvedPersona.name, source: resolvedPersona.source, version: resolvedPersona.version };
   if (!customer) throw new NotFoundError("Customer");
 
   // Fail-closed: a misconfigured real provider must never produce fake
-  // replies. Surface AI_FAILED (job retry + handoff + audit) with zero
-  // outbound sends and zero order/memory writes.
+  // replies. Surface AI_FAILED (job retry + audit) with zero outbound sends
+  // and zero order/memory writes. In Hermes external-persona mode no
+  // HumanHandoff is created either — the conversation stays OPEN and the
+  // failure remains visible and reprocessable.
   // P6: the workspace AISettings.provider choice is EFFECTIVE (not display-
   // only): resolution prefers it when its key exists, else ENV, else throws.
   let provider: AIProvider;
@@ -171,15 +160,17 @@ export async function runGating(
         status: "AI_FAILED",
         error: `PERMANENT: ${message_text}`,
       });
-      const { createHandoff } = await import("@/modules/handoffs/handoff-service");
-      await createHandoff(db, {
-        workspaceId: params.workspaceId,
-        conversationId: conversation.id,
-        customerId: customer.id,
-        reason: "AI_FAILURE",
-        metadata: { messageId: message.id, error: message_text },
-        actorUserId: "ai-agent",
-      });
+      if (!isHermesSelected(settings, process.env.AI_PROVIDER)) {
+        const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+        await createHandoff(db, {
+          workspaceId: params.workspaceId,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          reason: "AI_FAILURE",
+          metadata: { messageId: message.id, error: message_text },
+          actorUserId: "ai-agent",
+        });
+      }
       await recordAudit(db, {
         workspaceId: params.workspaceId,
         action: "conversation.ai_failed",
@@ -189,6 +180,40 @@ export async function runGating(
       });
     }
     return { terminal: { status: "AI_FAILED", error: `PERMANENT: ${message_text}` } };
+  }
+
+  // Persona resolution — SKIPPED in Hermes external-persona mode: reply
+  // personality is owned by the externally-configured Hermes agent, so no
+  // local Persona row, version, or template may influence the reply path.
+  // Telemetry carries nulls (never local persona ids) in this mode.
+  const hermesPersona = isHermesPersonaMode(provider);
+  let persona: PersonaConfig;
+  let activePersona: { id: string | null; name: string; source: string; version: number | null };
+  if (hermesPersona) {
+    persona = {
+      name: "Hermes", language: "ar", dialect: null, tone: "external", formality: "external",
+      responseLength: "external", emojiLevel: 0, salesStyle: "external",
+      systemInstructions: null, prohibitedPhrases: [], customRules: [],
+    };
+    activePersona = { id: null, name: "Hermes", source: "hermes", version: null };
+  } else {
+    const resolvedPersona = await timed("persona", () =>
+      resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId })
+    );
+    persona = {
+      name: resolvedPersona.name,
+      language: resolvedPersona.language,
+      dialect: resolvedPersona.dialect,
+      tone: resolvedPersona.tone,
+      formality: resolvedPersona.formality,
+      responseLength: resolvedPersona.responseLength,
+      emojiLevel: resolvedPersona.emojiLevel,
+      salesStyle: resolvedPersona.salesStyle,
+      systemInstructions: resolvedPersona.systemInstructions,
+      prohibitedPhrases: resolvedPersona.prohibitedPhrases,
+      customRules: resolvedPersona.customRules,
+    };
+    activePersona = { id: resolvedPersona.id, name: resolvedPersona.name, source: resolvedPersona.source, version: resolvedPersona.version };
   }
   // P1 privacy gate: customer PII leaves the process ONLY through
   // sendProtected* (per-call token vault, restored locally afterwards).
@@ -213,6 +238,7 @@ export async function runGating(
       settings,
       persona,
       activePersona,
+      hermesPersona,
       customer,
       channelRow,
       customerText,
