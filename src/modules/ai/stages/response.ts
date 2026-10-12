@@ -376,72 +376,94 @@ export async function runResponse(
 
   // The reply is on its way (or was already sent): now record success,
   // citations, and memories.
+  // PERF — these terminal writes are mutually independent (separate tables,
+  // reply already sent), so they run concurrently instead of holding the
+  // worker slot through N sequential round-trips. allSettled lets every
+  // write finish; the first error still propagates exactly as before.
   // P8 — OFFER_SHOWN يُسجَّل فقط بعد وصول الرد فعليًا (اقتراح ≠ أُرسل).
+  const postSendTasks: Promise<unknown>[] = [];
   if (salesPlan?.upsell && !params.dryRun) {
-    await recordSalesEvent(db, {
-      workspaceId: params.workspaceId,
-      type: "OFFER_SHOWN",
-      conversationId: conversation.id,
-      customerId: customer.id,
-      productId: salesPlan.upsell.productId,
-      sku: salesPlan.upsell.sku,
-      value: salesPlan.upsell.saving,
-      payload: { title: salesPlan.upsell.title, quantity: salesPlan.upsell.quantity, price: salesPlan.upsell.price },
-    }).catch(() => {});
+    postSendTasks.push(
+      recordSalesEvent(db, {
+        workspaceId: params.workspaceId,
+        type: "OFFER_SHOWN",
+        conversationId: conversation.id,
+        customerId: customer.id,
+        productId: salesPlan.upsell.productId,
+        sku: salesPlan.upsell.sku,
+        value: salesPlan.upsell.saving,
+        payload: { title: salesPlan.upsell.title, quantity: salesPlan.upsell.quantity, price: salesPlan.upsell.price },
+      }).catch(() => {})
+    );
   }
-  await logUsage(db, {
-    workspaceId: params.workspaceId,
-    conversationId: conversation.id,
-    messageId: message.id,
-    purpose: "RESPONSE",
-    provider: provider.name,
-    model: effectiveModel,
-    intent: extraction.intent,
-    confidence: extraction.confidence,
-    promptVersion: PROMPT_VERSIONS.RESPONSE,
+  postSendTasks.push(
+    logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: provider.name,
+      model: effectiveModel,
+      intent: extraction.intent,
+      confidence: extraction.confidence,
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
       personaId: activePersona.id,
       personaVersion: activePersona.version,
       fallbackUsed,
-    promptTokens: responseTokens.promptTokens,
-    completionTokens: responseTokens.completionTokens,
-    latencyMs: responseTokens.latencyMs,
-    success: true,
-  });
+      promptTokens: responseTokens.promptTokens,
+      completionTokens: responseTokens.completionTokens,
+      latencyMs: responseTokens.latencyMs,
+      success: true,
+    })
+  );
 
   if (!params.dryRun) {
-    await db.knowledgeCitation.createMany({
-      data: context.citations.map((c) => ({
-        workspaceId: params.workspaceId,
-        conversationId: conversation.id,
-        messageId: message.id,
-        sourceType: c.sourceType,
-        sourceId: c.sourceId,
-      })),
-      skipDuplicates: true,
-    });
+    postSendTasks.push(
+      db.knowledgeCitation.createMany({
+        data: context.citations.map((c) => ({
+          workspaceId: params.workspaceId,
+          conversationId: conversation.id,
+          messageId: message.id,
+          sourceType: c.sourceType,
+          sourceId: c.sourceId,
+        })),
+        skipDuplicates: true,
+      })
+    );
   }
 
   if (extraction.memories.length && !params.dryRun) {
-    await saveMemories(db, {
-      workspaceId: params.workspaceId,
-      customerId: customer.id,
-      source: `ai_extraction:${message.id}`,
-      memories: extraction.memories,
-    });
+    postSendTasks.push(
+      saveMemories(db, {
+        workspaceId: params.workspaceId,
+        customerId: customer.id,
+        source: `ai_extraction:${message.id}`,
+        memories: extraction.memories,
+      })
+    );
   }
 
   // 12. Summary refresh at intervals (not every message).
-  const inboundCount = await db.message.count({
-    where: { conversationId: conversation.id, direction: "INBOUND", deletedAt: null },
-  });
-  if (inboundCount % 6 === 0 && !params.dryRun) {
-    await db.backgroundJob.create({
-      data: {
-        type: "generate_summary",
-        workspaceId: params.workspaceId,
-        payload: { conversationId: conversation.id } as never,
-      },
-    });
+  postSendTasks.push(
+    (async () => {
+      const inboundCount = await db.message.count({
+        where: { conversationId: conversation.id, direction: "INBOUND", deletedAt: null },
+      });
+      if (inboundCount % 6 === 0 && !params.dryRun) {
+        await db.backgroundJob.create({
+          data: {
+            type: "generate_summary",
+            workspaceId: params.workspaceId,
+            payload: { conversationId: conversation.id } as never,
+          },
+        });
+      }
+    })()
+  );
+
+  const settled = await Promise.allSettled(postSendTasks);
+  for (const s of settled) {
+    if (s.status === "rejected") throw s.reason;
   }
 
   log.info(

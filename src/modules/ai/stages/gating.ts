@@ -30,7 +30,7 @@ export async function runGating(
   deps: OrchestratorDeps,
   fx: PipelineFx
 ): Promise<{ terminal: AIExecutionResult } | { state: GatingState }> {
-  const { timed, pipelineStarted } = fx;
+  const { timed, pipelineStarted, logTimings } = fx;
   // 1. Load message — only inbound customer messages drive the AI.
   const message = await timed("messageLoad", () => db.message.findUnique({ where: { id: params.messageId } }));
   if (!message || message.workspaceId !== params.workspaceId || message.conversationId !== params.conversationId) {
@@ -82,6 +82,84 @@ export async function runGating(
     }
     return { terminal: { status: "AI_DISABLED" } };
   }
+
+  // 3b. Per-conversation ordering: never answer a message while an OLDER
+  // sibling in the same conversation is still likely to be answered. Two
+  // overlapping executors (worker + jobs/run, scaled workers) or a retry
+  // racing fresh work could otherwise deliver the older reply AFTER the
+  // newer one. Deferral is a terminal success-noop — no send, no logs
+  // written: the orphan sweeper re-enqueues this message once the older
+  // sibling is decided. Older siblings always win, so nothing starves:
+  // the oldest undecided message in a conversation never defers.
+  // Runs only when the conversation is AI-active (checked above), so a
+  // deferral always resolves instead of waiting on a dead thread.
+  if (!params.dryRun) {
+    // createdAt may arrive stringified through serialized test doubles —
+    // normalize so the comparison is a real date comparison everywhere.
+    const msgTime = message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt);
+    const older = await timed("ordering", () =>
+      db.message.findFirst({
+        where: {
+          conversationId: params.conversationId,
+          direction: "INBOUND",
+          senderType: "CUSTOMER",
+          deletedAt: null,
+          OR: [
+            { createdAt: { lt: msgTime } },
+            { createdAt: msgTime, id: { lt: message.id } },
+          ],
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+      })
+    );
+    if (older) {
+      const olderLogs = await timed("ordering", () =>
+        db.aIUsageLog.findMany({
+          where: { messageId: older.id, purpose: "RESPONSE" },
+          select: { status: true },
+        })
+      );
+      const olderDecided = olderLogs.some((l) => l.status === "SUCCESS" || l.status === "HANDOFF");
+      if (!olderDecided) {
+        const attempted = olderLogs.length > 0;
+        const onlyDisabled = attempted && olderLogs.every((l) => l.status === "AI_DISABLED");
+        let olderLive = false;
+        if (attempted && !onlyDisabled) {
+          const liveJob = await timed("ordering", () =>
+            (db as any).backgroundJob.findFirst({
+              where: {
+                type: "process_ai_message",
+                idempotencyKey: `ai:${older.id}`,
+                status: { in: ["PENDING", "PROCESSING"] },
+              },
+              select: { id: true },
+            })
+          );
+          olderLive = !!liveJob;
+        }
+        // Defer while the older sibling was never attempted, is being
+        // worked right now, or is parked on AI_DISABLED (the sweeper
+        // reprocesses those within a cycle). An exhausted older sibling
+        // (AI_FAILED, no live job) no longer blocks: its retry comes back
+        // through backoff, and holding every newer reply for it would stall
+        // the conversation — the late retry stays visible in AIUsageLog.
+        if (!attempted || olderLive || onlyDisabled) {
+          log.info(
+            { conversationId: conversation.id, messageId: message.id, olderMessageId: older.id },
+            "ai_deferred_older_sibling"
+          );
+          logTimings("DEFERRED", { olderMessageId: older.id });
+          return { terminal: { status: "DEFERRED", error: `OLDER_SIBLING_UNDECIDED:${older.id}` } };
+        }
+        log.info(
+          { conversationId: conversation.id, messageId: message.id, olderMessageId: older.id },
+          "ai_ordering_proceed_older_failed"
+        );
+      }
+    }
+  }
+
   log.info(
     { conversationId: conversation.id, messageId: message.id, workspaceId: params.workspaceId },
     "ai_started"
@@ -95,14 +173,10 @@ export async function runGating(
   // builtin) drives reply voice in every provider mode, including Hermes —
   // Hermes carries no personaId parameter, so local instructions travel in
   // the request via the standard message builder.
-  const [settingsRaw, resolvedPersona, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
+  const [settingsRaw, resolvedPersona, customer, recentMessagesRaw] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
     resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
-    db.channel.findUnique({
-      where: { id: conversation.channelId },
-      select: { displayName: true, externalId: true },
-    }),
     db.message.findMany({
       where: { conversationId: conversation.id, deletedAt: null, isNote: false },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -110,6 +184,10 @@ export async function runGating(
       select: { senderType: true, direction: true, text: true },
     }),
   ]));
+  // PERF — the channel row is read once inside resolveChannelPersona (scope
+  // + assignment + display fields); reuse its display fields here instead of
+  // a second channel.findUnique. Same data, fully parallel as before.
+  const channelRow = resolvedPersona.channelPage;
   const settings = settingsRaw as AISettingsLike | null;
   if (settings && (!settings.aiEnabled || settings.autoRespond === false)) {
     if (!params.dryRun) {

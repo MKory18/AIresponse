@@ -206,19 +206,25 @@ export async function runExtraction(
   // answer — an unassigned page resolves nothing (safe fallback, said
   // out loud in the UI), and a workspace with no catalogs at all keeps
   // the legacy behaviour byte-for-byte.
-  const { resolveCatalogForChannel, workspaceHasCatalogs, catalogProductIds } = await import(
+  const { resolveCatalogForChannel, catalogProductIds } = await import(
     "@/modules/catalog/service"
   );
-  let allowedProductIds: string[] | null | undefined;
-  if (await workspaceHasCatalogs(db, params.workspaceId)) {
-    const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
-    log.info(
-      { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
-      "ai_catalog_resolved"
-    );
-    allowedProductIds =
-      resolved.status === "ok" ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id) : [];
-  }
+  // PERF — resolveCatalogForChannel already short-circuits workspaces with
+  // no catalogs internally; the extra workspaceHasCatalogs pre-check here
+  // was a duplicate round-trip with identical semantics:
+  // no_catalogs → undefined (legacy: every product may answer),
+  // assigned+active → ids, otherwise → [] (nothing may answer).
+  const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
+  log.info(
+    { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
+    "ai_catalog_resolved"
+  );
+  const allowedProductIds =
+    resolved.status === "ok"
+      ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id)
+      : resolved.status === "no_catalogs"
+        ? undefined
+        : [];
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
       loadMemory(db, params.workspaceId, customer.id),
@@ -253,7 +259,12 @@ export async function runExtraction(
   let salesPlan: import("@/modules/sales/plan-schemas").SalesPlan | undefined;
   if (productId && isBuyingContext(extraction.intent, extraction.requestedAction)) {
     try {
-      const fullProduct = await db.product.findUnique({ where: { id: productId } });
+      // PERF — reuse the product row buildAIContext already read (same row,
+      // same workspace check inside buildProductContext). Fallback fetch only
+      // if context carries no row (defensive; never expected on this path).
+      const fullProduct =
+        (context.productRow as Record<string, unknown> | null | undefined) ??
+        (await db.product.findUnique({ where: { id: productId } }));
       if (fullProduct && fullProduct.workspaceId === params.workspaceId) {
         const { buildSalesPlan } = await import("@/modules/sales/plan-builder");
         salesPlan = await buildSalesPlan(db, {

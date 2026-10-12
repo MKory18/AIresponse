@@ -206,6 +206,12 @@ describe("Phase 4 — orchestrator pipeline", () => {
   });
 
   it("handoffs on human request create a review alert, AI stays active", async () => {
+    // Production FIFO: the seeded first message is answered before the
+    // second turn runs — otherwise the ordering guard correctly defers the
+    // newer turn until the older sibling is decided.
+    await processAIMessage(db as Db, {
+      workspaceId: WS_A, conversationId, messageId: lastInboundMessageId(),
+    }, { vectorStore: vectorsFromDb() });
     const inbound = await processIncomingMessage(db as Db, {
       workspaceId: WS_A, channelType: "FACEBOOK", externalUserId: "fb-user-1",
       externalConversationId: "fb-conv-1", externalMessageId: "fb-msg-h", externalEventId: "fb-evt-h",
@@ -268,6 +274,11 @@ describe("Phase 4 — orchestrator pipeline", () => {
   });
 
   it("prompt injection from customer triggers handoff, not compliance", async () => {
+    // Same FIFO note as above: answer the seeded first message so the
+    // handoff decision for the second turn is isolated from ordering.
+    await processAIMessage(db as Db, {
+      workspaceId: WS_A, conversationId, messageId: lastInboundMessageId(),
+    }, { vectorStore: vectorsFromDb() });
     const inbound = await processIncomingMessage(db as Db, {
       workspaceId: WS_A, channelType: "FACEBOOK", externalUserId: "fb-user-1",
       externalConversationId: "fb-conv-1", externalMessageId: "fb-msg-inj", externalEventId: "fb-evt-inj",

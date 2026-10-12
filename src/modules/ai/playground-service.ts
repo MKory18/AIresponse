@@ -249,6 +249,7 @@ export async function sendPlaygroundMessage(
       customRules: (snap.customRules as string[]) ?? [],
       version: (snap.version as number) ?? null,
       source: "workspace",
+      channelPage: null,
     };
     draftUsed = true;
   } else if (session.personaId) {
@@ -271,6 +272,7 @@ export async function sendPlaygroundMessage(
       customRules: (row?.customRules as string[]) ?? [],
       version: typeof row?.version === "number" ? (row.version as number) : null,
       source: "workspace",
+      channelPage: null,
     };
   } else {
     persona = await resolveChannelPersona(db, { workspaceId: ctx.workspaceId, channelId: session.channelId });

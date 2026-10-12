@@ -12,6 +12,7 @@
  */
 import { prisma } from "../src/core/db/prisma";
 import { runJobs } from "../src/modules/jobs/handlers";
+import { nextPollDelayMs } from "../src/modules/jobs/service";
 import { processDueFollowUps } from "../src/modules/automation/followup-service";
 import { registerAutomationBridge } from "../src/modules/automation/engine";
 import { registerWorkflowBridge } from "../src/modules/automation/workflow-bridge";
@@ -22,6 +23,11 @@ const log = childLogger("worker");
 const POLL_INTERVAL_RAW = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 const POLL_INTERVAL_MS =
   Number.isFinite(POLL_INTERVAL_RAW) && POLL_INTERVAL_RAW >= 1000 ? POLL_INTERVAL_RAW : 5000;
+// PERF — short re-poll after a full batch (backlog draining); idle cadence
+// unchanged. Tunable without code changes; safe default.
+const BUSY_POLL_RAW = Number(process.env.WORKER_BUSY_POLL_MS ?? 250);
+const BUSY_POLL_MS = Number.isFinite(BUSY_POLL_RAW) && BUSY_POLL_RAW >= 50 ? BUSY_POLL_RAW : 250;
+const CYCLE_LIMIT = 10;
 const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
 
 let stopping = false;
@@ -43,7 +49,7 @@ async function cycle(): Promise<void> {
   let followUpOutcome: "ok" | "failed" = "ok";
   try {
     try {
-      const result = await runJobs(prisma, { limit: 10, workerId: WORKER_ID });
+      const result = await runJobs(prisma, { limit: CYCLE_LIMIT, workerId: WORKER_ID });
       lastProcessed = result.processed;
       lastFailed = result.failed;
     } catch (err) {
@@ -101,7 +107,11 @@ async function main(): Promise<void> {
       currentCycle = null;
     }
     if (stopping) break;
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    // PERF — backlog-aware polling: a full batch means more work is likely
+    // waiting, so re-poll quickly; otherwise keep the idle cadence exactly.
+    await new Promise((r) =>
+      setTimeout(r, nextPollDelayMs({ processed: lastProcessed, failed: lastFailed, limit: CYCLE_LIMIT, idleMs: POLL_INTERVAL_MS, busyMs: BUSY_POLL_MS }))
+    );
   }
 
   // Graceful: wait for the in-flight cycle (bounded).
