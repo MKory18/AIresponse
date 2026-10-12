@@ -91,6 +91,8 @@ model Workspace {
   agentDrafts             AgentDraft[]
   agentCallLogs           AgentCallLog[]
   productCompliances      ProductCompliance[]
+  catalogs                Catalog[]
+  catalogPageAssignments  CatalogPageAssignment[]
 
   @@index([slug])
 }
@@ -160,6 +162,7 @@ model Channel {
 
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   account       ChannelAccount?
+  catalogAssignment CatalogPageAssignment?
   conversations Conversation[]
   aiPersona     Persona?        @relation(fields: [aiPersonaId], references: [id], onDelete: SetNull)
 
@@ -467,6 +470,7 @@ model Product {
   workspace  Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   variants   ProductVariant[]
   mediaLinks ProductMedia[]
+  catalogLinks CatalogProduct[]
   orderItems OrderItem[]
   faqs       Faq[]
   feedbacks  Feedback[]
@@ -510,6 +514,70 @@ model ProductMedia {
 
   @@unique([productId, mediaAssetId])
   @@index([workspaceId, productId])
+}
+
+// ─────────────────────────── Catalogs ───────────────────────────
+//
+// A catalog is a named set of this workspace's products, attached to the
+// workspace's page-channels. The AI answers each page from that page's
+// ACTIVE catalog only — never from the page name, never from every
+// product in the database.
+//
+// - One product may live in many catalogs; one catalog may serve many
+//   pages; each page-channel carries exactly ONE active catalog
+//   (CatalogPageAssignment.channelId is unique — a switch replaces the
+//   row atomically, history lives in AuditLog).
+// - Removing a product from a catalog only deletes the LINK row.
+// - Prices, offers and stock stay on Product: the catalog never copies
+//   them, so it can never disagree with them.
+
+model Catalog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  products  CatalogProduct[]
+  pages     CatalogPageAssignment[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, isActive])
+}
+
+model CatalogProduct {
+  id        String   @id @default(cuid())
+  catalogId  String
+  productId  String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  catalog Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([catalogId, productId])
+  @@index([catalogId, sortOrder])
+}
+
+model CatalogPageAssignment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  catalogId   String
+  // The page's channel row (Channel.type FACEBOOK + externalId = page id;
+  // the 1:1 ChannelAccount behind it holds the trusted page identity).
+  // Unique: one active catalog per page, switched atomically.
+  channelId  String   @unique
+  assignedBy String?
+  assignedAt DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  catalog   Catalog   @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, catalogId])
 }
 
 // ─────────────────────────── Media ───────────────────────────

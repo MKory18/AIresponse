@@ -7,6 +7,7 @@ export const NAV_ITEMS: { href: string; label: string; icon: string; permission:
   { href: "/customers", label: t.nav.customers, icon: "Users", permission: "customers.read" },
   { href: "/orders", label: t.nav.orders, icon: "ShoppingBag", permission: "orders.read" },
   { href: "/products", label: t.nav.products, icon: "Package", permission: "products.read" },
+  { href: "/catalogs", label: "كتالوجات المنتجات", icon: "LibraryBig", permission: "catalogs.read" },
   { href: "/media", label: t.nav.media, icon: "Images", permission: "media.read" },
   { href: "/feedback", label: t.nav.feedback, icon: "MessageCircle", permission: "feedback.read" },
   { href: "/knowledge", label: t.nav.knowledge, icon: "BookOpen", permission: "knowledge.read" },
