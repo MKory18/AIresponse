@@ -24,6 +24,18 @@ import type {
 
 const log = childLogger("orchestrator");
 
+// P0: freshness bound for the ordering guard (minutes). A deferral only
+// makes sense while the older sibling is plausibly being answered RIGHT
+// NOW (live job) or arrived moments ago (enqueue race). An older message
+// that sat undecided beyond this window with no live job is stale —
+// deferring every newer reply behind it burns worker cycles in a
+// defer→sweep→re-enqueue loop and stalls the whole conversation.
+// Mirror of ORPHAN_MAX_AGE_HOURS philosophy: bounded, env-tunable.
+const ORDERING_GUARD_FRESH_MINUTES = Math.max(
+  1,
+  parseInt(process.env.ORDERING_GUARD_FRESH_MINUTES ?? "30", 10) || 30
+);
+
 export async function runGating(
   db: Db,
   params: PipelineParams,
@@ -110,7 +122,7 @@ export async function runGating(
           ],
         },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: { id: true },
+        select: { id: true, createdAt: true },
       })
     );
     if (older) {
@@ -122,29 +134,27 @@ export async function runGating(
       );
       const olderDecided = olderLogs.some((l) => l.status === "SUCCESS" || l.status === "HANDOFF");
       if (!olderDecided) {
-        const attempted = olderLogs.length > 0;
-        const onlyDisabled = attempted && olderLogs.every((l) => l.status === "AI_DISABLED");
-        let olderLive = false;
-        if (attempted && !onlyDisabled) {
-          const liveJob = await timed("ordering", () =>
-            (db as any).backgroundJob.findFirst({
-              where: {
-                type: "process_ai_message",
-                idempotencyKey: `ai:${older.id}`,
-                status: { in: ["PENDING", "PROCESSING"] },
-              },
-              select: { id: true },
-            })
-          );
-          olderLive = !!liveJob;
-        }
-        // Defer while the older sibling was never attempted, is being
-        // worked right now, or is parked on AI_DISABLED (the sweeper
-        // reprocesses those within a cycle). An exhausted older sibling
-        // (AI_FAILED, no live job) no longer blocks: its retry comes back
-        // through backoff, and holding every newer reply for it would stall
-        // the conversation — the late retry stays visible in AIUsageLog.
-        if (!attempted || olderLive || onlyDisabled) {
+        const hasFailed = olderLogs.some((l) => l.status === "AI_FAILED");
+        const liveJob = await timed("ordering", () =>
+          (db as any).backgroundJob.findFirst({
+            where: {
+              type: "process_ai_message",
+              idempotencyKey: `ai:${older.id}`,
+              status: { in: ["PENDING", "PROCESSING"] },
+            },
+            select: { id: true },
+          })
+        );
+        const olderLive = !!liveJob;
+        // P0: a LIVE older turn defers at any age (its answer is genuinely
+        // in flight). Otherwise only a FRESH older sibling may defer: beyond
+        // ORDERING_GUARD_FRESH_MINUTES with no live job, nobody is answering
+        // it imminently, so holding every newer reply hostage stalls the
+        // conversation (pre-guard behavior resumes, logged).
+        const olderCreated = (older as { createdAt?: Date | string }).createdAt;
+        const olderTime = olderCreated instanceof Date ? olderCreated.getTime() : new Date(olderCreated as string).getTime();
+        const olderFresh = Number.isFinite(olderTime) && Date.now() - olderTime < ORDERING_GUARD_FRESH_MINUTES * 60_000;
+        if (olderLive || (!hasFailed && olderFresh)) {
           log.info(
             { conversationId: conversation.id, messageId: message.id, olderMessageId: older.id },
             "ai_deferred_older_sibling"
@@ -154,7 +164,7 @@ export async function runGating(
         }
         log.info(
           { conversationId: conversation.id, messageId: message.id, olderMessageId: older.id },
-          "ai_ordering_proceed_older_failed"
+          hasFailed ? "ai_ordering_proceed_older_failed" : "ai_ordering_proceed_older_stale"
         );
       }
     }

@@ -299,8 +299,7 @@ describe("perf guards — ordering + worker polling", () => {
       expect(sentCount()).toBe(2);
     }, 120000);
 
-    it("newer turn proceeds when the older sibling exhausted retries", async () => {
-      const ch = await seedOrder();
+    it("newer turn proceeds when the older sibling exhausted retries", async () => {      const ch = await seedOrder();
       const m1 = await inbound(ch.id, "psid-d5", "d5m1", "مرحبا");
       const m2 = await inbound(ch.id, "psid-d5", "d5m2", "مرحبا مجددا");
       await ageFirst(m1.messageId);
@@ -309,6 +308,38 @@ describe("perf guards — ordering + worker polling", () => {
         data: { workspaceId: OW, conversationId: m1.conversationId, messageId: m1.messageId, purpose: "RESPONSE", provider: "mock", model: "m", promptTokens: 1, completionTokens: 1, latencyMs: 1, success: false, status: "AI_FAILED" },
       });
       await (db as any).backgroundJob.updateMany({ where: { idempotencyKey: `ai:${m1.messageId}` }, data: { status: "FAILED", finishedAt: new Date() } });
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).not.toBe("DEFERRED");
+      expect(sentCount()).toBe(1);
+    }, 120000);
+
+    it("stale never-attempted older sibling does not block a fresh message", async () => {
+      // P0: an older message that sat undecided for hours with no live job
+      // (stale thread, human era, lost enqueue) must NOT hold fresh replies
+      // hostage in a defer→sweep→re-enqueue loop. Only a LIVE older turn or
+      // a FRESH older sibling may defer the newer one.
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d6", "d6m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d6", "d6m2", "مرحبا مجددا");
+      await (db as any).message.update({ where: { id: m1.messageId }, data: { createdAt: new Date(Date.now() - 2 * 3600_000) } });
+      // Stale = nothing in flight: drop the older's queued job (a live
+      // PENDING job would rightly defer — that path is covered above).
+      await (db as any).backgroundJob.deleteMany({ where: { idempotencyKey: `ai:${m1.messageId}` } });
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).not.toBe("DEFERRED");
+      expect(sentCount()).toBe(1);
+    }, 120000);
+
+    it("stale AI_DISABLED older sibling does not block a fresh message", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d7", "d7m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d7", "d7m2", "مرحبا مجددا");
+      await (db as any).message.update({ where: { id: m1.messageId }, data: { createdAt: new Date(Date.now() - 2 * 3600_000) } });
+      await (db as any).aIUsageLog.create({
+        data: { workspaceId: OW, conversationId: m1.conversationId, messageId: m1.messageId, purpose: "RESPONSE", provider: "none", model: "none", promptTokens: 0, completionTokens: 0, latencyMs: 1, success: true, status: "AI_DISABLED" },
+      });
+      // Same staleness precondition: no live job for the older sibling.
+      await (db as any).backgroundJob.deleteMany({ where: { idempotencyKey: `ai:${m1.messageId}` } });
       const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
       expect(r2.status).not.toBe("DEFERRED");
       expect(sentCount()).toBe(1);
