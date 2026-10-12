@@ -95,14 +95,10 @@ export async function runGating(
   // builtin) drives reply voice in every provider mode, including Hermes —
   // Hermes carries no personaId parameter, so local instructions travel in
   // the request via the standard message builder.
-  const [settingsRaw, resolvedPersona, customer, channelRow, recentMessagesRaw] = await timed("config", () => Promise.all([
+  const [settingsRaw, resolvedPersona, customer, recentMessagesRaw] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
     resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
     db.customer.findUnique({ where: { id: conversation.customerId } }),
-    db.channel.findUnique({
-      where: { id: conversation.channelId },
-      select: { displayName: true, externalId: true },
-    }),
     db.message.findMany({
       where: { conversationId: conversation.id, deletedAt: null, isNote: false },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -110,6 +106,10 @@ export async function runGating(
       select: { senderType: true, direction: true, text: true },
     }),
   ]));
+  // PERF — the channel row is read once inside resolveChannelPersona (scope
+  // + assignment + display fields); reuse its display fields here instead of
+  // a second channel.findUnique. Same data, fully parallel as before.
+  const channelRow = resolvedPersona.channelPage;
   const settings = settingsRaw as AISettingsLike | null;
   if (settings && (!settings.aiEnabled || settings.autoRespond === false)) {
     if (!params.dryRun) {

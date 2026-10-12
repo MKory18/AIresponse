@@ -34,6 +34,27 @@ export const JOB_TYPES = [
 
 export type JobType = (typeof JOB_TYPES)[number];
 
+/**
+ * PERF — backlog-aware worker polling.
+ *
+ * When the last cycle drained a FULL batch (processed+failed >= limit), more
+ * work is probably waiting: re-poll after a short busy delay instead of the
+ * full idle interval, so a backlog drains in ~100s of ms per batch rather
+ * than one batch per 5s. When the cycle did less than a full batch the queue
+ * is (nearly) empty and the worker keeps the exact old idle cadence — same
+ * DB load when idle, much faster drain under load. Pure function (tested).
+ */
+export function nextPollDelayMs(args: {
+  processed: number;
+  failed: number;
+  limit: number;
+  idleMs: number;
+  busyMs?: number;
+}): number {
+  const busy = args.busyMs ?? 250;
+  return args.processed + args.failed >= args.limit ? Math.max(50, busy) : args.idleMs;
+}
+
 export interface EnqueuedJob {
   id: string;
   type: string;

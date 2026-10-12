@@ -48,6 +48,12 @@ export interface AIContext {
   feedback: { id: string; content: string; rating: number | null; source: string | null; mediaUrl: string | null }[];
   media: { id: string; url: string; type: string; title: string | null; category: string }[];
   citations: Citation[];
+  /**
+   * PERF — the raw product row already fetched by buildProductContext.
+   * Internal only (never sent to any provider): lets the sales-plan step
+   * reuse it instead of re-reading the same row. Null when no product.
+   */
+  productRow?: Record<string, unknown> | null;
 }
 
 // ── Individual builders (Phase 4 composes these via buildAIContext) ─────────
@@ -84,8 +90,7 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
 
   return {
     product: {
-      id: product.id,
-      name: product.name,
+      id: product.id,      name: product.name,
       sku: product.sku,
       // Price comes from DB decimals — never from AI or knowledge text.
       price: product.price.toString(),
@@ -107,6 +112,8 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
       { sourceType: "PRODUCT", sourceId: product.id } as Citation,
       ...product.faqs.map((f) => ({ sourceType: "FAQ", sourceId: f.id }) as Citation),
     ],
+    // PERF — raw row for the sales-plan step (same read, no second query).
+    productRow: product as unknown as Record<string, unknown>,
   };
 }
 
@@ -190,7 +197,7 @@ export async function buildAIContext(
   const [productCtx, knowledgeCtx, feedbackCtx, mediaCtx] = await Promise.all([
     params.productId
       ? buildProductContext(db, params.workspaceId, params.productId)
-      : Promise.resolve({ product: undefined, citations: [] as Citation[] }),
+      : Promise.resolve({ product: undefined, citations: [] as Citation[], productRow: null as Record<string, unknown> | null }),
     buildKnowledgeContext(db, vectorStore, {
       workspaceId: params.workspaceId,
       query: params.query,
@@ -210,6 +217,7 @@ export async function buildAIContext(
 
   return {
     product: productCtx.product,
+    productRow: productCtx.productRow ?? null,
     knowledge: knowledgeCtx.knowledge,
     feedback: feedbackCtx.feedback,
     media: mediaCtx.media,

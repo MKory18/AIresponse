@@ -428,13 +428,11 @@ export async function dispatchOutbound(
   }
 
   // Prior partial progress for this row (crash between the two sends).
-  const rowMeta = await db.message
-    .findUnique({ where: { id: message.id }, select: { metadata: true } })
-    .catch(() => null);
-  const priorPart1 =
-    rowMeta && typeof (rowMeta.metadata as { part1MessageId?: unknown })?.part1MessageId === "string"
-      ? ((rowMeta.metadata as { part1MessageId: string }).part1MessageId)
-      : null;
+  // PERF — reuse the value already read at claim time (priorPart1ForClaim):
+  // nothing writes metadata between the claim and this point on the success
+  // path (failures return early), so the extra re-read was a duplicate
+  // round-trip with an identical result.
+  const priorPart1 = priorPart1ForClaim;
 
   const persistPart1 = async (part1MessageId: string) => {
     await persistPart1For(db, message.id, sendMediaId ?? undefined, part1MessageId);

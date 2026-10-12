@@ -64,10 +64,9 @@ export async function handleChannelInbound(
     return { success: true };
   }
   const { processIncomingMessage } = await import("@/modules/conversations/service");
-  let processed = 0;
-  let failed = 0;
-  for (const m of messages) {
-    try {
+  const { processed, failed } = await processInboundGroups(messages, {
+    groupKey: (m) => `${m.channelType}:${m.channelId ?? ""}:${m.externalConversationId}`,
+    run: async (m) => {
       await processIncomingMessage(db, {
         workspaceId,
         channelType: m.channelType,
@@ -84,19 +83,61 @@ export async function handleChannelInbound(
         metadata: m.metadata ?? {},
         sentAt: m.sentAt ? new Date(m.sentAt) : undefined,
       });
-      processed += 1;
       await enqueueWhatsAppMediaDownload(db, workspaceId, m);
-    } catch (err) {
-      failed += 1;
+    },
+    onError: (m, err) => {
       log.warn(
         { workspaceId, externalEventId: m.externalEventId, error: err instanceof Error ? err.message : String(err) },
         "channel_inbound_message_failed"
       );
-    }
-  }
+    },
+  });
   log.info({ workspaceId, processed, failed }, "channel_inbound_processed");
   if (failed > 0 && processed === 0) {
     return { success: false, error: `${failed} channel messages failed` };
   }
   return { success: true };
+}
+
+/**
+ * PERF — conversation-grouped parallel ingestion.
+ *
+ * Messages from DIFFERENT conversations are independent (own customer,
+ * conversation, idempotency keys) and run concurrently; messages of the
+ * SAME conversation stay strictly sequential so per-conversation ordering
+ * (unread counts, last-message timestamps, single AI turn order) is exactly
+ * what the old serial loop produced. Failure accounting is identical:
+ * per-message try/catch, poison messages never drop the batch.
+ */
+export async function processInboundGroups<T>(
+  items: T[],
+  opts: {
+    groupKey: (m: T) => string;
+    run: (m: T) => Promise<void>;
+    onError?: (m: T, err: unknown) => void;
+  }
+): Promise<{ processed: number; failed: number }> {
+  const groups = new Map<string, T[]>();
+  for (const m of items) {
+    const k = opts.groupKey(m);
+    const g = groups.get(k);
+    if (g) g.push(m);
+    else groups.set(k, [m]);
+  }
+  let processed = 0;
+  let failed = 0;
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      for (const m of group) {
+        try {
+          await opts.run(m);
+          processed += 1;
+        } catch (err) {
+          failed += 1;
+          opts.onError?.(m, err);
+        }
+      }
+    })
+  );
+  return { processed, failed };
 }

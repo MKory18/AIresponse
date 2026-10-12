@@ -390,51 +390,54 @@ export async function handleProcessWebhookEvent(db: HandlerDb, payload: Record<s
     })
   );
   const profileByPsid = new Map(profileResults.map((r) => [r.psid, r]));
-  let processed = 0;
-  let failed = 0;
-  for (const m of messages) {
-    const psid = String(m.externalCustomerId ?? "");
-    // Best-effort sender profile (throttled, cached): fills Customer.name /
-    // avatarUrl so the inbox shows real identity instead of fallbacks.
-    // Never blocks ingestion on failure — falls through to nulls.
-    const prof = profileByPsid.get(psid);
-    const senderName: string | null = prof?.name ?? null;
-    const senderAvatar: string | null = prof?.avatar ?? null;
-    try {
+  // PERF — ingest conversation groups concurrently, strictly sequential
+  // inside one conversation (see processInboundGroups): a 10-PSID batch no
+  // longer pays N serial DB pipelines; same-conversation order is preserved.
+  const { processInboundGroups } = await import("@/modules/channels/inbound-job");
+  const { processed, failed } = await processInboundGroups(messages, {
+    groupKey: (m) => String((m as Record<string, unknown>).externalConversationId ?? ""),
+    run: async (m) => {
+      const mm = m as Record<string, unknown>;
+      const psid = String(mm.externalCustomerId ?? "");
+      // Best-effort sender profile (throttled, cached): fills Customer.name /
+      // avatarUrl so the inbox shows real identity instead of fallbacks.
+      // Never blocks ingestion on failure — falls through to nulls.
+      const prof = profileByPsid.get(psid);
+      const senderName: string | null = prof?.name ?? null;
+      const senderAvatar: string | null = prof?.avatar ?? null;
       await processIncomingMessage(db, {
         workspaceId,
         channelType: "FACEBOOK",
         channelId,
         externalUserId: psid,
-        externalUserName: (m.externalUserName as string | undefined) ?? senderName ?? undefined,
-        externalAvatarUrl: (m.externalAvatarUrl as string | undefined) ?? senderAvatar ?? undefined,
-        externalConversationId: String(m.externalConversationId ?? ""),
-        externalMessageId: String(m.externalMessageId ?? ""),
-        externalEventId: String(m.externalEventId ?? ""),
+        externalUserName: (mm.externalUserName as string | undefined) ?? senderName ?? undefined,
+        externalAvatarUrl: (mm.externalAvatarUrl as string | undefined) ?? senderAvatar ?? undefined,
+        externalConversationId: String(mm.externalConversationId ?? ""),
+        externalMessageId: String(mm.externalMessageId ?? ""),
+        externalEventId: String(mm.externalEventId ?? ""),
         provider: "facebook",
         type: "TEXT",
-        text: (m.text as string) ?? null,
+        text: (mm.text as string) ?? null,
         metadata: {
-          channelAccountId: m.channelAccountId,
-          attachments: m.attachments ?? [],
+          channelAccountId: mm.channelAccountId,
+          attachments: mm.attachments ?? [],
           // P12: كانت الإحالة تسقط هنا فلا يُلتقط أي إعلان ماسنجر بالمسار الحي —
           // ref (P8) والإحالة الكاملة برقم الإعلان تمرّان الآن للمعالج.
-          adRef: (m.adRef as string | null | undefined) ?? null,
-          ...(m.referral ? { referral: m.referral } : {}),
+          adRef: (mm.adRef as string | null | undefined) ?? null,
+          ...(mm.referral ? { referral: mm.referral } : {}),
         },
-        sentAt: m.timestamp ? new Date(m.timestamp as string) : undefined,
+        sentAt: mm.timestamp ? new Date(mm.timestamp as string) : undefined,
       });
-      processed += 1;
-    } catch (err) {
+    },
+    onError: (_m, err) => {
       // One poison message must not drop the whole batch — each message is
       // independently idempotent and retried via its own job/redelivery.
-      failed += 1;
       log.warn(
         { webhookEventId, workspaceId, error: err instanceof Error ? err.message : String(err) },
         "webhook_message_failed"
       );
-    }
-  }
+    },
+  });
 
   // P12: إحالات بلا رسالة → لمسات إسناد (أفضل جهد — لا تفشل الدفعة).
   const signals = (payload.referralSignals as Array<Record<string, unknown>> | undefined) ?? [];
