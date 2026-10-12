@@ -102,7 +102,7 @@ export default function DashboardPage() {
       <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 ring-1 ring-inset ring-brand-500/15 sm:px-6">
         <div
           aria-hidden
-          className="absolute inset-x-0 top-0 h-1 bg-gradient-to-l from-brand-600 via-sky-400 to-brand-600"
+          className="absolute inset-x-0 top-0 h-1 rounded-t-3xl bg-primary/70"
         />
         <div
           aria-hidden

@@ -30,14 +30,14 @@ export function ConversationItem({
       className={cn(
         "relative block w-full rounded-xl px-3 py-3 text-start transition-all duration-150",
         selected
-          ? "bg-gradient-to-l from-brand-500/15 to-brand-500/5 shadow-glow ring-1 ring-inset ring-brand-500/20"
+          ? "bg-primary-soft/70 ring-1 ring-inset ring-primary/15"
           : "hover:bg-surface-3/70"
       )}
     >
       <span
         aria-hidden
         className={cn(
-          "absolute inset-y-2.5 start-0 w-1 rounded-full bg-gradient-to-b from-brand-400 to-brand-600 transition-opacity",
+          "absolute inset-y-2.5 start-0 w-1 rounded-full bg-primary transition-opacity",
           c.unreadCount > 0 && !selected ? "opacity-100" : "opacity-0"
         )}
       />
@@ -90,7 +90,7 @@ export function ConversationItem({
                 </span>
               )}
               {c.unreadCount > 0 && (
-                <span className="num inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gradient-to-b from-brand-400 to-brand-600 px-1.5 text-[10px] font-bold text-white shadow-xs">
+                <span className="num inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-white shadow-xs">
                   {c.unreadCount}
                 </span>
               )}

@@ -17,7 +17,7 @@ export default function SettingsPage() {
         {sections.map((s) => (
           <Link key={s.href} href={s.href}>
             <GlassCard className="group flex items-start gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500/20 to-sky-500/20 text-brand-600 dark:text-brand-300">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
                 <s.icon size={18} />
               </span>
               <span className="min-w-0 flex-1">

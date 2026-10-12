@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, ChevronLeft, Menu, Search } from "lucide-react";
+import { Bell, ChevronDown, ChevronLeft, LogOut, Menu, Search, Users } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { Sidebar, type NavEntry } from "./app-sidebar";
@@ -24,6 +24,9 @@ export function AppShell({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [narrow, setNarrow] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -37,6 +40,22 @@ export function AppShell({
     window.addEventListener("sidebar-toggle", sync);
     return () => window.removeEventListener("sidebar-toggle", sync);
   }, []);
+  // Account menu: close on outside click or Escape.
+  useEffect(() => {
+    if (!accountOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) setAccountOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAccountOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [accountOpen]);
   // The inbox is a full-bleed 3-pane surface; every other page gets page padding.
   const fullBleed = pathname === "/conversations";
 
@@ -57,7 +76,7 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen p-0 lg:p-4">
       <Sidebar
         items={navItems}
         workspaceName={workspaceName}
@@ -66,18 +85,18 @@ export function AppShell({
         onClose={() => setOpen(false)}
       />
 
-      {/* Main column offset for the fixed sidebar on desktop (RTL sidebar on the right) */}
-      <div className={cn("flex min-h-screen flex-col transition-all duration-200", narrow ? "lg:ps-[76px]" : "lg:ps-64")}>
-        <header className="glass-strong sticky top-0 z-20 border-b border-line/60 shadow-[0_1px_0_rgb(37_99_235/0.08)]">
-          <div className="flex h-16 items-center gap-3 px-4 lg:px-6">
+      {/* Main column offset for the floating sidebar on desktop (RTL sidebar on the right) */}
+      <div className={cn("flex min-h-screen flex-col transition-all duration-200 lg:min-h-[calc(100vh-2rem)]", narrow ? "lg:ps-[120px]" : "lg:ps-[352px]")}>
+        <header className="sticky top-0 z-20 border border-line/70 bg-surface-2 shadow-card lg:top-4 lg:rounded-[20px]">
+          <div className="flex h-16 items-center gap-3 px-4 lg:h-20 lg:px-6">
             <button
               onClick={() => setOpen(true)}
               aria-label={t.a11y.openMenu}
-              className="rounded-xl p-2 text-ink-muted transition hover:bg-surface-3 hover:text-ink lg:hidden"
+              className="rounded-xl p-2 text-ink-muted transition hover:bg-surface-hover hover:text-ink lg:hidden"
             >
               <Menu size={19} />
             </button>
-            <nav aria-label="breadcrumb" className="flex min-w-0 items-center gap-1 text-[13px]">
+            <nav aria-label="breadcrumb" className="hidden min-w-0 items-center gap-1 text-[13px] xl:flex">
               {crumbs.map((c, i) => (
                 <span key={c.href} className="flex min-w-0 items-center gap-1">
                   {i > 0 && <ChevronLeft size={14} className="shrink-0 text-ink-subtle" aria-hidden />}
@@ -95,31 +114,67 @@ export function AppShell({
                 </span>
               ))}
             </nav>
-            <div className="ms-auto flex items-center gap-1.5">
+            <div className="ms-auto flex items-center gap-2">
               <form onSubmit={onSearch} role="search" className="relative hidden md:block">
-                <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
+                <Search size={16} className="pointer-events-none absolute start-4 top-1/2 -translate-y-1/2 text-ink-subtle" />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={`${t.common.search}…`}
                   aria-label={t.common.search}
-                  className="glass-subtle h-9 w-52 rounded-xl ps-9 pe-3 text-[13px] text-ink outline-none transition-all placeholder:text-ink-subtle focus:w-64 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10"
+                  className="h-12 w-56 rounded-2xl border border-transparent bg-surface-3/80 ps-11 pe-4 text-sm text-ink outline-none transition-all placeholder:text-ink-subtle focus:w-72 focus:border-primary focus:bg-surface-2 focus:ring-4 focus:ring-primary/10"
                 />
               </form>
               <Link
                 href="/handoffs"
                 aria-label={t.nav.handoffs}
                 title={t.nav.handoffs}
-                className="relative rounded-xl p-2 text-ink-muted transition hover:bg-surface-3 hover:text-ink"
+                className="relative rounded-2xl p-2.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink"
               >
-                <Bell size={18} />
+                <Bell size={19} strokeWidth={1.75} />
                 {/* لا نقطة زائفة: العدد الفعلي يظهر داخل صفحة التحويلات نفسها */}
               </Link>
               <ThemeToggle />
-              <span className="hidden items-center gap-2 rounded-xl border border-line/70 bg-surface-2/70 py-1 pe-3 ps-1 backdrop-blur sm:inline-flex">
-                <Avatar name={userName} size="xs" />
-                <span className="max-w-28 truncate text-xs font-semibold text-ink">{userName}</span>
-              </span>
+              <div ref={accountRef} className="relative">
+                <button
+                  onClick={() => setAccountOpen((o) => !o)}
+                  aria-label="الحساب"
+                  aria-expanded={accountOpen}
+                  aria-haspopup="menu"
+                  className={cn(
+                    "hidden items-center gap-2 rounded-2xl border border-line/70 bg-surface-2 py-1.5 pe-3 ps-1.5 transition hover:bg-surface-hover sm:inline-flex",
+                    accountOpen && "border-primary/40 ring-4 ring-primary/10"
+                  )}
+                >
+                  <Avatar name={userName} size="xs" />
+                  <span className="max-w-28 truncate text-[13px] font-semibold text-ink">{userName}</span>
+                  <ChevronDown size={14} className="text-ink-subtle" />
+                </button>
+                {accountOpen && (
+                  <div role="menu" className="absolute end-0 top-[calc(100%+8px)] z-30 w-48 rounded-2xl border border-line/70 bg-surface-2 p-1.5 shadow-pop">
+                    <Link
+                      href="/settings/team"
+                      role="menuitem"
+                      onClick={() => setAccountOpen(false)}
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-ink transition hover:bg-surface-hover"
+                    >
+                      <Users size={15} className="text-ink-subtle" />
+                      {t.nav.team}
+                    </Link>
+                    <form action="/api/auth/logout" method="post" onSubmit={() => setLoggingOut(true)}>
+                      <button
+                        type="submit"
+                        role="menuitem"
+                        disabled={loggingOut}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-red-600 transition hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                      >
+                        <LogOut size={15} />
+                        {loggingOut ? "…" : t.common.logout}
+                      </button>
+                    </form>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>

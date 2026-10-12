@@ -50,31 +50,29 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <main className="min-h-screen bg-surface-1 lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* ── Showcase panel (desktop) ─────────────────────────── */}
-      <div className="relative hidden overflow-hidden bg-gradient-to-bl from-blue-950 via-brand-600 to-sky-500 lg:flex lg:flex-col lg:justify-between lg:p-10">
-        {/* decorative glows + dot pattern */}
+      <div className="relative hidden overflow-hidden bg-[#232A4D] lg:flex lg:flex-col lg:justify-between lg:p-10">
+        {/* soft dot pattern */}
         <div aria-hidden className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-24 -start-24 h-96 w-96 rounded-full bg-sky-300/25 blur-3xl" />
-          <div className="absolute bottom-0 end-0 h-[28rem] w-[28rem] rounded-full bg-blue-950/40 blur-3xl" />
           <div
-            className="absolute inset-0 opacity-[0.15]"
+            className="absolute inset-0 opacity-[0.12]"
             style={{ backgroundImage: "radial-gradient(rgb(255 255 255 / 0.9) 1px, transparent 1px)", backgroundSize: "22px 22px" }}
           />
         </div>
 
         <div className="relative flex items-center gap-3">
-          <span className="rounded-2xl bg-white/15 p-0.5 ring-1 ring-white/40 backdrop-blur">
+          <span className="rounded-2xl bg-white/10 p-0.5 ring-1 ring-white/20">
             <BrandLogo size="lg" />
           </span>
           <div>
             <p className="text-xl font-bold leading-7 text-white">
-              Zaki <span className="text-sky-200">response</span>
+              Zaki <span className="text-white/80">response</span>
             </p>
-            <p className="text-xs text-sky-100/90">{t.app.tagline}</p>
+            <p className="text-xs text-white/70">{t.app.tagline}</p>
           </div>
         </div>
 
         <div className="relative space-y-6">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/12 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/20">
             <Sparkles size={13} />
             مساعد المبيعات الذكي لمتجرك
           </div>
@@ -84,19 +82,19 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
           <ul className="space-y-3.5">
             {HIGHLIGHTS.map(({ icon: Icon, title, desc }) => (
               <li key={title} className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/12 text-white ring-1 ring-white/25 backdrop-blur">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white ring-1 ring-white/20">
                   <Icon size={17} />
                 </span>
                 <span>
                   <span className="block text-sm font-bold text-white">{title}</span>
-                  <span className="block text-xs leading-5 text-sky-100/90">{desc}</span>
+                  <span className="block text-xs leading-5 text-white/70">{desc}</span>
                 </span>
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="relative flex items-center gap-2 text-xs text-sky-100/80">
+        <div className="relative flex items-center gap-2 text-xs text-white/60">
           <ShieldCheck size={14} />
           حماية الأسعار والطلبات وتسليم ذكي للموظفين — دائمًا
         </div>
@@ -109,13 +107,13 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             <BrandLogo size="lg" />
             <div>
               <p className="text-lg font-bold text-ink">
-                Zaki <span className="bg-gradient-to-l from-brand-600 to-sky-500 bg-clip-text text-transparent">response</span>
+                Zaki <span className="text-primary">response</span>
               </p>
               <p className="text-xs text-ink-muted">{t.app.tagline}</p>
             </div>
           </div>
-          <div className="rounded-2xl border border-line bg-surface-2 p-7 shadow-[0_20px_50px_-20px_rgb(37_99_235/0.35)] sm:p-8">
-            <span className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-brand-500/[0.08] px-3 py-1 text-[11px] font-bold text-brand-700 ring-1 ring-inset ring-brand-500/20 dark:text-brand-300">
+          <div className="rounded-3xl border border-line bg-surface-2 p-7 shadow-card sm:p-8">
+            <span className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-[11px] font-bold text-primary ring-1 ring-inset ring-primary/20">
               <Bot size={12} />
               {mode === "login" ? "مرحبًا بعودتك" : "ابدأ مجانًا"}
             </span>
@@ -141,7 +139,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                   {error}
                 </p>
               )}
-              <Button type="submit" loading={loading} size="lg" className="w-full shadow-[0_10px_24px_-8px_rgb(37_99_235/0.7)]">
+              <Button type="submit" loading={loading} size="lg" className="w-full">
                 {loading ? t.common.loading : mode === "login" ? "دخول" : "إنشاء الحساب"}
               </Button>
             </form>

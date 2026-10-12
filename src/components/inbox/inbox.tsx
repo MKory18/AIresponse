@@ -445,7 +445,7 @@ export default function Inbox() {
                 className={cn(
                   "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
                   filter === f.key
-                    ? "bg-gradient-to-b from-brand-400 to-brand-600 text-white shadow-xs"
+                    ? "bg-primary text-white shadow-xs"
                     : "text-ink-muted hover:bg-surface-3 hover:text-ink"
                 )}
               >
@@ -677,7 +677,7 @@ export default function Inbox() {
                   onClick={() => setComposerTab("reply")}
                   className={cn(
                     "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
-                    composerTab === "reply" ? "bg-gradient-to-b from-brand-400 to-brand-600 text-white shadow-xs" : "text-ink-muted hover:bg-surface-3 hover:text-ink"
+                    composerTab === "reply" ? "bg-primary-soft text-primary" : "text-ink-muted hover:bg-surface-3 hover:text-ink"
                   )}
                 >
                   رد للعميل

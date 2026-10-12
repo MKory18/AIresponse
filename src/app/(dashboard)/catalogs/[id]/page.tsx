@@ -292,7 +292,7 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
             {detail.products.map(({ product: p }) => (
-              <div key={p.id} className="flex items-center gap-2 rounded-xl border border-line/60 p-2">
+              <div key={p.id} className="flex items-center gap-2 rounded-2xl border border-line/60 p-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-bold text-ink">{p.name}</p>
                   <p className="num mt-0.5 text-[11px] text-ink-subtle">
@@ -325,7 +325,7 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
         ) : (
           <div className="space-y-2">
             {detail.pages.map((pg) => (
-              <div key={pg.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line/60 p-2">
+              <div key={pg.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line/60 p-2.5">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold text-ink">{pg.channel.displayName}</p>
                   <p className="num mt-0.5 text-[11px] text-ink-subtle">
@@ -388,7 +388,7 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
               const already = linkedIds.has(p.id);
               const checked = picked.has(p.id);
               return (
-                <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-xl border border-line/60 p-2">
+                <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-2xl border border-line/60 p-2.5">
                   <input
                     type="checkbox"
                     disabled={already}

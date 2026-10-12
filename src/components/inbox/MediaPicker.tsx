@@ -99,7 +99,7 @@ export function MediaPicker({
             onClick={() => setTab(t.key)}
             className={cn(
               "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
-              tab === t.key ? "bg-gradient-to-b from-brand-400 to-brand-600 text-white shadow-xs" : "text-ink-muted hover:bg-surface-3 hover:text-ink"
+              tab === t.key ? "bg-primary-soft text-primary" : "text-ink-muted hover:bg-surface-3 hover:text-ink"
             )}
           >
             {t.label}

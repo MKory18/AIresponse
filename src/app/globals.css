@@ -2,32 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ═══════════ Zaki response Design Tokens — white & blue ═══════════ */
+/* ═══════════ Zaki response Design Tokens — calm NeoCommerce canvas ═══════════ */
 :root {
   color-scheme: light;
-  --background: 239 246 255;
+  --background: 238 240 245;
   --surface: 255 255 255;
-  --surface-glass: 255 255 255 / 0.78;
+  --surface-glass: 255 255 255 / 0.9;
   --surface-elevated: 255 255 255;
-  --surface-muted: 232 242 255;
-  --border: 208 226 250;
+  --surface-muted: 245 245 246;
+  --border: 236 236 241;
   --border-glass: 255 255 255 / 0.7;
-  --text: 12 28 58;
-  --text-muted: 71 100 140;
-  --text-subtle: 130 155 190;
+  --text: 21 21 21;
+  --text-muted: 102 102 109;
+  --text-subtle: 146 146 154;
   --brand: 37 99 235;
   --brand-strong: 29 78 216;
-  --success: 16 163 110;
-  --warning: 217 119 6;
-  --danger: 220 38 38;
+  --primary: 64 88 243;
+  --primary-hover: 52 74 224;
+  --primary-soft: 238 237 255;
+  --success: 36 150 109;
+  --warning: 217 154 36;
+  --danger: 217 75 75;
   --info: 2 132 199;
-  --line: 208 226 250;
-  --surface-1: 239 246 255;
+  --line: 236 236 241;
+  --surface-1: 238 240 245;
   --surface-2: 255 255 255;
-  --surface-3: 232 242 255;
-  --app-glow-1: 37 99 235 / 0.12;
-  --app-glow-2: 56 189 248 / 0.12;
-  --glass-shadow: 0 1px 2px rgb(23 55 120 / 0.06), 0 10px 28px -14px rgb(37 99 235 / 0.22);
+  --surface-3: 245 245 246;
+  --surface-hover: 247 247 251;
+  --app-glow-1: 37 99 235 / 0.05;
+  --app-glow-2: 56 189 248 / 0.05;
+  --glass-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px -8px rgb(16 24 40 / 0.08);
 }
 
 .dark {
@@ -48,6 +52,7 @@
   --surface-1: 5 11 26;
   --surface-2: 10 20 42;
   --surface-3: 17 31 60;
+  --surface-hover: 23 40 75;
   --app-glow-1: 37 99 235 / 0.22;
   --app-glow-2: 56 189 248 / 0.14;
   --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 14px 36px -12px rgb(2 8 30 / 0.7);

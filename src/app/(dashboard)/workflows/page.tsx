@@ -258,7 +258,7 @@ export default function WorkflowsPage() {
             <GlassCard key={wf.id} className="p-4 transition-all hover:shadow-glass">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <button type="button" className="flex min-w-0 items-start gap-2.5 text-start" onClick={() => openDetail(wf.id)}>
-                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${wf.isEnabled ? "bg-gradient-to-br from-sky-500/20 to-brand-500/20 text-brand-600 dark:text-brand-300" : "bg-surface-3 text-ink-subtle"}`}>
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${wf.isEnabled ? "bg-primary-soft text-primary" : "bg-surface-3 text-ink-subtle"}`}>
                     <GitBranch size={17} />
                   </span>
                   <span className="block min-w-0">

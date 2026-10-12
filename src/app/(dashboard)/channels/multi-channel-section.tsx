@@ -103,7 +103,7 @@ export function MultiChannelSection() {
   return (
     <GlassCard className="p-4 sm:p-5">
       <div className="mb-3 flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-brand-700 text-white shadow-glow">
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-soft text-primary">
           <MessageCircle size={20} />
         </span>
         <div>
