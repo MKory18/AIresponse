@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
-import { probeProviderEndpoint, openAIChatUrl } from "@/modules/ai/provider";
+import { openAIChatUrl, openAIEmbeddingsUrl, probeOpenAICompatibleCaps, probeProviderEndpoint } from "@/modules/ai/provider";
 import { resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
 import { isHermesPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
@@ -123,14 +123,27 @@ export const POST = createHandler(
       // Malformed OPENAI_BASE_URL: report, never probe a fallback host.
       return ok({ provider: choice, status: "failed", latencyMs: 0, detail: "ENDPOINT_MISCONFIGURED", endpoint: null, model });
     }
-    const probe = await probeProviderEndpoint(endpoint, key, model);
+    // Embeddings are a SEPARATE capability on a separate endpoint (often a
+    // separate model): a gateway with working chat but no /v1/embeddings is
+    // NOT ready — every turn would die at knowledge retrieval. Report both.
+    const embModel =
+      (settings?.embeddingModel as string | null | undefined) ?? env.EMBEDDING_MODEL ?? "text-embedding-3-small";
+    const caps = await probeOpenAICompatibleCaps({
+      chatUrl: endpoint,
+      embeddingsUrl: choice === "openai" ? openAIEmbeddingsUrl() : "https://openrouter.ai/api/v1/embeddings",
+      apiKey: key,
+      chatModel: model,
+      embeddingsModel: embModel,
+    });
     return ok({
       provider: choice,
-      status: probe.ok ? "working" : "failed",
-      latencyMs: probe.latencyMs,
-      detail: probe.detail,
+      status: caps.status,
+      latencyMs: caps.latencyMs,
+      detail: caps.detail,
       endpoint,
       model,
+      chat: caps.chat,
+      embeddings: caps.embeddings,
     });
   }
 );

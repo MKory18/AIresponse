@@ -18,6 +18,8 @@ import {
   OpenAICompatibleProvider,
   openAIChatUrl,
   openAIEmbeddingsUrl,
+  probeEmbeddingsEndpoint,
+  probeOpenAICompatibleCaps,
   resolveOpenAIBaseRoot,
 } from "@/modules/ai/provider";
 import { getWorkspaceProvider } from "@/modules/ai/router";
@@ -162,8 +164,7 @@ describe("provider wiring with custom base", () => {
   });
 });
 
-describe("custom-base pipeline (mock transport)", () => {
-  const WS = "ws-cbase";
+describe("custom-base pipeline (mock transport)", () => {  const WS = "ws-cbase";
   const PAGE = "page-cbase";
   type Db = Prisma.TransactionClient;
   let db: ReturnType<typeof createFakeDb>;
@@ -221,4 +222,77 @@ describe("custom-base pipeline (mock transport)", () => {
     const sentAfter = (db._stores.message as any[]).filter((m) => m.direction === "OUTBOUND" && m.deliveryStatus === "SENT");
     expect(sentAfter).toHaveLength(1);
   }, 120000);
+});
+
+describe("embeddings capability probe", () => {
+  const EMB_URL = `${CUSTOM_ROOT}/embeddings`;
+
+  function mockFetch(handler: (url: string) => Response) {
+    vi.stubGlobal("fetch", (async (url: any) => handler(String(url))) as typeof fetch);
+  }
+
+  it("reports working + actual dimensions on success", async () => {
+    mockFetch((u) => {
+      expect(u).toBe(EMB_URL);
+      return Response.json({ data: [{ embedding: Array.from({ length: 1536 }, () => 0.02) }] });
+    });
+    const r = await probeEmbeddingsEndpoint(EMB_URL, TEST_KEY, "emb-model");
+    expect(r.ok).toBe(true);
+    expect(r.dimensions).toBe(1536);
+    expect(r.model).toBe("emb-model");
+    expect(r.detail).toBe("HTTP_200");
+  });
+
+  it("classifies 401/404 distinctly from timeouts and bad shapes", async () => {
+    mockFetch(() => new Response("{}", { status: 401 }));
+    expect((await probeEmbeddingsEndpoint(EMB_URL, TEST_KEY, "m")).detail).toBe("HTTP_401");
+    mockFetch(() => new Response("{}", { status: 404 }));
+    expect((await probeEmbeddingsEndpoint(EMB_URL, TEST_KEY, "m")).detail).toBe("HTTP_404");
+    mockFetch(() => Response.json({ data: [{ embedding: "oops" }] }));
+    expect((await probeEmbeddingsEndpoint(EMB_URL, TEST_KEY, "m")).detail).toBe("BAD_RESPONSE_SHAPE");
+    mockFetch(() => Response.json({ data: [] }));
+    expect((await probeEmbeddingsEndpoint(EMB_URL, TEST_KEY, "m")).detail).toBe("BAD_RESPONSE_SHAPE");
+  });
+
+  it("never leaks the key in results", async () => {
+    mockFetch(() => new Response("denied", { status: 401 }));
+    const r = await probeEmbeddingsEndpoint(EMB_URL, TEST_KEY, "m");
+    expect(JSON.stringify(r)).not.toContain(TEST_KEY);
+  });
+
+  it("aggregate is failed when chat works but embeddings fail", async () => {
+    mockFetch((u) => {
+      if (u.endsWith("/embeddings")) return new Response("{}", { status: 404 });
+      return Response.json({ choices: [{ message: { content: "hi" } }] });
+    });
+    const caps = await probeOpenAICompatibleCaps({
+      chatUrl: `${CUSTOM_ROOT}/chat/completions`,
+      embeddingsUrl: EMB_URL,
+      apiKey: TEST_KEY,
+      chatModel: "chat-m",
+      embeddingsModel: "emb-m",
+    });
+    expect(caps.chat.ok).toBe(true);
+    expect(caps.embeddings.ok).toBe(false);
+    expect(caps.status).toBe("failed");
+    expect(caps.detail).toContain("EMB_HTTP_404");
+  });
+
+  it("aggregate is working only when both pass", async () => {
+    mockFetch((u) => {
+      if (u.endsWith("/embeddings")) {
+        return Response.json({ data: [{ embedding: Array.from({ length: 1536 }, () => 0.01) }] });
+      }
+      return Response.json({ choices: [{ message: { content: "hi" } }] });
+    });
+    const caps = await probeOpenAICompatibleCaps({
+      chatUrl: `${CUSTOM_ROOT}/chat/completions`,
+      embeddingsUrl: EMB_URL,
+      apiKey: TEST_KEY,
+      chatModel: "chat-m",
+      embeddingsModel: "emb-m",
+    });
+    expect(caps.status).toBe("working");
+    expect(caps.embeddings.dimensions).toBe(1536);
+  });
 });

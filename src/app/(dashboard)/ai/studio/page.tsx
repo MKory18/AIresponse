@@ -22,7 +22,7 @@ type StatusData = {
   knowledge: { ready: number; processing: number; failed: number; faqs: number; personas: number };
 };
 
-type TestResult = { provider: string; status: string; latencyMs: number; detail: string; endpoint?: string; model?: string };
+type TestResult = { provider: string; status: string; latencyMs: number; detail: string; endpoint?: string; model?: string; chat?: { ok: boolean; latencyMs: number; detail: string; model: string }; embeddings?: { ok: boolean; latencyMs: number; detail: string; model: string; dimensions: number | null } };
 
 const STATUS_TONE: Record<string, string> = {
   working: "DELIVERED",
@@ -157,6 +157,12 @@ export default function AIStudioPage() {
                 </div>
                 <p className="mt-1 truncate text-[11px] text-ink-muted" dir="ltr">{p.endpoint ?? "—"}</p>
                 {r && <p className="mt-1 text-[11px] text-ink-muted" dir="ltr">{r.detail} · {r.latencyMs}ms{r.model ? ` · ${r.model}` : ""}</p>}
+                {r?.embeddings && (
+                  <p className="mt-1 text-[11px] text-ink-muted" dir="ltr">
+                    embeddings: {r.embeddings.detail} · {r.embeddings.latencyMs}ms · {r.embeddings.model}
+                    {typeof r.embeddings.dimensions === "number" ? ` · ${r.embeddings.dimensions}d` : ""}
+                  </p>
+                )}
                 <div className="mt-2">
                   <Button size="sm" variant="ghost" loading={testing === p.id} disabled={testing === p.id} onClick={() => testProvider(p.id)}>
                     اختبار الاتصال

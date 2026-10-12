@@ -531,8 +531,7 @@ export async function probeProviderEndpoint(
   apiKey: string,
   model: string,
   opts?: { fetchFn?: typeof fetch; timeoutMs?: number; followRedirects?: boolean }
-): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
-  const started = Date.now();
+): Promise<{ ok: boolean; latencyMs: number; detail: string }> {  const started = Date.now();
   const fetchFn = opts?.fetchFn ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? 8000;
   const followRedirects = opts?.followRedirects ?? true;
@@ -555,4 +554,106 @@ export async function probeProviderEndpoint(
   } finally {
     clearTimeout(timer);
   }
+}
+
+export interface EmbeddingsProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  /** Safe tokens only: HTTP_xxx / TIMEOUT / NETWORK_ERROR / BAD_RESPONSE_SHAPE. Never bodies, keys, or URLs with secrets. */
+  detail: string;
+  model: string;
+  /** Actual vector length reported by the endpoint, or null when unreadable. */
+  dimensions: number | null;
+}
+
+/**
+ * Independent embeddings capability probe — server-side only.
+ *
+ * Chat working does NOT imply embeddings work (different endpoint, often a
+ * different model). Sends one tiny PII-free input ("ping"); the caller
+ * supplies the key from server ENV. A gateway without /v1/embeddings must
+ * surface here as a clear failure — never as a ready provider.
+ */
+export async function probeEmbeddingsEndpoint(
+  embeddingsUrl: string,
+  apiKey: string,
+  model: string,
+  opts?: { fetchFn?: typeof fetch; timeoutMs?: number }
+): Promise<EmbeddingsProbeResult> {
+  const started = Date.now();
+  const fetchFn = opts?.fetchFn ?? fetch;
+  const timeoutMs = opts?.timeoutMs ?? 8000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchFn(embeddingsUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, input: "ping" }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return { ok: false, latencyMs: Date.now() - started, detail: `HTTP_${res.status}`, model, dimensions: null };
+    }
+    const json = (await res.json()) as { data?: { embedding?: unknown }[] };
+    const vec = json?.data?.[0]?.embedding;
+    if (!Array.isArray(vec) || vec.length === 0 || !vec.every((v) => typeof v === "number" && Number.isFinite(v))) {
+      return { ok: false, latencyMs: Date.now() - started, detail: "BAD_RESPONSE_SHAPE", model, dimensions: null };
+    }
+    return { ok: true, latencyMs: Date.now() - started, detail: `HTTP_${res.status}`, model, dimensions: vec.length };
+  } catch (err) {
+    const detail = err instanceof Error && err.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR";
+    return { ok: false, latencyMs: Date.now() - started, detail, model, dimensions: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface ChatProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  detail: string;
+  model: string;
+}
+
+export interface GatewayCapabilities {
+  chat: ChatProbeResult;
+  embeddings: EmbeddingsProbeResult;
+  /** "working" only when BOTH pass — a chat-only gateway is NOT ready. */
+  status: "working" | "failed";
+  latencyMs: number;
+  detail: string;
+}
+
+/**
+ * Combined capability probe for OpenAI-compatible gateways.
+ * Pure orchestration over injectable transports — unit-testable with mocks.
+ */
+export async function probeOpenAICompatibleCaps(args: {
+  chatUrl: string;
+  embeddingsUrl: string;
+  apiKey: string;
+  chatModel: string;
+  embeddingsModel: string;
+  fetchFn?: typeof fetch;
+  timeoutMs?: number;
+  followRedirects?: boolean;
+}): Promise<GatewayCapabilities> {
+  const chat = await probeProviderEndpoint(args.chatUrl, args.apiKey, args.chatModel, {
+    fetchFn: args.fetchFn,
+    timeoutMs: args.timeoutMs,
+    followRedirects: args.followRedirects,
+  });
+  const embeddings = await probeEmbeddingsEndpoint(args.embeddingsUrl, args.apiKey, args.embeddingsModel, {
+    fetchFn: args.fetchFn,
+    timeoutMs: args.timeoutMs,
+  });
+  const status = chat.ok && embeddings.ok ? "working" : "failed";
+  return {
+    chat: { ...chat, model: args.chatModel },
+    embeddings,
+    status,
+    latencyMs: chat.latencyMs + embeddings.latencyMs,
+    detail: `CHAT_${chat.detail}+EMB_${embeddings.detail}`,
+  };
 }
