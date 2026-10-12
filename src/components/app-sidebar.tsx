@@ -8,7 +8,7 @@ import {
   MessageCircle, BookOpen, UserRound, FlaskConical, Radio, Workflow, Clock,
   Hand, ChartNoAxesCombined, Settings, LogOut, X,
   ChevronsRight, ChevronsLeft, Bell, SlidersHorizontal, GitBranch, Megaphone,
-  Cable, Bot,
+  Cable, Bot, LibraryBig,
 } from "lucide-react";
 import type { LucideProps } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -51,6 +51,7 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   SlidersHorizontal,
   Cable,
   AgentBot: Bot,
+  LibraryBig,
 };
 
 function NavLink({

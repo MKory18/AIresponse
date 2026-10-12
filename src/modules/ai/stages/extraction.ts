@@ -201,10 +201,28 @@ export async function runExtraction(
   // 6+7. Memory + product resolution are independent — run concurrently.
   // buildAIContext still waits for productId (dependency), but memory no
   // longer blocks product lookup and vice versa.
+  // The product candidates are scoped to this page's active catalog: when
+  // the workspace holds any catalogs, only the channel's catalog may
+  // answer — an unassigned page resolves nothing (safe fallback, said
+  // out loud in the UI), and a workspace with no catalogs at all keeps
+  // the legacy behaviour byte-for-byte.
+  const { resolveCatalogForChannel, workspaceHasCatalogs, catalogProductIds } = await import(
+    "@/modules/catalog/service"
+  );
+  let allowedProductIds: string[] | null | undefined;
+  if (await workspaceHasCatalogs(db, params.workspaceId)) {
+    const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
+    log.info(
+      { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
+      "ai_catalog_resolved"
+    );
+    allowedProductIds =
+      resolved.status === "ok" ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id) : [];
+  }
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
       loadMemory(db, params.workspaceId, customer.id),
-      resolveProductId(db, params.workspaceId, extraction, customerText),
+      resolveProductId(db, params.workspaceId, extraction, customerText, allowedProductIds),
     ])
   );
   const vectorStore = deps.vectorStore ?? getVectorStore();
@@ -426,7 +444,16 @@ export async function runExtraction(
   };
 }
 
-async function resolveProductId(db: Db, workspaceId: string, extraction: ExtractionResult, customerText = ""): Promise<string | null> {
+async function resolveProductId(
+  db: Db,
+  workspaceId: string,
+  extraction: ExtractionResult,
+  customerText = "",
+  // The page's catalog, when catalogs exist: undefined = no catalogs in
+  // this workspace (legacy: every product may answer); [] = catalogs
+  // exist but this page resolves none (nothing may answer).
+  allowedIds?: string[] | null
+): Promise<string | null> {
   const candidates: string[] = [];
   if (extraction.entities.product) candidates.push(extraction.entities.product);
   // Context-based fallback: match product names against words in the message
@@ -436,6 +463,7 @@ async function resolveProductId(db: Db, workspaceId: string, extraction: Extract
     if (candidates.length >= 12) break;
   }
   if (!candidates.length) return null;
+  if (allowedIds && allowedIds.length === 0) return null;
   // Single query instead of N sequential findFirst calls (latency fix).
   const ors: { name: { contains: string } }[] = [];
   for (const name of candidates.slice(0, 12)) {
@@ -444,7 +472,13 @@ async function resolveProductId(db: Db, workspaceId: string, extraction: Extract
     if (cleaned !== name) ors.push({ name: { contains: cleaned } });
   }
   const product = await db.product.findFirst({
-    where: { workspaceId, isActive: true, isArchived: false, OR: ors },
+    where: {
+      workspaceId,
+      isActive: true,
+      isArchived: false,
+      ...(allowedIds ? { id: { in: allowedIds } } : {}),
+      OR: ors,
+    },
     select: { id: true },
   });
   return product?.id ?? null;

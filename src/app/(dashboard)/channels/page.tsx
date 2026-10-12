@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Facebook, PlugZap, Unplug } from "lucide-react";
 import { MultiChannelSection } from "./multi-channel-section";
+import { CatalogPageSection } from "./catalog-page-section";
 import { t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -274,6 +275,7 @@ export default function ChannelsPage() {
               </Button>
             )}
           </div>
+          <CatalogPageSection channelId={c.channelId} pageName={c.pageName} />
         </GlassCard>
       ))}
       {!loading && !error && connections.length === 0 && pendingPages.length === 0 && (

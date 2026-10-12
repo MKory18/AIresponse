@@ -227,6 +227,8 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         productCompliance: (r, w) => r.productId === w.productId,
         omsConnection: (r, w) => r.workspaceId === w.workspaceId || (w.webhookKey != null && r.webhookKey === w.webhookKey),
         campaign: (r, w) => w.externalIdempotencyKey != null && r.workspaceId === w.workspaceId && r.externalIdempotencyKey === w.externalIdempotencyKey,
+        // Page catalogs — mirrors the real @@unique constraints.
+        catalog: (r, w) => r.workspaceId === w.workspaceId && r.name === w.name,
       };
       const uniq = uniqMap[name];
       if (uniq) {
@@ -319,6 +321,9 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
       const uniqMap: Record<string, (r: Row, w: Row) => boolean> = {
         campaignContentVersion: (r, w) => r.campaignId === w.campaignId && r.version === w.version,
         campaignRecipient: (r, w) => r.campaignId === w.campaignId && r.customerId === w.customerId,
+        // Page catalogs — mirrors the real unique constraints.
+        catalog: (r, w) => r.workspaceId === w.workspaceId && r.name === w.name,
+        catalogProduct: (r, w) => r.catalogId === w.catalogId && r.productId === w.productId,
       };
       const uniq = uniqMap[name];
       let count = 0;
@@ -397,6 +402,10 @@ export function createFakeDb() {
   const agentCallLogRows: Row[] = [];
   const productComplianceRows: Row[] = [];
   const omsConnectionRows: Row[] = [];
+  // Page catalogs.
+  const catalogRows: Row[] = [];
+  const catalogProductRows: Row[] = [];
+  const catalogPageAssignmentRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -420,6 +429,9 @@ export function createFakeDb() {
       agentCallLog: agentCallLogRows,
       productCompliance: productComplianceRows,
       omsConnection: omsConnectionRows,
+      catalog: catalogRows,
+      catalogProduct: catalogProductRows,
+      catalogPageAssignment: catalogPageAssignmentRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -476,6 +488,9 @@ export function createFakeDb() {
     agentCallLog: makeModel("agentCallLog", agentCallLogRows, { tokenId: null, errorCode: null, requestId: null, agentRef: null, dryRun: false, latencyMs: 0 }),
     productCompliance: makeModel("productCompliance", productComplianceRows, { classification: null, verdict: null, allowedClaims: [], bannedClaims: [], adRules: [], sourceUpdatedAt: null, fetchedAt: null, lastError: null }),
     omsConnection: makeModel("omsConnection", omsConnectionRows, { isActive: true, lastProductSyncAt: null, lastCustomerSyncAt: null, mode: "api", apiVersion: "legacy", webhookSecretEncrypted: null, webhookKey: null, autoHandoff: false, lastWebhookAt: null, lastOkAt: null, lastErrorAt: null, lastError: null }),
+    catalog: makeModel("catalog", catalogRows, { description: null, isActive: true }),
+    catalogProduct: makeModel("catalogProduct", catalogProductRows, { sortOrder: 0 }),
+    catalogPageAssignment: makeModel("catalogPageAssignment", catalogPageAssignmentRows, { assignedBy: null }),
   };
 
   const conversationModel = db.conversation as any;
