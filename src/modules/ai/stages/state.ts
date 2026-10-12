@@ -20,7 +20,7 @@ import type { PersonaConfig, Intent } from "../prompts";
 import type { VectorStore } from "@/modules/knowledge/vector-store";
 
 export interface AIExecutionResult {
-  status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND";
+  status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND" | "DEFERRED";
   intent?: Intent;
   confidence?: number;
   plan?: ResponsePlan;

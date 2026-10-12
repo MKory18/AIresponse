@@ -21,7 +21,8 @@ import {
   setFacebookClientFactory,
 } from "@/modules/channels/facebook/client";
 import { processInboundGroups } from "@/modules/channels/inbound-job";
-import { nextPollDelayMs } from "@/modules/jobs/service";
+import { nextPollDelayMs, recoverOrphanedInboundMessages } from "@/modules/jobs/service";
+import { processIncomingMessage } from "@/modules/conversations/service";
 import { encryptSecret } from "@/core/crypto";
 
 const WS = "ws-budget";
@@ -173,6 +174,137 @@ describe("perf guards — ordering + worker polling", () => {
     });
     expect(res).toEqual({ processed: 2, failed: 1 });
     expect(seen.sort()).toEqual(["ok1", "ok2"]);
+  });
+
+  // ── Cross-executor ordering guard (DEFERRED) ──────────────────────────
+  // Within one batch/job, processInboundGroups already serializes each
+  // conversation (proven above). These tests pin the second layer: two
+  // OVERLAPPING AI turns for the same conversation (worker + jobs/run,
+  // scaled workers, retry racing fresh work) must never deliver the older
+  // reply after the newer one. The newer turn defers (terminal
+  // success-noop) and the orphan sweeper re-enqueues it — never lost.
+  describe("ai ordering guard", () => {
+    const OW = "ws-order";
+    const OPAGE = "page-order-1";
+
+    async function seedOrder() {
+      const mock = new MockAIProvider();
+      mock.intentHandler = () => ({
+        intent: "GREETING", confidence: 0.99, entities: {}, missingFields: [], memories: [], requestedAction: "ANSWER",
+      });
+      mock.responseHandler = () => "أهلاً فيك";
+      setMockAIProvider(mock);
+      const ch = (await db.channel.create({
+        data: { workspaceId: OW, type: "FACEBOOK", status: "CONNECTED", displayName: "Order Page", externalId: OPAGE },
+      } as never)) as any;
+      await db.channelAccount.create({
+        data: { channelId: ch.id, provider: "FACEBOOK", externalAccountId: OPAGE, pageName: "Order Page", encryptedCredentials: encryptSecret("tok-order") },
+      } as never);
+      await (db as any).aISettings.create({
+        data: { workspaceId: OW, provider: "mock", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true },
+      });
+      setFacebookClientFactory(
+        () =>
+          new FacebookClient({
+            fetchImpl: (async () => Response.json({ recipient_id: "psid", message_id: `mid-${Date.now()}` })) as typeof fetch,
+          })
+      );
+      return ch;
+    }
+
+    async function inbound(chId: string, psid: string, tag: string, text: string) {
+      const r = (await processIncomingMessage(db as Db, {
+        workspaceId: OW, channelType: "FACEBOOK", channelId: chId,
+        externalUserId: psid, externalConversationId: psid,
+        externalMessageId: `m-${tag}`, externalEventId: `e-${tag}`,
+        provider: "facebook", type: "TEXT", text,
+      })) as any;
+      return { conversationId: r.conversationId, messageId: r.messageId };
+    }
+
+    async function ageFirst(messageId: string) {
+      // Deterministic createdAt order regardless of clock granularity.
+      await (db as any).message.update({ where: { id: messageId }, data: { createdAt: new Date(Date.now() - 60_000) } });
+    }
+
+    function sentCount() {
+      return (db._stores.message as any[]).filter((m) => m.direction === "OUTBOUND" && m.deliveryStatus === "SENT").length;
+    }
+
+    it("newer turn defers while the older sibling was never attempted", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d1", "d1m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d1", "d1m2", "مرحبا مجددا");
+      await ageFirst(m1.messageId);
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).toBe("DEFERRED");
+      expect(sentCount()).toBe(0);
+    }, 120000);
+
+    it("newer turn defers while the older sibling is live on another executor", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d2", "d2m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d2", "d2m2", "مرحبا مجددا");
+      await ageFirst(m1.messageId);
+      // Simulate m1 attempted once (AI_FAILED) and reclaimed PROCESSING by a
+      // second executor: attempted + live => defer (covers the live branch).
+      await (db as any).aIUsageLog.create({
+        data: { workspaceId: OW, conversationId: m1.conversationId, messageId: m1.messageId, purpose: "RESPONSE", provider: "mock", model: "m", promptTokens: 1, completionTokens: 1, latencyMs: 1, success: false, status: "AI_FAILED" },
+      });
+      await (db as any).backgroundJob.updateMany({
+        where: { idempotencyKey: `ai:${m1.messageId}` },
+        data: { status: "PROCESSING", lockedAt: new Date(), lockedBy: "other-worker" },
+      });
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).toBe("DEFERRED");
+      expect(sentCount()).toBe(0);
+    }, 120000);
+
+    it("sequential turns answer in order (no deferral on the happy path)", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d3", "d3m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d3", "d3m2", "مرحبا مجددا");
+      await ageFirst(m1.messageId);
+      const r1 = await processAIMessage(db as Db, { ...m1, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r1.status).not.toBe("DEFERRED");
+      expect(r1.status).not.toBe("AI_FAILED");
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).not.toBe("DEFERRED");
+      expect(sentCount()).toBe(2);
+    }, 120000);
+
+    it("deferred message is re-enqueued by the orphan sweeper (never lost)", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d4", "d4m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d4", "d4m2", "مرحبا مجددا");
+      await ageFirst(m1.messageId);
+      // m2's own AI job is DONE (deferred success-noop); drop it so the
+      // sweeper sees an undecided message with no live job.
+      await (db as any).backgroundJob.deleteMany({ where: { idempotencyKey: `ai:${m2.messageId}` } });
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).toBe("DEFERRED");
+      const rec = await recoverOrphanedInboundMessages(db as Db, { limit: 20 });
+      expect(rec.recovered).toBeGreaterThanOrEqual(1);
+      const requeued = (db._stores.backgroundJob as any[]).filter(
+        (j) => j.type === "process_ai_message" && (j.payload as any)?.messageId === m2.messageId && j.status === "PENDING"
+      );
+      expect(requeued.length).toBeGreaterThanOrEqual(1);
+    }, 120000);
+
+    it("newer turn proceeds when the older sibling exhausted retries", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d5", "d5m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d5", "d5m2", "مرحبا مجددا");
+      await ageFirst(m1.messageId);
+      // Older failed terminally with no live job left.
+      await (db as any).aIUsageLog.create({
+        data: { workspaceId: OW, conversationId: m1.conversationId, messageId: m1.messageId, purpose: "RESPONSE", provider: "mock", model: "m", promptTokens: 1, completionTokens: 1, latencyMs: 1, success: false, status: "AI_FAILED" },
+      });
+      await (db as any).backgroundJob.updateMany({ where: { idempotencyKey: `ai:${m1.messageId}` }, data: { status: "FAILED", finishedAt: new Date() } });
+      const r2 = await processAIMessage(db as Db, { ...m2, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2.status).not.toBe("DEFERRED");
+      expect(sentCount()).toBe(1);
+    }, 120000);
   });
 
   it("messenger batch: same-conversation messages keep input order", async () => {
