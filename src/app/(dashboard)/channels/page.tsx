@@ -197,7 +197,7 @@ export default function ChannelsPage() {
       <GlassCard className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-white">
               <Facebook size={20} />
             </span>
             <div>
@@ -208,7 +208,7 @@ export default function ChannelsPage() {
           {oauthConfigured && (
             <a
               href="/api/channels/facebook/connect"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-b from-brand-400 to-brand-600 px-3.5 text-[13px] font-semibold text-white shadow-xs transition hover:brightness-110"
+              className="inline-flex h-11 items-center gap-1.5 rounded-2xl bg-primary px-4 text-sm font-semibold text-white transition hover:bg-primary-hover"
             >
               <PlugZap size={14} />
               ربط صفحة Facebook

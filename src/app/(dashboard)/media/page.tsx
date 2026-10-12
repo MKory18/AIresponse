@@ -332,7 +332,7 @@ export default function MediaPage() {
               className={cn(
                 "shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
                 type === f.key
-                  ? "bg-gradient-to-b from-brand-400 to-brand-600 text-white shadow-xs"
+                  ? "bg-primary-soft text-primary"
                   : "text-ink-muted hover:bg-surface-3 hover:text-ink"
               )}
             >

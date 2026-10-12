@@ -9,7 +9,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-line bg-surface-2 shadow-card",
+        "rounded-3xl border border-line bg-surface-2 shadow-card",
         className
       )}
       {...props}
@@ -39,7 +39,7 @@ export function GlassCard({
   ...props
 }: React.HTMLAttributes<HTMLDivElement> & { level?: "glass-subtle" | "glass" | "glass-strong" }) {
   return (
-    <div className={cn("rounded-2xl", level, className)} {...props}>
+    <div className={cn("rounded-3xl", level, className)} {...props}>
       {children}
     </div>
   );
@@ -51,7 +51,7 @@ export function GlassPanel({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("glass overflow-hidden rounded-2xl", className)} {...props}>
+    <div className={cn("glass overflow-hidden rounded-3xl", className)} {...props}>
       {children}
     </div>
   );
@@ -72,11 +72,11 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("glass rounded-2xl px-5 py-4", className)}>
+    <div className={cn("rounded-3xl bg-surface-2 px-5 py-4 shadow-card sm:px-6 sm:py-5", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-bold leading-7 text-ink">{title}</h1>
-          {description && <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-ink-muted">{description}</p>}
+          <h1 className="text-2xl font-bold leading-9 text-ink lg:text-[30px]">{title}</h1>
+          {description && <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-muted">{description}</p>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>

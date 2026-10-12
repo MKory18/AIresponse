@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -54,9 +55,10 @@ function priceText(p: CatalogProduct["product"]): string {
  * at render time. Page links switch atomically through the same door the
  * channel screen uses.
  */
-export default function CatalogDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default function CatalogDetailPage() {
   const toast = useToast();
-  const [id, setId] = useState<string | null>(null);
+  const routeParams = useParams<{ id: string }>();
+  const id = routeParams.id;
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -73,10 +75,6 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
   const [channelId, setChannelId] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState<{ title: string; body: string; run: () => void } | null>(null);
-
-  useEffect(() => {
-    void params.then((p) => setId(p.id));
-  }, [params]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -292,7 +290,7 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
             {detail.products.map(({ product: p }) => (
-              <div key={p.id} className="flex items-center gap-2 rounded-xl border border-line/60 p-2">
+              <div key={p.id} className="flex items-center gap-2 rounded-2xl border border-line/60 p-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-bold text-ink">{p.name}</p>
                   <p className="num mt-0.5 text-[11px] text-ink-subtle">
@@ -325,7 +323,7 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
         ) : (
           <div className="space-y-2">
             {detail.pages.map((pg) => (
-              <div key={pg.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line/60 p-2">
+              <div key={pg.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line/60 p-2.5">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold text-ink">{pg.channel.displayName}</p>
                   <p className="num mt-0.5 text-[11px] text-ink-subtle">
@@ -388,7 +386,7 @@ export default function CatalogDetailPage({ params }: { params: Promise<{ id: st
               const already = linkedIds.has(p.id);
               const checked = picked.has(p.id);
               return (
-                <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-xl border border-line/60 p-2">
+                <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-2xl border border-line/60 p-2.5">
                   <input
                     type="checkbox"
                     disabled={already}

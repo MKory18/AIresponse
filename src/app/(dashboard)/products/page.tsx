@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ImagePlus, Package, Plus, Search } from "lucide-react";
+import { ImagePlus, Package, Plus, Search, ArrowUpLeft } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("active");
+  const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -40,6 +41,7 @@ export default function ProductsPage() {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (status) params.set("status", status);
+    if (category) params.set("category", category);
     const res = await fetch(`/api/products?${params}`);
     if (!res.ok) {
       setError("فشل تحميل المنتجات");
@@ -48,7 +50,7 @@ export default function ProductsPage() {
     const data = await res.json();
     setProducts(data.items);
     setError(null);
-  }, [q, status]);
+  }, [q, status, category]);
 
   useEffect(() => {
     setLoading(true);
@@ -116,8 +118,8 @@ export default function ProductsPage() {
 
       <GlassCard level="glass-subtle" className="flex flex-wrap items-center gap-2 p-3">
         <div className="relative min-w-52 flex-1">
-          <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث بالاسم أو SKU أو الوسم…" aria-label={t.common.search} className="ps-9" />
+          <Search size={16} className="pointer-events-none absolute start-4 top-1/2 -translate-y-1/2 text-ink-subtle" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث بالاسم أو SKU أو الوسم…" aria-label={t.common.search} className="ps-11 h-12" />
         </div>
         <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t.common.status} className="w-40">
           <option value="active">النشطة</option>
@@ -126,6 +128,31 @@ export default function ProductsPage() {
           <option value="all">الكل</option>
         </Select>
       </GlassCard>
+
+      {/* Real categories from the loaded products — no invented filters. */}
+      {Array.from(new Set(products.map((p) => p.category).filter(Boolean))).length > 0 && (
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="التصنيفات">
+          <button
+            role="tab"
+            aria-selected={category === ""}
+            onClick={() => setCategory("")}
+            className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${category === "" ? "bg-primary-soft text-primary" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
+          >
+            الكل
+          </button>
+          {Array.from(new Set(products.map((p) => p.category).filter(Boolean))).map((c) => (
+            <button
+              key={c as string}
+              role="tab"
+              aria-selected={category === c}
+              onClick={() => setCategory(category === c ? "" : (c as string))}
+              className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${category === c ? "bg-primary-soft text-primary" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <GlassCard className="p-2">
@@ -140,44 +167,50 @@ export default function ProductsPage() {
       )}
 
       {!loading && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {products.map((p) => {
             const primary = p.mediaLinks[0]?.mediaAsset;
             return (
-              <GlassCard key={p.id} className="group flex flex-col overflow-hidden p-0 transition-all duration-200 hover:-translate-y-1 hover:shadow-glass">
+              <GlassCard key={p.id} className="group flex flex-col overflow-hidden p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass">
                 {primary?.type === "IMAGE" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={primary.url} alt={p.name} className="h-40 w-full object-cover" loading="lazy" />
+                  <div className="overflow-hidden rounded-2xl bg-surface-3/70">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={primary.url} alt={p.name} className="h-52 w-full object-contain" loading="lazy" />
+                  </div>
                 ) : (
-                  <div className="flex h-40 w-full items-center justify-center bg-surface-3/60 text-ink-subtle">
+                  <div className="flex h-52 w-full items-center justify-center rounded-2xl bg-surface-3/70 text-ink-subtle">
                     <ImagePlus size={28} strokeWidth={1.5} />
                   </div>
                 )}
-                <div className="flex flex-1 flex-col p-4">
+                <div className="flex flex-1 flex-col px-1.5 pb-1.5 pt-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <Link href={`/products/${p.id}`} className="block truncate text-sm font-bold text-ink transition hover:text-brand-600">
+                      <Link href={`/products/${p.id}`} className="block truncate text-[15px] font-bold text-ink transition hover:text-primary">
                         {p.name}
                       </Link>
                       <p className="num mt-0.5 text-[11px] text-ink-subtle" dir="ltr">{p.sku}</p>
                     </div>
                     <StatusBadge value={p.isArchived ? "CLOSED" : p.isActive ? "IN_STOCK" : "PENDING"} />
                   </div>
-                  <div className="mt-2.5 flex items-center justify-between">
-                    <p className="num text-base font-bold text-brand-600 dark:text-brand-400" dir="ltr">
+                  <div className="mt-2 flex items-center justify-between">
+                    <p className="num text-[15px] font-semibold text-ink-muted" dir="ltr">
                       {Number(p.price).toLocaleString()} {p.currency}
                     </p>
                     <span className="text-[11px] text-ink-subtle">{label(p.stockStatus)}{p.category ? ` · ${p.category}` : ""}</span>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line/60 pt-3">
+                  <div className="mt-3 flex items-center gap-1.5 border-t border-line/60 pt-3">
                     <Button size="sm" variant="secondary" onClick={() => toggleActive(p)}>
                       {p.isActive ? "تعطيل" : "تفعيل"}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => toggleArchive(p)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
                       {p.isArchived ? "استعادة" : "أرشفة"}
                     </Button>
-                    <Link href={`/products/${p.id}`} className="ms-auto inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-semibold text-ink-muted transition hover:bg-surface-3 hover:text-ink">
-                      {t.common.details}
+                    <Link
+                      href={`/products/${p.id}`}
+                      aria-label={`${t.common.details}: ${p.name}`}
+                      className="ms-auto inline-flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface-2 text-ink-muted transition hover:border-primary/40 hover:text-primary"
+                    >
+                      <ArrowUpLeft size={16} className="-scale-x-100" />
                     </Link>
                   </div>
                 </div>

@@ -72,33 +72,23 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
       className={cn(
-        "group relative mb-1 flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-150",
+        "group relative mb-1 flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors duration-150",
         active
-          ? "bg-gradient-to-l from-brand-600 via-brand-500 to-sky-500 font-semibold text-white shadow-[0_6px_16px_-6px_rgb(37_99_235/0.7),inset_0_1px_0_rgb(255_255_255/0.25)]"
-          : "text-ink-muted hover:bg-brand-500/[0.07] hover:text-brand-700 dark:hover:text-brand-200",
+          ? "bg-primary-soft font-semibold text-primary"
+          : "text-ink-muted hover:bg-surface-hover hover:text-ink",
         collapsed && "justify-center px-0"
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-y-1.5 start-0 w-1 rounded-full bg-white/70 transition-all",
-          active ? "opacity-100" : "opacity-0"
-        )}
-      />
       <Icon
-        size={18}
-        strokeWidth={active ? 2.25 : 2}
-        className={cn(
-          "shrink-0 transition-colors",
-          active ? "text-white" : "text-ink-subtle group-hover:text-brand-500"
-        )}
+        size={20}
+        strokeWidth={active ? 2.25 : 1.75}
+        className={cn("shrink-0 transition-colors", active ? "text-primary" : "text-ink-subtle group-hover:text-ink-muted")}
       />
       {!collapsed && <span className="min-w-0 flex-1 truncate">{label}</span>}
       {!collapsed && badge && (
         <span className={cn(
           "num flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold",
-          active ? "bg-white/25 text-white" : "bg-brand-500 text-white"
+          active ? "bg-surface-2 text-primary shadow-xs" : "bg-primary text-white"
         )}>
           {badge}
         </span>
@@ -151,7 +141,7 @@ export function Sidebar({
 
   function navList(coll: boolean, onNavigate?: () => void) {
     return (
-      <nav aria-label={t.a11y.mainNav} className="flex-1 space-y-0.5 overflow-y-auto px-3 py-3">
+      <nav aria-label={t.a11y.mainNav} className="flex-1 space-y-1 overflow-y-auto px-4 py-2">
         {items.map(({ href, label, icon, badge }) => {
           const active = href === activeHref;
           return (
@@ -199,41 +189,38 @@ export function Sidebar({
   );
 
   const brand = (coll: boolean) => (
-    <div className={cn("flex items-center gap-2.5 border-b border-line/70 px-4 py-4", coll && "justify-center px-2")}>
+    <div className={cn("flex items-center gap-2.5 px-4 pb-3 pt-5", coll && "justify-center px-2")}>
       <BrandLogo size="md" />
       {!coll && (
-        <div className="min-w-0">
-          <p className="text-sm font-bold leading-5 text-ink">
-            Zaki <span className="bg-gradient-to-l from-brand-600 to-sky-500 bg-clip-text text-transparent">response</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-bold leading-5 text-ink">
+            Zaki <span className="text-primary">response</span>
           </p>
           {workspaceName && <p className="truncate text-[11px] text-ink-muted">{workspaceName}</p>}
         </div>
       )}
+      <button
+        onClick={toggleCollapse}
+        aria-label={coll ? "توسيع القائمة" : "طي القائمة"}
+        title={coll ? "توسيع" : "طي"}
+        className="shrink-0 rounded-xl p-2 text-ink-subtle transition hover:bg-surface-hover hover:text-ink"
+      >
+        {coll ? <ChevronsLeft size={17} /> : <ChevronsRight size={17} />}
+      </button>
     </div>
   );
 
   return (
     <>
-      {/* Desktop sidebar — glass, RTL: start side = right */}
+      {/* Desktop sidebar — floating white card, RTL: start side = right */}
       <aside
         className={cn(
-          "glass-strong fixed inset-y-0 start-0 z-30 hidden flex-col transition-all duration-200 lg:flex",
-          collapsed ? "w-[76px]" : "w-64"
+          "fixed inset-y-4 start-4 z-30 hidden flex-col rounded-[28px] border border-line/70 bg-surface-2 shadow-card transition-all duration-200 lg:flex",
+          collapsed ? "w-[88px]" : "w-80"
         )}
       >
         {brand(collapsed)}
         {navList(collapsed)}
-        <div className="mt-auto flex items-center justify-between border-t border-line/70 px-3 py-2">
-          {!collapsed && <ThemeToggle />}
-          <button
-            onClick={toggleCollapse}
-            aria-label={collapsed ? "توسيع القائمة" : "طي القائمة"}
-            title={collapsed ? "توسيع" : "طي"}
-            className="rounded-lg p-2 text-ink-subtle transition hover:bg-surface-3 hover:text-ink"
-          >
-            {collapsed ? <ChevronsLeft size={16} /> : <ChevronsRight size={16} />}
-          </button>
-        </div>
         {userBlock(collapsed)}
       </aside>
 

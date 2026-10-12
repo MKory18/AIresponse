@@ -14,21 +14,21 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-b from-sky-400 via-brand-500 to-brand-600 text-white shadow-[0_8px_20px_-8px_rgb(37_99_235/0.8),inset_0_1px_0_rgb(255_255_255/0.3)] hover:brightness-110 hover:shadow-[0_10px_26px_-8px_rgb(37_99_235/0.9)] active:brightness-95 disabled:opacity-50 disabled:saturate-50",
+    "bg-primary text-white shadow-[0_8px_20px_-10px_rgb(64_88_243/0.7)] hover:bg-primary-hover active:bg-primary-hover disabled:opacity-50",
   secondary:
-    "glass-subtle text-ink hover:border-brand-300 hover:text-brand-700 active:scale-[0.98] disabled:opacity-50 dark:hover:text-brand-300",
+    "border border-line bg-surface-2 text-ink-muted hover:bg-surface-hover hover:text-ink active:scale-[0.98] disabled:opacity-50 dark:hover:text-brand-300",
   ghost: "text-ink-muted hover:bg-surface-3 hover:text-ink active:scale-[0.98] disabled:opacity-50",
   danger:
     "border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 active:scale-[0.98] disabled:opacity-50 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
   success:
-    "bg-gradient-to-b from-emerald-500 to-emerald-600 text-white shadow-xs hover:brightness-110 active:brightness-95 disabled:opacity-50",
+    "bg-emerald-600 text-white shadow-xs hover:brightness-105 active:brightness-95 disabled:opacity-50",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-7 gap-1 rounded-lg px-2.5 text-xs",
-  md: "h-9 gap-1.5 rounded-xl px-3.5 text-[13px]",
-  lg: "h-11 gap-2 rounded-xl px-5 text-sm",
-  icon: "h-8 w-8 rounded-xl",
+  sm: "h-8 gap-1 rounded-xl px-3 text-xs",
+  md: "h-11 gap-1.5 rounded-2xl px-4 text-sm",
+  lg: "h-12 gap-2 rounded-2xl px-5 text-sm",
+  icon: "h-10 w-10 rounded-2xl",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -40,7 +40,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex select-none items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all duration-150 focus-visible:outline-2 disabled:cursor-not-allowed",
+        "inline-flex select-none items-center justify-center whitespace-nowrap rounded-2xl font-semibold transition-all duration-150 focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed",
         variants[variant],
         sizes[size],
         className

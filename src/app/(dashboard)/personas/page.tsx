@@ -238,7 +238,7 @@ export default function PersonasPage() {
             <div key={p.id} className="space-y-2.5">
               <GlassCard className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
               <div className="flex min-w-0 items-start gap-2.5">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/20 to-brand-500/20 text-brand-600 dark:text-brand-300">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
                   <UserRound size={18} />
                 </span>
                 <div className="min-w-0">

@@ -31,7 +31,7 @@ function Bar({ label, value, max }: { label: string; value: number; max: number 
         <span className="num text-ink-muted">{value.toLocaleString()}</span>
       </p>
       <div className="h-2 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-        <div className="h-full rounded-full bg-gradient-to-l from-brand-400 to-brand-600 transition-all" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );

@@ -9,6 +9,12 @@ const config: Config = {
         sans: ["var(--font-arabic)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
+        // Primary action blue (NeoCommerce reference).
+        primary: {
+          DEFAULT: "#4058F3",
+          hover: "#344AE0",
+          soft: "#EEEDFF",
+        },
         // Primary — blue (kept from existing brand identity, extended scale)
         brand: {
           50: "#eef5fe",
@@ -27,6 +33,7 @@ const config: Config = {
           1: "rgb(var(--surface-1) / <alpha-value>)",
           2: "rgb(var(--surface-2) / <alpha-value>)",
           3: "rgb(var(--surface-3) / <alpha-value>)",
+          hover: "rgb(var(--surface-hover) / <alpha-value>)",
         },
         ink: {
           DEFAULT: "rgb(var(--text) / <alpha-value>)",
