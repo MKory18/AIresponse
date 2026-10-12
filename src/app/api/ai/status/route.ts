@@ -8,7 +8,7 @@ import {
   validateTaskModel,
   type AiTask,
 } from "@/modules/ai/router";
-import { testProviderConnection, normalizeHermesEndpoint } from "@/modules/ai/provider";
+import { testProviderConnection, normalizeHermesEndpoint, openAIChatUrl } from "@/modules/ai/provider";
 import { getCurrentEmbeddingIdentity } from "@/modules/knowledge/embeddings";
 
 /**
@@ -40,12 +40,22 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
   const allowMock = ["1", "true", "yes"].includes(((env.ALLOW_MOCK_AI ?? "") as string).toLowerCase());
   const isProd = process.env.NODE_ENV === "production";
 
+  // Effective OpenAI-compatible endpoint (custom gateway root when set,
+  // api.openai.com default otherwise; misconfigured root is reported, never
+  // silently replaced — the key must never go to an unintended host).
+  let openaiEndpoint: string | null = null;
+  let openaiEndpointOk = true;
+  try {
+    openaiEndpoint = openAIChatUrl();
+  } catch {
+    openaiEndpointOk = false;
+  }
   const providers = [
     {
       id: "openai",
-      configured: hasOpenaiKey,
-      status: hasOpenaiKey ? ("configured" as const) : ("needs_key" as const),
-      endpoint: "https://api.openai.com/v1/chat/completions",
+      configured: hasOpenaiKey && openaiEndpointOk,
+      status: !hasOpenaiKey ? ("needs_key" as const) : !openaiEndpointOk ? ("failed" as const) : ("configured" as const),
+      endpoint: openaiEndpoint,
     },
     {
       id: "openrouter",

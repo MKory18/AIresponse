@@ -48,8 +48,45 @@ export interface AIProvider {
   generateVision?(req: VisionRequest): Promise<AIResponse>;
 }
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENAI_API_ROOT = "https://api.openai.com/v1";
+
+/**
+ * Optional OpenAI-compatible API root (server ENV `OPENAI_BASE_URL`).
+ *
+ * Returns the validated root WITHOUT trailing slash. Unset/blank = the
+ * api.openai.com default (existing behavior byte-identical). A SET but
+ * malformed value throws a permanent config error — silently falling back
+ * to api.openai.com would send the custom gateway's key to OpenAI.
+ * Only absolute http(s) URLs without embedded credentials are accepted.
+ */
+export function resolveOpenAIBaseRoot(raw?: string | null): string {
+  const value = (raw ?? process.env.OPENAI_BASE_URL ?? "").trim();
+  if (!value) return OPENAI_API_ROOT;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new AIProviderError(`OPENAI_BASE_URL is not a valid absolute URL`, { retryable: false });
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new AIProviderError(`OPENAI_BASE_URL must use http(s)`, { retryable: false });
+  }
+  if (url.username || url.password) {
+    throw new AIProviderError(`OPENAI_BASE_URL must not embed credentials`, { retryable: false });
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+
+/** Effective chat-completions URL for the openai provider path. */
+export function openAIChatUrl(): string {
+  return `${resolveOpenAIBaseRoot()}/chat/completions`;
+}
+
+/** Effective embeddings URL for the openai provider path. */
+export function openAIEmbeddingsUrl(): string {
+  return `${resolveOpenAIBaseRoot()}/embeddings`;
+}
 
 /** Shared OpenAI-compatible implementation for OpenAI & OpenRouter. */
 export class OpenAICompatibleProvider implements AIProvider {
@@ -386,7 +423,7 @@ export function resolveAIProvider(opts: {
     return new OpenAICompatibleProvider({
       name: "openai",
       apiKey: opts.openaiKey,
-      baseUrl: OPENAI_URL,
+      baseUrl: openAIChatUrl(),
       defaultModel: opts.responseModel || "gpt-4o-mini",
     });
   }

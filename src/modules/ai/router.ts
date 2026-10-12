@@ -6,6 +6,7 @@ import {
   OpenAICompatibleProvider,
   getInjectedMockProvider,
   normalizeHermesEndpoint,
+  openAIChatUrl,
   resolveAIProvider,
   type AIProvider,
 } from "./provider";
@@ -394,7 +395,7 @@ export function getWorkspaceProvider(
     return new OpenAICompatibleProvider({
       name: choice,
       apiKey: keyFor(choice)!,
-      baseUrl: isOpenai ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions",
+      baseUrl: isOpenai ? openAIChatUrl() : "https://openrouter.ai/api/v1/chat/completions",
       defaultModel: settings?.responseModel ?? e.responseModel ?? (isOpenai ? "gpt-4o-mini" : "openai/gpt-4o-mini"),
     });
   }

@@ -10,6 +10,11 @@ const envSchema = z.object({
     .min(32, "ENCRYPTION_KEY must be at least 32 chars (hex/base64)"),
   AI_PROVIDER: z.enum(["openai", "openrouter", "anthropic", "google", "hermes"]).optional(),
   OPENAI_API_KEY: z.string().optional(),
+  // Optional OpenAI-compatible API root (e.g. a self-hosted gateway like
+  // https://gateway.example.com/v1). Used for BOTH chat completions and
+  // embeddings when AI_PROVIDER=openai. Server-side only, deployer-trusted
+  // (never accepted from client requests). Unset = api.openai.com default.
+  OPENAI_BASE_URL: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_API_KEY: z.string().optional(),
