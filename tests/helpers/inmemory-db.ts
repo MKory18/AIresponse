@@ -307,11 +307,15 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
     async groupBy(args: any) {
       const rows = store.filter((r) => matchesWhere(r, args.where));
       const key = args.by[0] ?? args.by;
+      const sumFields: string[] = args._sum ? Object.keys(args._sum).filter((f) => (args._sum as Row)[f]) : [];
       const groups = new Map<unknown, Row>();
       for (const r of rows) {
         const k = r[key];
-        const g = groups.get(k) ?? { [key]: k, _count: { [key]: 0 } };
+        const g = groups.get(k) ?? { [key]: k, _count: { [key]: 0 }, _sum: {} as Row };
         g._count[key] += 1;
+        for (const f of sumFields) {
+          (g._sum as Row)[f] = ((g._sum as Row)[f] ?? 0) + (typeof r[f] === "number" ? r[f] : 0);
+        }
         groups.set(k, g);
       }
       return [...groups.values()];

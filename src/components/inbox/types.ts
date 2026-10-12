@@ -21,6 +21,7 @@ export type ConversationListItem = {
     identities?: { displayName: string | null; avatarUrl?: string | null; channelType: string }[];
   };
   channel: {
+    id?: string;
     type: string;
     displayName?: string | null;
     externalId?: string | null;

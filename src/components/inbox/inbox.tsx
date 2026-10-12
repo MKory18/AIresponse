@@ -14,6 +14,13 @@ import { Input, Select } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
 import { ConversationItem, ConversationListEmpty, ConversationListSkeleton } from "./conversation-item";
+import {
+  PageSwitcher,
+  readSelectedChannelId,
+  sanitizeSelectedChannelId,
+  writeSelectedChannelId,
+  type InboxPageRow,
+} from "./page-switcher";
 import { CustomerPanel } from "./customer-panel";
 import { MediaPicker } from "./MediaPicker";
 import { DateSeparator, MessageBubble } from "./message-bubble";
@@ -74,6 +81,11 @@ export default function Inbox() {
   const [prioritySel, setPrioritySel] = useState("");
   const [assigneeSel, setAssigneeSel] = useState("");
   const [channelSel, setChannelSel] = useState("");
+  // Page switcher: exact Facebook page filter ("" = all pages).
+  const [pages, setPages] = useState<InboxPageRow[]>([]);
+  const [pagesLoading, setPagesLoading] = useState(true);
+  const [pagesError, setPagesError] = useState(false);
+  const [selectedChannelId, setSelectedChannelId] = useState("");
   const [openHandoff, setOpenHandoff] = useState<OpenHandoff>(null);
   const [activity, setActivity] = useState<AssignmentActivity[]>([]);
   const [composerTab, setComposerTab] = useState<"reply" | "note">("reply");
@@ -115,6 +127,35 @@ export default function Inbox() {
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
 
+  const fetchPages = useCallback(async (): Promise<InboxPageRow[]> => {
+    setPagesError(false);
+    const res = await fetch("/api/conversations/pages");
+    if (!res.ok) {
+      setPagesError(true);
+      setPagesLoading(false);
+      return [];
+    }
+    const data = (await res.json()) as { pages: InboxPageRow[] };
+    const rows = data.pages ?? [];
+    setPages(rows);
+    setPagesLoading(false);
+    return rows;
+  }, []);
+
+  // Load pages once; hydrate ?channelId= only against server-returned ids.
+  useEffect(() => {
+    fetchPages().then((rows) => {
+      setSelectedChannelId(sanitizeSelectedChannelId(readSelectedChannelId(), rows));
+    });
+  }, [fetchPages]);
+
+  function selectPage(id: string) {
+    const clean = sanitizeSelectedChannelId(id, pages);
+    setSelectedChannelId(clean);
+    writeSelectedChannelId(clean);
+    setCursor(null);
+  }
+
   const fetchList = useCallback(
     async (opts?: { append?: boolean; cursor?: string | null; signal?: AbortSignal }) => {
       const seq = ++listSeq.current;
@@ -125,6 +166,7 @@ export default function Inbox() {
       if (prioritySel) params.set("priority", prioritySel);
       if (assigneeSel) params.set("assignee", assigneeSel);
       if (channelSel) params.set("channelType", channelSel);
+      if (selectedChannelId) params.set("channelId", selectedChannelId);
       if (opts?.cursor) params.set("cursor", opts.cursor);
       const res = await fetch(`/api/conversations?${params}`, { signal: opts?.signal });
       if (!res.ok) {
@@ -145,7 +187,7 @@ export default function Inbox() {
       });
       setCursor(data.nextCursor);
     },
-    [query, filter, statusSel, prioritySel, assigneeSel, channelSel]
+    [query, filter, statusSel, prioritySel, assigneeSel, channelSel, selectedChannelId]
   );
 
   // Initial load + filter changes (debounced)
@@ -237,6 +279,23 @@ export default function Inbox() {
       cancelled = true;
     };
   }, [selectedId]);
+
+  // Switching pages must never leave a thread from another page open:
+  // clear the selection (and its thread state) when it falls outside the
+  // active page filter. The next list fetch already drops it server-side;
+  // this only avoids showing stale details in between.
+  useEffect(() => {
+    if (!selectedChannelId || !selectedId) return;
+    const cur = conversations.find((c) => c.id === selectedId);
+    if (cur && cur.channel.id !== selectedChannelId) {
+      setSelectedId(null);
+      setMessages([]);
+      setCustomer(null);
+      setOpenHandoff(null);
+      setActivity([]);
+      setOrderDraftCard(null);
+    }
+  }, [selectedChannelId, selectedId, conversations]);
 
   async function send(pickedMediaId?: string) {
     if (!selectedId || (!draft.trim() && !pickedMediaId)) return;
@@ -404,7 +463,7 @@ export default function Inbox() {
   }
 
   const unreadTotal = conversations.reduce((a, c) => a + c.unreadCount, 0);
-  const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || prioritySel || assigneeSel || channelSel);
+  const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || prioritySel || assigneeSel || channelSel || selectedChannelId);
   const aiMode = selected?.aiState !== "HUMAN_ACTIVE";
 
   // Pick up ?q= from the topbar search.
@@ -425,6 +484,14 @@ export default function Inbox() {
         )}
       >
         <div className="space-y-2.5 border-b border-line/60 p-3">
+          <PageSwitcher
+            pages={pages}
+            selectedId={selectedChannelId}
+            loading={pagesLoading}
+            error={pagesError}
+            onSelect={selectPage}
+            onRetry={fetchPages}
+          />
           <div className="relative">
             <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
             <Input

@@ -43,6 +43,7 @@ export interface ConversationListRow {
     identities: { displayName: string | null; avatarUrl: string | null; channelType: string }[];
   };
   channel: {
+    id: string;
     type: string;
     displayName: string | null;
     externalId: string | null;
@@ -72,6 +73,8 @@ export async function listConversations(
     assignee?: string;
     actorUserId?: string;
     channelType?: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "TELEGRAM" | "WEB";
+    /** Exact page filter — verified workspace-owned below (never trusted blind). */
+    channelId?: string;
     /** ISO dates bounding conversation activity (updatedAt). */
     dateFrom?: string;
     dateTo?: string;
@@ -102,6 +105,16 @@ export async function listConversations(
       select: { id: true },
     });
     where.channelId = { in: channels.map((c) => c.id) };
+  }
+  if (params.channelId) {
+    // Ownership first: a crafted id from another workspace must never leak
+    // its conversations (same response as a missing channel — no oracle).
+    const own = await db.channel.findFirst({
+      where: { id: params.channelId, workspaceId: params.workspaceId },
+      select: { id: true },
+    });
+    if (!own) throw new NotFoundError("Channel");
+    where.channelId = params.channelId;
   }
   const from = params.dateFrom ? new Date(params.dateFrom) : null;
   const to = params.dateTo ? new Date(params.dateTo) : null;
@@ -158,6 +171,7 @@ export async function listConversations(
       },
       channel: {
         select: {
+          id: true,
           type: true,
           displayName: true,
           externalId: true,
@@ -245,6 +259,47 @@ export async function listConversations(
   }
   const withPreview = enriched.map((c) => ({ ...c, lastMessage: previewByConv.get(c.id) ?? null }));
   return { items: withPreview as unknown as ConversationListRow[], nextCursor: hasMore ? items[items.length - 1].id : null };
+}
+
+/** One switcher row: a real workspace channel + its unread total. */
+export interface ConversationPageRow {
+  id: string;
+  type: string;
+  displayName: string | null;
+  externalId: string | null;
+  status: string;
+  unreadCount: number;
+}
+
+/**
+ * Pages for the inbox switcher — workspace-scoped, secret-free, one bounded
+ * group-by for unread totals (no N+1). Soft-deleted threads never count.
+ */
+export async function listConversationPages(db: Db, workspaceId: string): Promise<ConversationPageRow[]> {
+  const channels = await db.channel.findMany({
+    where: { workspaceId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, type: true, displayName: true, externalId: true, status: true },
+  });
+  if (channels.length === 0) return [];
+  const sums = await (db as unknown as {
+    conversation: {
+      groupBy: (args: unknown) => Promise<Array<{ channelId: string; _sum: { unreadCount: number | null } }>>;
+    };
+  }).conversation.groupBy({
+    by: ["channelId"],
+    where: { workspaceId, deletedAt: null, channelId: { in: channels.map((c) => c.id) } },
+    _sum: { unreadCount: true },
+  }).catch(() => []);
+  const unreadByChannel = new Map((sums ?? []).map((s) => [s.channelId, s._sum?.unreadCount ?? 0]));
+  return channels.map((c) => ({
+    id: c.id,
+    type: c.type,
+    displayName: c.displayName,
+    externalId: c.externalId,
+    status: c.status,
+    unreadCount: unreadByChannel.get(c.id) ?? 0,
+  }));
 }
 
 export async function getConversationDetail(db: Db, ctx: ActorContext, conversationId: string) {
