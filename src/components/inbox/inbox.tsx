@@ -15,6 +15,7 @@ import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
 import { ConversationItem, ConversationListEmpty, ConversationListSkeleton } from "./conversation-item";
 import { CustomerPanel } from "./customer-panel";
+import { MediaPicker } from "./MediaPicker";
 import { DateSeparator, MessageBubble } from "./message-bubble";
 import {
   CHANNEL_LABELS,
@@ -94,6 +95,7 @@ export default function Inbox() {
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachData, setCoachData] = useState<any>(null);
   const [coachError, setCoachError] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   // Guards against stale responses: a slow poll/switch must never overwrite
   // newer state (switching threads or changing filters mid-flight).
@@ -236,8 +238,8 @@ export default function Inbox() {
     };
   }, [selectedId]);
 
-  async function send() {
-    if (!selectedId || !draft.trim()) return;
+  async function send(pickedMediaId?: string) {
+    if (!selectedId || (!draft.trim() && !pickedMediaId)) return;
     const text = draft.trim();
     // Client-generated idempotency key: double-click/double-POST resends the
     // SAME row instead of creating a duplicate outbound message.
@@ -247,8 +249,8 @@ export default function Inbox() {
       id: `optimistic-${Date.now()}`,
       senderType: "HUMAN",
       direction: "OUTBOUND",
-      type: "TEXT",
-      text,
+      type: pickedMediaId ? "IMAGE" : "TEXT",
+      text: text || null,
       mediaUrl: null,
       deliveryStatus: "PENDING",
       createdAt: new Date().toISOString(),
@@ -259,7 +261,7 @@ export default function Inbox() {
       const res = await fetch(`/api/conversations/${selectedId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, idempotencyKey }),
+        body: JSON.stringify({ ...(text ? { text } : {}), ...(pickedMediaId ? { mediaId: pickedMediaId } : {}), idempotencyKey }),
       });
       const data = (await res.json().catch(() => ({}))) as MessageItem & { deliveryStatus?: string };
       if (!res.ok) throw new Error((data as { message?: string }).message ?? "");
@@ -702,8 +704,9 @@ export default function Inbox() {
                 <div className="flex gap-0.5 pb-0.5">
                   <button
                     aria-label={t.inbox.attach}
-                    title={`${t.inbox.attach} (قريبًا)`}
-                    disabled
+                    title="أرسل من المكتبة"
+                    disabled={composerTab !== "reply" || sending}
+                    onClick={() => setPickerOpen(true)}
                     className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-subtle transition hover:bg-surface-3 hover:text-ink disabled:opacity-40"
                   >
                     <Paperclip size={16} />
@@ -745,6 +748,17 @@ export default function Inbox() {
               </div>
               <p className="mt-1.5 px-1 text-[10px] text-ink-subtle">Enter {t.common.send} · Shift+Enter {t.inbox.newLine}</p>
             </footer>
+            {/* Send from the library: the photo travels with the draft text
+                through the normal human-reply door — policy, idempotency
+                and channel rules all still apply. */}
+            <MediaPicker
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onPick={(mediaId) => {
+                setPickerOpen(false);
+                void send(mediaId);
+              }}
+            />
           </>
         )}
       </section>

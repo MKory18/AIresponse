@@ -44,6 +44,14 @@ export interface DispatchOutboundParams {
   /** Optional media asset ID to attach (image/video/audio/file). */
   mediaId?: string | null;
   /**
+   * WHY NO MEDIA GOES OUT WITH THIS SEND — recorded on the row, never silent.
+   *
+   * Set upstream when the sender already knows (no image, all sent, channel
+   * refuses it), or filled here when the attachment itself fails. A skipped
+   * image never fails the text travelling with it.
+   */
+  mediaSkipped?: string;
+  /**
    * P9 — قالب معتمد (WhatsApp Business Platform فقط): المسار الرسمي
    * الوحيد للتسويق خارج نافذة 24h. القنوات الأخرى ترفضه صراحة.
    */
@@ -70,7 +78,7 @@ export interface DispatchOutboundResult {
 /** Human agent reply through the SAME ChannelSender + policy + idempotency. */
 export async function sendHumanReply(
   db: Db,
-  params: { workspaceId: string; conversationId: string; userId: string; text: string; idempotencyKey?: string }
+  params: { workspaceId: string; conversationId: string; userId: string; text: string; idempotencyKey?: string; mediaId?: string | null }
 ): Promise<DispatchOutboundResult> {
   return dispatchOutbound(db, {
     workspaceId: params.workspaceId,
@@ -79,6 +87,7 @@ export async function sendHumanReply(
     text: params.text,
     senderType: "HUMAN",
     senderId: params.userId,
+    mediaId: params.mediaId ?? undefined,
   });
 }
 
@@ -364,27 +373,50 @@ export async function dispatchOutbound(
   // either part. Partial progress (part1MessageId) is persisted so a crash
   // between the two sends never duplicates the first part on recovery.
   let attachment: { type: "image" | "video" | "audio" | "file"; payload: { url: string } } | null = null;
+  // A skip reason travelling in with the call wins: it names the real
+  // cause (no image, all sent, channel refuses it).
+  let mediaSkipped: string | undefined = params.mediaSkipped;
   if (params.mediaId) {
     try {
       const publicUrl = await generatePublicMediaUrl(db, params.workspaceId, params.mediaId, 60);
       // Determine attachment type from media asset
       const asset = await (db as any).mediaAsset.findUnique({
         where: { id: params.mediaId },
-        select: { type: true, mimeType: true },
+        select: { type: true, mimeType: true, size: true },
       });
       let attachType: "image" | "video" | "audio" | "file" = "file";
       if (asset?.type === "IMAGE") attachType = "image";
       else if (asset?.type === "VIDEO") attachType = "video";
       else if (asset?.type === "AUDIO") attachType = "audio";
       attachment = { type: attachType, payload: { url: publicUrl } };
+      // THE CHANNEL DECIDES BEFORE ANYTHING LEAVES. A file the channel
+      // refuses never reaches its sender: the reply goes out as words and
+      // the row says why — for AI replies, human picks, campaigns and
+      // follow-ups alike, because every one of them arrives here.
+      const { mediaFitsChannel } = await import("@/modules/media/channel-limits");
+      const fit = mediaFitsChannel(
+        { type: asset?.type ?? "DOCUMENT", mimeType: asset?.mimeType ?? "", size: asset?.size ?? 0 },
+        channel.type
+      );
+      if (!fit.ok) {
+        attachment = null;
+        mediaSkipped = mediaSkipped ?? "CHANNEL_UNFIT";
+        log.warn({ ...ctx, recipientId, status: "TEXT_ONLY", reason: fit.reason, durationMs: Date.now() - started }, "facebook.message.media_skipped");
+      }
     } catch (err) {
-      await markFailed(db, message.id, "MEDIA_NOT_AVAILABLE", "تعذر إرفاق الوسائط");
-      log.warn({ ...ctx, recipientId, status: "FAILED", reason: "MEDIA_NOT_AVAILABLE", durationMs: Date.now() - started }, "facebook.message.failed");
-      return { messageId: message.id, deliveryStatus: "FAILED", error: "MEDIA_NOT_AVAILABLE", channelId: ctx.channelId, pageId: ctx.pageId, recipientId, durationMs: Date.now() - started };
+      // THE TEXT SURVIVES THE IMAGE. A missing or unreadable asset used to
+      // fail the whole reply — the customer got nothing, not even the
+      // words. Now the send continues text-only and the row says why.
+      attachment = null;
+      mediaSkipped = mediaSkipped ?? "MEDIA_NOT_AVAILABLE";
+      log.warn({ ...ctx, recipientId, status: "TEXT_ONLY", reason: "MEDIA_NOT_AVAILABLE", durationMs: Date.now() - started }, "facebook.message.media_skipped");
     }
   }
 
-  // 7. Send via the Facebook client (the only Graph caller).
+  // The id that actually travels from here on: a skipped attachment must
+  // not be recorded as sent — the next reply would treat it as delivered
+  // and never show it.
+  const sendMediaId = attachment ? params.mediaId : null;
   const client = getFacebookClient();
   let pageAccessToken: string;
   try {
@@ -405,14 +437,14 @@ export async function dispatchOutbound(
       : null;
 
   const persistPart1 = async (part1MessageId: string) => {
-    await persistPart1For(db, message.id, params.mediaId ?? undefined, part1MessageId);
+    await persistPart1For(db, message.id, sendMediaId ?? undefined, part1MessageId);
   };
 
   // 7b. Non-Messenger transports share the idempotency shell above and the
   // persist/error shapes below; only policy + sender differ per provider.
   if (channel.type !== "FACEBOOK") {
     return dispatchChannelSend(db, {
-      params,
+      params: { ...params, mediaId: sendMediaId, mediaSkipped },
       messageId: message.id,
       channel,
       account,
@@ -464,13 +496,28 @@ export async function dispatchOutbound(
       if (priorPart1) {
         firstMid = priorPart1;
       } else {
-        const r1 = await adapter.sendMedia(recipientId, { type: toMessageType(attachment.type), mediaUrl: attachment.payload.url });
-        firstMid = r1.externalMessageId;
-        graphCode = graphCodeOf(r1);
-        await persistPart1(firstMid);
+        try {
+          const r1 = await adapter.sendMedia(recipientId, { type: toMessageType(attachment.type), mediaUrl: attachment.payload.url });
+          firstMid = r1.externalMessageId;
+          graphCode = graphCodeOf(r1);
+          await persistPart1(firstMid);
+        } catch (mediaErr) {
+          // TRANSIENT STAYS TRANSIENT: a retryable provider failure keeps
+          // the QUEUED path and its recovery (both parts go out together
+          // later). Only a PERMANENT media refusal falls back to words —
+          // the text survives the image, and the row says which half was
+          // skipped.
+          const transientMedia =
+            mediaErr instanceof FacebookApiError && mediaErr.kind === ("TRANSIENT" as const);
+          if (transientMedia) throw mediaErr;
+          attachment = null;
+          mediaSkipped = mediaSkipped ?? "SEND_FAILED";
+          log.warn({ ...ctx, recipientId, status: "TEXT_ONLY", reason: "SEND_FAILED", durationMs: Date.now() - started }, "facebook.message.media_skipped");
+        }
       }
       const r2 = await adapter.sendText(recipientId, params.text);
-      secondMid = r2.externalMessageId;
+      secondMid = attachment ? r2.externalMessageId : undefined;
+      if (!attachment) firstMid = r2.externalMessageId;
       graphCode = graphCodeOf(r2) ?? graphCode;
     } else {
       const single = attachment
@@ -485,7 +532,7 @@ export async function dispatchOutbound(
         deliveryStatus: "SENT",
         externalMessageId: firstMid,
         deliveryError: null,
-        ...(secondMid ? { metadata: { ...(params.mediaId ? { mediaId: params.mediaId } : {}), ...(priorPart1 || attachment ? { part1MessageId: firstMid } : {}), secondExternalMessageId: secondMid } } : {}),
+        ...(secondMid ? { metadata: { ...(sendMediaId ? { mediaId: sendMediaId } : {}), ...(priorPart1 || attachment ? { part1MessageId: firstMid } : {}), ...(mediaSkipped ? { mediaSkipped } : {}), secondExternalMessageId: secondMid } } : { ...(mediaSkipped ? { metadata: { mediaSkipped } } : {}) }),
       },
     });
     await db.channelAccount.update({
@@ -527,7 +574,8 @@ export async function dispatchOutbound(
         deliveryStatus: isTransient ? "QUEUED" : "FAILED",
         deliveryError: err instanceof Error ? err.message : String(err),
         metadata: {
-          ...(params.mediaId ? { mediaId: params.mediaId } : {}),
+          ...(sendMediaId ? { mediaId: sendMediaId } : {}),
+          ...(mediaSkipped ? { mediaSkipped } : {}),
           ...(keepPart1 ? { part1MessageId: keepPart1 } : {}),
           providerErrorCode: code || "UNKNOWN",
           providerErrorMessage: err instanceof Error ? err.message : String(err),
@@ -654,6 +702,10 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
   const toMessageType = (t: "image" | "video" | "audio" | "file"): "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" =>
     t === "image" ? "IMAGE" : t === "video" ? "VIDEO" : t === "audio" ? "AUDIO" : "DOCUMENT";
 
+  // A text-only fallback still records why no image travels with it.
+  // Declared outside `try`: the failure branch below reads it too.
+  let channelSkip: string | undefined = s.params.mediaSkipped;
+
   try {
     let firstMid: string | undefined;
     let secondMid: string | undefined;
@@ -676,13 +728,33 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
       if (s.priorPart1) {
         firstMid = s.priorPart1;
       } else {
-        const r1 = await adapter.sendMedia(s.recipientId, { type: toMessageType(s.attachment.type), mediaUrl: s.attachment.payload.url });
-        firstMid = r1.externalMessageId;
-        code = codeOf(r1);
-        await persistPart1For(db, s.messageId, s.params.mediaId ?? undefined, firstMid);
+        try {
+          const r1 = await adapter.sendMedia(s.recipientId, { type: toMessageType(s.attachment.type), mediaUrl: s.attachment.payload.url });
+          firstMid = r1.externalMessageId;
+          code = codeOf(r1);
+          await persistPart1For(db, s.messageId, s.params.mediaId ?? undefined, firstMid);
+        } catch (mediaErr) {
+          // TRANSIENT STAYS TRANSIENT (QUEUED + recovery); only a
+          // PERMANENT media refusal falls back to words with the reason
+          // on the row.
+          const transientMedia =
+            (mediaErr instanceof TelegramApiError ||
+              mediaErr instanceof WhatsAppApiError ||
+              mediaErr instanceof InstagramApiError ||
+              mediaErr instanceof TikTokApiError) &&
+            mediaErr.kind === "TRANSIENT";
+          if (transientMedia) throw mediaErr;
+          s.attachment = null;
+          channelSkip = channelSkip ?? "SEND_FAILED";
+          log.warn({ ...base, recipientId: s.recipientId, status: "TEXT_ONLY", reason: "SEND_FAILED", durationMs: Date.now() - s.started }, `${scope}.media_skipped`);
+        }
       }
       const r2 = await adapter.sendText(s.recipientId, s.params.text);
-      secondMid = r2.externalMessageId;
+      if (s.attachment) {
+        secondMid = r2.externalMessageId;
+      } else {
+        firstMid = r2.externalMessageId;
+      }
       code = codeOf(r2) ?? code;
     } else {
       const single = s.attachment
@@ -698,7 +770,7 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
         externalMessageId: firstMid,
         deliveryError: null,
         provider: providerOf(s.channel.type),
-        ...(secondMid ? { metadata: { ...(s.params.mediaId ? { mediaId: s.params.mediaId } : {}), ...(s.priorPart1 || s.attachment ? { part1MessageId: firstMid } : {}), secondExternalMessageId: secondMid } } : {}),
+        ...(secondMid ? { metadata: { ...(s.params.mediaId ? { mediaId: s.params.mediaId } : {}), ...(s.priorPart1 || s.attachment ? { part1MessageId: firstMid } : {}), ...(channelSkip ? { mediaSkipped: channelSkip } : {}), secondExternalMessageId: secondMid } } : { ...(channelSkip ? { metadata: { mediaSkipped: channelSkip } } : {}) }),
       },
     });
     await db.channelAccount.update({
@@ -747,6 +819,7 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
         deliveryError: err instanceof Error ? err.message : String(err),
         metadata: {
           ...(s.params.mediaId ? { mediaId: s.params.mediaId } : {}),
+          ...(channelSkip ? { mediaSkipped: channelSkip } : {}),
           ...(keepPart1 ? { part1MessageId: keepPart1 } : {}),
           providerErrorCode: code || "UNKNOWN",
           providerErrorMessage: err instanceof Error ? err.message : String(err),

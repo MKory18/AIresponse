@@ -241,11 +241,21 @@ export async function deleteMedia(db: Db, ctx: ActorContext, mediaId: string) {
 
 // ── Media retrieval (metadata/tags based — no vision AI per search) ─────────
 
-export async function findProductMedia(db: Db, workspaceId: string, productId: string, limit = 5) {
+export async function findProductMedia(
+  db: Db,
+  workspaceId: string,
+  productId: string,
+  limit = 5,
+  type?: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"
+) {
   // Dual-source read during migration: legacy direct FK + canonical join table.
+  // Default IMAGE on both paths: the direct query always asked for
+  // images, while the join table answered with whatever was linked —
+  // so a video linked to a product came back as its photo.
+  const wantType = type ?? "IMAGE";
   const [direct, links] = await Promise.all([
     db.mediaAsset.findMany({
-      where: { workspaceId, productId, type: "IMAGE", ...excludeCustomerInbound() },
+      where: { workspaceId, productId, type: wantType, ...excludeCustomerInbound() },
       orderBy: [{ createdAt: "desc" }],
       take: limit,
     }),
@@ -260,7 +270,15 @@ export async function findProductMedia(db: Db, workspaceId: string, productId: s
   const merged: typeof direct = [];
   for (const l of links) {
     const a = (l as { mediaAsset?: (typeof direct)[number] }).mediaAsset;
-    if (a && a.workspaceId === workspaceId && a.category !== CUSTOMER_INBOUND && !seen.has(a.id)) {
+    // The join table carries no type of its own: a non-image linked to a
+    // product must never come back as the product's photo.
+    if (
+      a &&
+      a.workspaceId === workspaceId &&
+      a.category !== CUSTOMER_INBOUND &&
+      a.type === wantType &&
+      !seen.has(a.id)
+    ) {
       seen.add(a.id);
       merged.push(a);
     }
@@ -272,6 +290,41 @@ export async function findProductMedia(db: Db, workspaceId: string, productId: s
     }
   }
   return merged.slice(0, limit);
+}
+
+/**
+ * THE NEXT PHOTO THIS CONVERSATION HAS NOT SEEN — OR WHY THERE IS NONE.
+ *
+ * IMAGE only (never a video answering as a photo, never a customer
+ * inbound — both enforced by findProductMedia), one at a time, each
+ * photo once per conversation: when every photo went out already, no
+ * repeat without a reason. Whether the file fits the channel is decided
+ * at the send itself (see dispatchOutbound), so AI picks, human picks
+ * and campaigns all share one table.
+ */
+export async function pickUnsentProductImage(
+  db: Db,
+  workspaceId: string,
+  conversationId: string,
+  productId: string
+): Promise<{ mediaId: string | null; skipped?: string }> {
+  const [images, sent] = await Promise.all([
+    findProductMedia(db, workspaceId, productId, 10, "IMAGE"),
+    db.message.findMany({
+      where: { conversationId, direction: "OUTBOUND", deliveryStatus: "SENT" },
+      select: { metadata: true },
+    }),
+  ]);
+  const sentIds = new Set<string>();
+  for (const m of sent) {
+    const id = (m.metadata as { mediaId?: unknown } | null)?.mediaId;
+    if (typeof id === "string") sentIds.add(id);
+  }
+  for (const img of images) {
+    if (!sentIds.has(img.id)) return { mediaId: img.id };
+  }
+  if (images.length === 0) return { mediaId: null, skipped: "NO_IMAGE" };
+  return { mediaId: null, skipped: "ALL_SENT" };
 }
 
 export async function findFeedbackMedia(db: Db, workspaceId: string, productId: string, limit = 3) {

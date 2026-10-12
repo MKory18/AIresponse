@@ -26,6 +26,7 @@ type MediaAsset = {
   mimeType: string;
   createdAt: string;
   products: LinkedProduct[];
+  whatsapp?: { ok: boolean; reason?: string };
 };
 
 type ProductOption = { id: string; name: string };
@@ -385,6 +386,14 @@ export default function MediaPage() {
               <div className="space-y-1 p-2.5">
                 <p className="truncate text-xs font-bold text-ink" title={m.title ?? ""}>{m.title ?? m.id}</p>
                 <p className="num text-[10px] text-ink-subtle">{formatSize(m.size)} · {formatDate(m.createdAt)}</p>
+                {/* A file WhatsApp would refuse says so on its own card —
+                    red with its fix in orange — before anybody attaches it. */}
+                {m.whatsapp && !m.whatsapp.ok && (
+                  <p className="text-[10px] font-semibold leading-relaxed text-red-600 dark:text-red-400">
+                    ⚠️ ما بتنبعت عالواتساب: الصيغة أو الحجم
+                    <span className="block text-amber-600 dark:text-amber-400">🔧 ارفعها JPG أو PNG أقل من 5MB</span>
+                  </p>
+                )}
                 {m.products.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {m.products.map((p) => (
@@ -421,6 +430,12 @@ export default function MediaPage() {
                 <p className="mt-0.5 text-[11px] text-ink-muted">
                   {t.media.linkedProduct}: {m.products.length > 0 ? m.products.map((p) => p.name).join("، ") : t.media.noProduct}
                 </p>
+                {m.whatsapp && !m.whatsapp.ok && (
+                  <p className="mt-0.5 text-[11px] font-semibold leading-relaxed text-red-600 dark:text-red-400">
+                    ⚠️ ما بتنبعت عالواتساب: الصيغة أو الحجم
+                    <span className="block text-amber-600 dark:text-amber-400">🔧 ارفعها JPG أو PNG أقل من 5MB</span>
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-medium">
                 <a href={m.url} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline dark:text-brand-300">{t.media.download}</a>
