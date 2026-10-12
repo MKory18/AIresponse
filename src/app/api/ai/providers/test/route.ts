@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
-import { probeProviderEndpoint, openAIChatUrl } from "@/modules/ai/provider";
+import { probeProviderEndpoint } from "@/modules/ai/provider";
 import { resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
 import { isHermesPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
@@ -113,16 +113,11 @@ export const POST = createHandler(
     if (!key) {
       return ok({ provider: choice, status: "needs_key", latencyMs: 0, detail: "API_KEY_MISSING" });
     }
+    endpoint =
+      choice === "openai"
+        ? "https://api.openai.com/v1/chat/completions"
+        : "https://openrouter.ai/api/v1/chat/completions";
     model = resolveModel(settings as never, "RESPONSE").model;
-    try {
-      endpoint =
-        choice === "openai"
-          ? openAIChatUrl()
-          : "https://openrouter.ai/api/v1/chat/completions";
-    } catch {
-      // Malformed OPENAI_BASE_URL: report, never probe a fallback host.
-      return ok({ provider: choice, status: "failed", latencyMs: 0, detail: "ENDPOINT_MISCONFIGURED", endpoint: null, model });
-    }
     const probe = await probeProviderEndpoint(endpoint, key, model);
     return ok({
       provider: choice,
