@@ -289,6 +289,14 @@ describe("perf guards — ordering + worker polling", () => {
         (j) => j.type === "process_ai_message" && (j.payload as any)?.messageId === m2.messageId && j.status === "PENDING"
       );
       expect(requeued.length).toBeGreaterThanOrEqual(1);
+      // Full lifecycle: older answered first, then the requeued newer turn
+      // proceeds — deferred is never lost AND order is preserved end to end.
+      const r1 = await processAIMessage(db as Db, { ...m1, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r1.status).not.toBe("DEFERRED");
+      const rq = requeued[0].payload as { conversationId: string; messageId: string };
+      const r2b = await processAIMessage(db as Db, { ...rq, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r2b.status).not.toBe("DEFERRED");
+      expect(sentCount()).toBe(2);
     }, 120000);
 
     it("newer turn proceeds when the older sibling exhausted retries", async () => {
