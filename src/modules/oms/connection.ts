@@ -17,6 +17,28 @@ import { OMS_APP_EVENTS } from "./app-webhook";
 
 export const OMS_NO_TOKEN = "__oms_no_token__";
 
+/**
+ * سرّ التحقق من توقيعات ويب هوك الـ OMS الوارد (post-P2 مسار الاستقبال).
+ *
+ * `webhookSecretEncrypted` أولًا (عقد التوقيع الموقّع — تدوير مستقل عن
+ * التوكن). الإصدارات القديمة api/legacy بتحقق بالتوكن الحقيقي نفسه. الوضع
+ * اليدوي **أبدًا** ما يتحقق بالتوكن: البديل المؤقت `__oms_no_token__` ثابت عام
+ * ومنشور — أي حدا بيقدر يوقّع بيها. ما في سر صالح = ما في توقيع مقبول
+ * (فشِل-وَقّف، بلا بديل صامت).
+ */
+export function resolveOmsWebhookSecret(conn: {
+  mode?: string | null;
+  tokenEncrypted?: string | null;
+  webhookSecretEncrypted?: string | null;
+}): string | null {
+  if (conn.webhookSecretEncrypted) return decryptSecret(conn.webhookSecretEncrypted);
+  if (conn.mode === "manual") return null;
+  if (conn.tokenEncrypted && hasRealToken(conn.tokenEncrypted)) {
+    return decryptSecret(conn.tokenEncrypted);
+  }
+  return null;
+}
+
 type OmsConnRow = {
   id: string;
   workspaceId: string;

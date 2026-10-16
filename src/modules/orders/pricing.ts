@@ -30,20 +30,27 @@ export async function calculatePricing(
   }
 ): Promise<PriceBreakdown> {
   const unitPrice = Number(params.product.price);
-  const subtotal = unitPrice * params.quantity;
+  // قرش واحد: الحساب بكسور صحيحة (integer cents) لا فواصل عائمة —
+  // 0.1×3 = 0.30 بالضبط، والتقريب بيسير مرة وحدة آخر الخط. المبالغ
+  // الصحيحة (SYP وأمثالها) بقوا تطابق بت-ببت مع السلوك القديم.
+  const subtotalCents = Math.round(unitPrice * 100) * params.quantity;
+  const subtotal = subtotalCents / 100;
   const delivery = await quoteDelivery(db, {
     workspaceId: params.workspaceId,
     province: params.province,
     subtotal,
   });
-  const discount = params.discount ?? 0;
+  // الخصم يمرّ بسقف [0, subtotal] — بسالب/كامل ما بيفيد أي مسار محاسبي.
+  const discount = Math.min(Math.max(params.discount ?? 0, 0), subtotal);
+  const discountCents = Math.round(discount * 100);
+  const feeCents = Math.round(delivery.fee * 100);
   return {
     unitPrice,
     quantity: params.quantity,
     subtotal,
     discount,
     deliveryFee: delivery.fee,
-    total: subtotal - discount + delivery.fee,
+    total: (subtotalCents - discountCents + feeCents) / 100,
     currency: params.product.currency,
     deliveryAvailable: delivery.available,
     deliveryReason: delivery.reason,

@@ -757,7 +757,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_owner_queue",
     title_ar: "بانتظار المالك",
-    description_ar: "البنود الي بانتظار قرارك بالردود: مسودات Hermes · اعتماد حملات · خصومات · طلبات للنسخ للـ OMS — الأقدم أول.",
+    description_ar: "البنود الي بانتظار قرارك بالردود: مسودات الوكيل الذكي · اعتماد حملات · خصومات · طلبات للنسخ للـ OMS — الأقدم أول.",
     risk: "read",
     input_schema: S.obj({ limit: LIMIT_JSON }, []),
     output_schema: QUEUE_JSON,

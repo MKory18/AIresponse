@@ -29,6 +29,29 @@ export const ASSIGNABLE_ROLES = [
 
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
+/**
+ * رتبة OWNER فقط هي اللي بتدير صفوف OWNER: تعيين OWNER جديد، تعديل أو تعليق
+ * أو إزالة OWNER قائم. ADMIN عنده `users.manage` لكن ذيل التسلسل — الفحص
+ * هنا مغلق فشلًا (لا اعتماد على شكل الهجوم). ADMIN/SUPER_ADMIN ليستا بصف
+ * WorkspaceMember دايمًا؛ الصف ناقص = ما في OWNER فاعل = رفض.
+ */
+function assertOwnerRank(actorRole: string | null | undefined): void {
+  if (actorRole !== "OWNER") {
+    throw new AppError(
+      "Only a workspace OWNER can assign or manage owner roles",
+      403,
+      "OWNER_ROLE_REQUIRED"
+    );
+  }
+}
+
+async function getActorRole(db: Db, ctx: ActorContext): Promise<string | null> {
+  const row = (await db.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: ctx.workspaceId, userId: ctx.userId } },
+  })) as { role: string } | null;
+  return row?.role ?? null;
+}
+
 function assertAssignableRole(role: string): asserts role is AssignableRole {
   if (!(ASSIGNABLE_ROLES as readonly string[]).includes(role)) {
     throw new AppError("Role cannot be assigned through this API", 422, "INVALID_ROLE");
@@ -120,6 +143,9 @@ export async function inviteMember(
   }
   assertAssignableRole(input.role);
   if (input.permissions !== undefined) assertValidPermissions(input.permissions);
+  if (input.role === "OWNER") {
+    assertOwnerRank(await getActorRole(db, ctx));
+  }
 
   const user = (await db.user.findUnique({ where: { email } })) as { id: string } | null;
   if (!user) {
@@ -229,12 +255,19 @@ export async function updateMember(
   if (Object.keys(data).length === 0) {
     throw new AppError("Nothing to update", 422, "EMPTY_UPDATE");
   }
-  // Owner floor: demoting/suspending the last active owner is refused.
+  // Owner floor أولاً: انزع/علّق المالك الأخير النشيط مرفوض مهما كانت الرتبة —
+  // ثم حارس الرتبة: غير-OWNER ما يدير صف OWNERS طبقًا أبدًا. الترتيب يحفظ
+  // كود الرفض المثبت (OWNER_REQUIRED) لسيناريو المالك الأخير.
   const wasOwner = member.role === "OWNER" && member.status === "ACTIVE";
   const staysOwner =
     (data.role ?? member.role) === "OWNER" && (data.status ?? member.status) === "ACTIVE";
   if (wasOwner && !staysOwner) {
     await ensureOwnerRemaining(db, ctx.workspaceId, member.id);
+  }
+  // OWNER rows (the target, or a promotion TO owner) are owner-managed only.
+  const touchesOwner = member.role === "OWNER" || input.role === "OWNER";
+  if (touchesOwner) {
+    assertOwnerRank(await getActorRole(db, ctx));
   }
   const updated = await db.workspaceMember.update({ where: { id: member.id }, data });
   if (wasOwner && !staysOwner) {
@@ -268,8 +301,13 @@ export async function removeMember(db: Db, ctx: ActorContext, memberId: string) 
     throw new AppError("Members cannot remove their own membership", 403, "CANNOT_EDIT_SELF");
   }
   const wasOwner = member.role === "OWNER" && member.status === "ACTIVE";
+  // Floor first (pinned OWNER_REQUIRED for the last-active-owner case),
+  // then the rank guard — a non-owner never manages OWNER rows regardless.
   if (wasOwner) {
     await ensureOwnerRemaining(db, ctx.workspaceId, member.id);
+  }
+  if (member.role === "OWNER") {
+    assertOwnerRank(await getActorRole(db, ctx));
   }
   await db.workspaceMember.delete({ where: { id: member.id } });
   if (wasOwner) {

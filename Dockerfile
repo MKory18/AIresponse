@@ -7,7 +7,9 @@ FROM node:22-alpine AS deps
 RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci || npm install
+# OCR-2026-10-16: npm ci فقط — انحراف الاتزان (package-lock.json) يقف
+# صريحًا بدل بناء بصمت بمكتبات مختلفة عن الـ CI.
+RUN npm ci
 
 # ── build ───────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder

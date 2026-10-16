@@ -88,7 +88,8 @@ export async function getAgentAnalytics(db: Db, workspaceId: string, q: RangeQue
   const allConvIds = [...assignedConvsByAgent.values()].flat();
   const messages = allConvIds.length
     ? await db.message.findMany({
-        where: { workspaceId, conversationId: { in: allConvIds }, deletedAt: null },
+        // الملاحظات الداخلية ليست رد موظف — لا تُحسب وقت أحمال في FRT.
+        where: { workspaceId, conversationId: { in: allConvIds }, deletedAt: null, isNote: false },
         select: { conversationId: true, direction: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       })

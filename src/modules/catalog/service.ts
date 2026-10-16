@@ -1,5 +1,6 @@
 import type { Db } from "@/modules/customers/service";
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
+import { CUSTOMER_INBOUND } from "@/modules/media/service";
 
 /**
  * PAGE CATALOGS — WHICH PRODUCTS EACH PAGE MAY ANSWER WITH.
@@ -307,9 +308,10 @@ export async function buildPageProductContext(db: Db, workspaceId: string, chann
   products.sort((a, b) => (order.get(a.id as string) ?? 0) - (order.get(b.id as string) ?? 0));
   const media = (await db.mediaAsset.findMany({
     where: { workspaceId, productId: { in: ids }, type: "IMAGE" },
-    select: { id: true, url: true, productId: true },
+    select: { id: true, url: true, productId: true, category: true },
     take: 60,
-  })) as { id: string; url: string; productId: string | null }[];
+  })) as { id: string; url: string; productId: string | null; category: string }[];
+
   const imagesByProduct = new Map<string, string[]>();
   // Join-table links alongside the legacy FK — same cover-both rule as
   // the media library, so a linked photo is never missing here.
@@ -317,15 +319,20 @@ export async function buildPageProductContext(db: Db, workspaceId: string, chann
     where: { productId: { in: ids }, workspaceId },
     include: { mediaAsset: true },
     take: 200,
-  })) as { productId: string; mediaAsset: { id: string; url: string; type: string } | null }[];
+  })) as {
+    productId: string;
+    mediaAsset: { id: string; url: string; type: string; category: string } | null;
+  }[];
   for (const j of joins) {
     if (j.mediaAsset?.type !== "IMAGE") continue;
+    if (j.mediaAsset.category === CUSTOMER_INBOUND) continue;
     const arr = imagesByProduct.get(j.productId) ?? [];
     if (arr.length < 3 && !arr.includes(j.mediaAsset.url)) arr.push(j.mediaAsset.url);
     imagesByProduct.set(j.productId, arr);
   }
   for (const m of media) {
     if (!m.productId) continue;
+    if (m.category === CUSTOMER_INBOUND) continue;
     const arr = imagesByProduct.get(m.productId) ?? [];
     if (arr.length < 3) arr.push(m.url);
     imagesByProduct.set(m.productId, arr);

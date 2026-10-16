@@ -93,7 +93,10 @@ export async function handleChannelInbound(
     },
   });
   log.info({ workspaceId, processed, failed }, "channel_inbound_processed");
-  if (failed > 0 && processed === 0) {
+  // العقد (شرح الأعلى): الدفعة تفشل إذا فشلت أي رسالة. الرسائل الفاشلة
+  // ما بتنعاد من الويب هوك (DUPLICATE)، وعمل إعادة المهمة كاملة هو
+  // المرة الوحييدة إنقذهم: نجاح جزئي صامت = رسائل زبائن ضايعة.
+  if (failed > 0) {
     return { success: false, error: `${failed} channel messages failed` };
   }
   return { success: true };

@@ -25,7 +25,9 @@ export async function createSessionToken(payload: SessionPayload): Promise<strin
 
 export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, secretKey());
+    // OCR-2026-10-16: تثبيت الخوارزمية — لا قبول عائلات توقيع بديلة عند
+    // تلاعب برأس التوكن (alg confusion).
+    const { payload } = await jwtVerify(token, secretKey(), { algorithms: ["HS256"] });
     if (typeof payload.userId !== "string") return null;
     return {
       userId: payload.userId,

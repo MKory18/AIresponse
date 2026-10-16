@@ -1,8 +1,9 @@
 ﻿import type { Prisma, StockStatus } from "@prisma/client";
-import { ConflictError, NotFoundError } from "@/core/errors";
+import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
+import { CUSTOMER_INBOUND } from "@/modules/media/service";
 
 export interface ProductInput {
   name: string;
@@ -142,6 +143,11 @@ export async function attachProductMedia(
   await getOwnedProduct(db, ctx.workspaceId, productId);
   const asset = await db.mediaAsset.findUnique({ where: { id: mediaAssetId } });
   if (!asset || asset.workspaceId !== ctx.workspaceId) throw new NotFoundError("Media");
+  // وسيط الزبون الوارد مربوط برسالته بس — ما بيتلحق بمنتج ولا بيتصعد
+  // لِ ميديا المنتج/الكاتولج/سياق الذكاء (شرح media/service.ts).
+  if ((asset as { category?: string }).category === CUSTOMER_INBOUND) {
+    throw new AppError("Inbound customer media cannot be attached to products", 422, "INBOUND_MEDIA_NOT_ATTACHABLE");
+  }
 
   const existing = await db.productMedia.findUnique({
     where: { productId_mediaAssetId: { productId, mediaAssetId } },

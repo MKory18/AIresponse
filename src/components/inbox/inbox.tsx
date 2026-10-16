@@ -390,7 +390,14 @@ export default function Inbox() {
     setCoachLoading(true);
     setCoachError(false);
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/coach`, { method: "POST" });
+      // OCR-2026-10-16 #9: body فاضي كان باربع INVALID_BODY دايمًا — المسار
+      // لازم JSON (حتى {}) لأنه schema strict. بلا هالسطر الميزة كانت
+      // مطفية من الواجهة كليًا رغم اختبارات المسار الخضرا (بيز body).
+      const res = await fetch(`/api/conversations/${conversationId}/coach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
       if (!res.ok) throw new Error();
       const json = await res.json();
       setCoachData(json.data ?? null);

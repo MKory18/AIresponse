@@ -120,7 +120,9 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
 
   const messages = conversationIds.length
     ? await db.message.findMany({
-        where: { workspaceId, conversationId: { in: conversationIds }, deletedAt: null },
+        // OCR-2026-10-16: الملاحظات الداخلية ليست رسائل زبون — إلا هنا كانت
+        // تعدّ messages واردة وتضخّم FRT (الملاحظة تُعدّ "أول رد").
+        where: { workspaceId, conversationId: { in: conversationIds }, deletedAt: null, isNote: false },
         select: { conversationId: true, direction: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       })
@@ -422,7 +424,8 @@ export async function getSLA(db: DbClient, workspaceId: string, q: RangeQuery, s
   });
   const messages = conversations.length
     ? await db.message.findMany({
-        where: { workspaceId, conversationId: { in: conversations.map((c) => c.id) }, deletedAt: null },
+        // الملاحظات الداخلية خارج طيّات الـ SLA (لا زبون ولا رد فعلي).
+        where: { workspaceId, conversationId: { in: conversations.map((c) => c.id) }, deletedAt: null, isNote: false },
         select: { conversationId: true, direction: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       })
