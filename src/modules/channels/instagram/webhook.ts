@@ -1,4 +1,5 @@
 import { enqueueJob } from "@/modules/jobs/service";
+import { atomically } from "../webhook-tx";
 import { childLogger } from "@/core/logger";
 import { deriveInstagramEventId } from "./normalizer";
 import { InstagramChannelAdapter } from "./adapter";
@@ -65,25 +66,8 @@ async function ingestSingleAccount(db: Db, payload: unknown, igId: string): Prom
   const workspaceId = channel.workspaceId as string;
 
   const externalEventId = deriveInstagramEventId(payload);
-  let webhookEvent;
-  try {
-    webhookEvent = await (db as any).webhookEvent.create({
-      data: {
-        workspaceId,
-        channelType: "INSTAGRAM",
-        externalEventId,
-        source: "instagram",
-        payload: payload as object,
-      },
-    });
-  } catch (err) {
-    if ((err as { code?: string })?.code === "P2002") {
-      log.info({ event: "instagram.webhook.duplicate", igId });
-      return { status: "DUPLICATE" };
-    }
-    throw err;
-  }
 
+  // OCR-2026-10-16: التسوية النقية قبل فتح أي أثر.
   const adapter = getChannelAdapter("INSTAGRAM", {
     instagram: { igId, channelAccountId: (account as { id: string }).id, channelId: (channel as { id?: string }).id },
   });
@@ -91,23 +75,50 @@ async function ingestSingleAccount(db: Db, payload: unknown, igId: string): Prom
     throw new ChannelNotSupportedError("INSTAGRAM");
   }
   const normalized = adapter.receiveMessage(payload);
-  if (normalized.length > 0) {
-    await enqueueJob(db, {
-      workspaceId,
-      type: "process_channel_inbound",
-      payload: {
-        webhookEventId: webhookEvent.id,
+
+  // OCR-2026-10-16 (سباق): «إنشاء الحدث ← الطابور» بمعاملة واحدة عند توفرها.
+  let webhookEvent: { id: string } | undefined;
+  let duplicate = false;
+  await atomically(db, async (tx) => {
+    try {
+      webhookEvent = (await tx.webhookEvent.create({
+        data: {
+          workspaceId,
+          channelType: "INSTAGRAM",
+          externalEventId,
+          source: "instagram",
+          payload: payload as object,
+        },
+      })) as { id: string };
+    } catch (err) {
+      if ((err as { code?: string })?.code === "P2002") {
+        duplicate = true;
+        return;
+      }
+      throw err;
+    }
+    if (normalized.length > 0) {
+      await enqueueJob(tx, {
         workspaceId,
-        channelType: "INSTAGRAM",
-        channelId: (channel as { id?: string }).id,
-        messages: normalized,
-      },
-    });
-  } else {
-    await (db as any).webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: { processedAt: new Date() },
-    });
+        type: "process_channel_inbound",
+        payload: {
+          webhookEventId: webhookEvent.id,
+          workspaceId,
+          channelType: "INSTAGRAM",
+          channelId: (channel as { id?: string }).id,
+          messages: normalized,
+        },
+      });
+    } else {
+      await tx.webhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: { processedAt: new Date() },
+      });
+    }
+  });
+  if (duplicate) {
+    log.info({ event: "instagram.webhook.duplicate", igId });
+    return { status: "DUPLICATE" };
   }
   return { status: "OK", normalizedCount: normalized.length };
 }

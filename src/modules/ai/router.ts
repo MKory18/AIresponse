@@ -327,6 +327,8 @@ export function getWorkspaceProvider(
     responseModel?: string;
     nodeEnv?: string;
     allowMockAi?: string;
+    /** صريح فقط: مفتاح المنصة على عنوان مخصص من مساحة عمل (تسريب مفتاح). */
+    allowWorkspaceGatewayKeys?: string;
   }
 ): AIProvider {
   const injected = getInjectedMockProvider();
@@ -341,6 +343,7 @@ export function getWorkspaceProvider(
     responseModel: process.env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: process.env.ALLOW_MOCK_AI,
+    allowWorkspaceGatewayKeys: process.env.AI_WORKSPACE_GATEWAY_KEYS,
   };
   // Precedence (P6): an explicit workspace choice of a REAL provider
   // (openai/openrouter/internal/hermes) is effective and fail-closed on a
@@ -380,7 +383,19 @@ export function getWorkspaceProvider(
   // "internal" at construction (privacy-gate trusts the flag, not the name).
   const base = settings?.customBaseUrl?.trim();
   if (base && (choice === "openai" || choice === "openrouter" || choice === "internal")) {
-    const key = keyFor(choice) ?? "internal-endpoint";
+    // HIGH (OCR-2026-10-16): platform env keys must NEVER ride a
+    // workspace-owned URL — a public attacker host would exfiltrate the
+    // server-wide key. Explicit opt-in flag only; otherwise refuse when an
+    // env key would have been attached (fail-closed), keep the historic
+    // "internal-endpoint" behavior when no env key exists.
+    const envKey = keyFor(choice);
+    const optedIn = ["1", "true", "yes"].includes((e.allowWorkspaceGatewayKeys ?? "").toLowerCase());
+    if ((choice === "openai" || choice === "openrouter") && envKey && !optedIn) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: refusing platform ${choice.toUpperCase()} key on workspace customBaseUrl ("${base}") — key exfiltration risk. Use provider "internal"/"hermes", or set AI_WORKSPACE_GATEWAY_KEYS=1 to accept deliberately.`
+      );
+    }
+    const key = envKey ?? "internal-endpoint";
     return new OpenAICompatibleProvider({
       name: "internal",
       apiKey: key,

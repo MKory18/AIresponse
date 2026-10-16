@@ -1,5 +1,6 @@
 import { AppError, NotFoundError } from "@/core/errors";
 import { encryptSecret, randomId } from "@/core/crypto";
+import { storeChannelSecret } from "./secret-at-rest";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { getInstagramClient } from "./instagram/client";
@@ -132,7 +133,9 @@ export async function connectChannel(
         externalAccountId: String(me.id),
         token: botToken,
         accountName: me.username || null,
-        metadata: { tgWebhookSecret: secret },
+        // OCR-2026-10-16: سرّ الويب هوك مشفّر وسكونًا (قارئ متسامح للصفوف
+        // النصية القديمة) — لا نص صريح بالـ metadata بعد اليوم.
+        metadata: { tgWebhookSecretEnc: storeChannelSecret(secret) },
       });
       // Best-effort auto-registration when the app URL is public HTTPS;
       // otherwise the operator sets it (URL + secret returned, documented).

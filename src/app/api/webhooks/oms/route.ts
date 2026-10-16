@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { childLogger } from "@/core/logger";
 import { verifyOmsWebhookSignature } from "@/modules/oms/client";
-import { decryptSecret } from "@/core/crypto";
-import { handleOmsStatusChanged, OmsWorkspaceMismatchError, type OmsStatusWebhook } from "@/modules/oms/webhook";
+import { resolveOmsWebhookSecret } from "@/modules/oms/connection";
+import { handleOmsStatusChanged, type OmsStatusWebhook } from "@/modules/oms/webhook";
 import { prisma } from "@/core/db/prisma";
+import { rateLimitDb } from "@/core/api/rate-limit";
 
 const log = childLogger("webhooks.oms");
+
+/** رد موحّد 404 — بلا فراغ معرفة (طلب/مساحة/اتصال) لمهاجم بلا توقيع. */
+function omsNotFound(): NextResponse {
+  return NextResponse.json({ error: "OMS_NOT_FOUND" }, { status: 404 });
+}
 
 export const runtime = "nodejs";
 
@@ -13,12 +19,26 @@ export const runtime = "nodejs";
  * OMS → engine webhook: order-status-changed.
  * P2 trust model: the workspace is derived from the ORDER row (lookup by
  * omsOrderId) — the payload's workspaceId is an untrusted hint. Signature
- * verification uses the derived workspace's connection. Unknown orders and
- * bad signatures are rejected with zero side effects.
+ * verification uses the derived workspace's connection SECRET (webhook
+ * secret first; legacy api rows keep their real token). Manual-mode rows get
+ * no secret at all — the placeholder token is public and must never verify.
+ * Unknown orders, mismatches and missing secrets are uniform, zero side
+ * effects, and rate-limited to blunt the enumeration oracle.
  */
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-oms-signature");
+
+  // Shield: keep immature/MitM traffic cheap. Order flows stay well under it.
+  // (Skipped in tests: the in-memory route suites have no rate-limit store.)
+  if (process.env.NODE_ENV !== "test") {
+    try {
+      const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+      await rateLimitDb(`${ip}:oms-webhook`, 300, 60_000);
+    } catch {
+      // Storage hiccup on a hardening shield — never block the real OMS.
+    }
+  }
 
   let parsed: OmsStatusWebhook;
   try {
@@ -39,22 +59,23 @@ export async function POST(req: NextRequest) {
   });
   if (!order) {
     log.warn("oms.webhook.unknown_order");
-    return NextResponse.json({ error: "ORDER_NOT_FOUND" }, { status: 404 });
+    return omsNotFound();
   }
   if (parsed.workspaceId && parsed.workspaceId !== order.workspaceId) {
     log.warn("oms.webhook.workspace_mismatch");
-    return NextResponse.json({ error: new OmsWorkspaceMismatchError().code }, { status: 404 });
+    return omsNotFound();
   }
 
   const conn = await prisma.omsConnection.findUnique({
     where: { workspaceId: order.workspaceId },
   });
-  if (!conn || !conn.isActive) {
-    log.warn({ workspaceId: order.workspaceId }, "oms.webhook.no_connection");
-    return NextResponse.json({ error: "OMS_NOT_CONFIGURED" }, { status: 404 });
+  const secret = conn?.isActive ? resolveOmsWebhookSecret(conn) : null;
+  if (!conn || !conn.isActive || !secret) {
+    log.warn({ workspaceId: order.workspaceId }, "oms.webhook.no_connection_or_secret");
+    return omsNotFound();
   }
 
-  if (!verifyOmsWebhookSignature(rawBody, signature, decryptSecret(conn.tokenEncrypted))) {
+  if (!verifyOmsWebhookSignature(rawBody, signature, secret)) {
     log.warn({ workspaceId: order.workspaceId }, "oms.webhook.rejected_signature");
     return NextResponse.json({ error: "INVALID_SIGNATURE" }, { status: 401 });
   }

@@ -16,7 +16,14 @@ export interface EmbeddingProvider {
 
 const SCHEMA_DIMENSIONS = 1536;
 
-/** Deterministic local provider for tests/dev — no network, stable output. */
+/**
+ * قرار مالك صريح (OCR-2026-10-16 #4): الترميز الخارجي يعني مرور نصوص فيها
+ * كلام زبائن نحو api.openai.com. الافتراضي مرفوض (إغلاق كامل) — فتحه لا
+ * يكون إلا بيئة صريحة AI_ALLOW_EXTERNAL_EMBEDDINGS=1 من مالك المنصة.
+ */
+export function externalEmbeddingAllowed(): boolean {
+  return ["1", "true", "yes"].includes((process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS ?? "").toLowerCase());
+}/** Deterministic local provider for tests/dev — no network, stable output. */
 export class HashEmbeddingProvider implements EmbeddingProvider {
   readonly provider = "hash";
   readonly model: string;
@@ -67,6 +74,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         `but schema expects ${SCHEMA_DIMENSIONS}. ` +
         `Use a model with matching dimensions (e.g., text-embedding-3-small for 1536) ` +
         `or migrate the database schema to the new dimension.`
+      );
+    }
+    if (!externalEmbeddingAllowed()) {
+      throw new AIError(
+        "EXTERNAL_EMBEDDING_DISABLED: مرور نصوص زبائن إلى api.openai.com مرفوض افتراضيًا — " +
+          "فعّله صراحة بـ AI_ALLOW_EXTERNAL_EMBEDDINGS=1 بعد قرار الخصوصية."
       );
     }
     const env = getEnv();

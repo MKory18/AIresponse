@@ -34,10 +34,14 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # OCR-2026-10-16: بلا كلمة مرور افتراضية عامة — POSTGRES_PASSWORD
+      # إجباري من بيئة الإنتاج (فشل صريح بدل postgres/postgres المكشوف).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the deployment environment}
       POSTGRES_DB: ai_commerce
     ports:
-      - "5432:5432"
+      # OCR-2026-10-16: المحرك محلي فقط — الخدمة بين الحاويات على الشبكة
+      # الداخلية (Coolify أو أي راوتر عكسي) ما تحتاج فتح المنفذ عامًا.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./prisma/init:/docker-entrypoint-initdb.d:ro

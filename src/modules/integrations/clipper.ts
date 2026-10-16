@@ -498,7 +498,12 @@ export async function retargetCounts(db: Db, campaignId: string) {
 
   const sentAt = new Map(sent.map((r) => [r.customerId, new Date(r.sentAt as string | Date).getTime()]));
   const ids = [...sentAt.keys()];
-  const minSince = new Date(Math.min(...sentAt.values()));
+  // OCR-2026-10-16: Math.min(...values) انفجر المكدس بما فوق آلاف المستلمين —
+  // حلقة تدقيق بسيطة بدل الانتشار (دفعات الحملات الكبيرة).
+  let minTs = Number.POSITIVE_INFINITY;
+  for (const v of sentAt.values()) if (v < minTs) minTs = v;
+  if (!Number.isFinite(minTs)) minTs = Date.now();
+  const minSince = new Date(minTs);
 
   const messageIds = sent.map((r) => r.messageId).filter((v): v is string => Boolean(v));
   const [msgs, convs, orders, customers] = await Promise.all([

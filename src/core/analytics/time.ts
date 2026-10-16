@@ -6,6 +6,8 @@
  * "day" means the workspace's business day — not the browser's or UTC's.
  */
 
+import { AppError } from "@/core/errors";
+
 export type PresetRange = "today" | "yesterday" | "last_7_days" | "last_30_days" | "custom";
 
 export interface ResolvedRange {
@@ -18,7 +20,8 @@ export function timezoneOffsetMinutes(timezone: string, instant: Date): number {
   try {
     const dtf = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
-      hour12: false,
+      // ملزمة المشروع: h23 (منتصف الليل «00» لا «24») — ثابتة عبر الإصدارات.
+      hourCycle: "h23",
       year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
@@ -63,11 +66,20 @@ export function resolveRange(q: RangeQuery): ResolvedRange & { timezone: string 
   const range = q.range ?? "last_7_days";
 
   if (range === "custom") {
-    if (!q.from || !q.to) throw new Error("custom range requires from and to");
+    if (!q.from || !q.to) {
+      throw new AppError("Custom range requires from and to", 422, "INVALID_RANGE");
+    }
     const start = new Date(q.from);
     const end = new Date(q.to);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) throw new Error("invalid dates");
-    if (end.getTime() - start.getTime() > 92 * 24 * 3600_000) throw new Error("range too large (max 92 days)");
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new AppError("Invalid custom range dates", 422, "INVALID_RANGE");
+    }
+    if (end.getTime() < start.getTime()) {
+      throw new AppError("Custom range: 'to' precedes 'from'", 422, "INVALID_RANGE");
+    }
+    if (end.getTime() - start.getTime() > 92 * 24 * 3600_000) {
+      throw new AppError("Custom range too large (max 92 days)", 422, "INVALID_RANGE");
+    }
     return { start, end, timezone };
   }
 

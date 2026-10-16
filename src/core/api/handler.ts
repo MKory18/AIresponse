@@ -115,6 +115,13 @@ export function createHandler<TBody = unknown, TQuery = unknown>(
 }
 
 export function handleError(err: unknown, req: NextRequest, ms: number): NextResponse {
+  const safePath = (() => {
+    try {
+      return new URL(req.url).pathname;
+    } catch {
+      return "(unparseable)";
+    }
+  })();
   if (err instanceof ApiError) return err.response;
   if (err instanceof ZodError) {
     return NextResponse.json(
@@ -124,16 +131,18 @@ export function handleError(err: unknown, req: NextRequest, ms: number): NextRes
   }
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
-      log.error({ err, path: req.url, ms }, "api_error");
+      log.error({ err, path: safePath, ms }, "api_error");
     } else {
-      log.warn({ code: err.code, msg: err.message, path: req.url, ms }, "api_rejected");
+      log.warn({ code: err.code, msg: err.message, path: safePath, ms }, "api_rejected");
     }
     return NextResponse.json(
       { error: err.code, message: err.message, details: err.details ?? undefined },
       { status: err.statusCode }
     );
   }
-  log.error({ err, path: req.url, ms }, "api_unhandled_error");
+  // OCR-2026-10-16: pathname فقط — req.url الكامل كان يحمل بحث الهاتف/الاسم
+  // (خصوصية: ولا بيانات زبون في السجلات) إلى سجلات الأخطاء.
+  log.error({ err, path: safePath, ms }, "api_unhandled_error");
   return NextResponse.json({ error: "INTERNAL_ERROR" }, { status: 500 });
 }
 

@@ -369,6 +369,10 @@ export async function processPendingJobs(
 
     const handler = handlers[job.type];
     let result: JobResult;
+    // HIGH (OCR-2026-10-16 #5): معلّق واحد متجمد كان يجمد حلقة العامل
+    // كلها للأبد (شبكة بلا مهلة/استعلام معلّق). المهلة تفشل المهمة وتفصل
+    // مسار الإعادة المعتاد — العملية نفسها تبقى على قيد العمر (لا kill).
+    const jobTimeoutMs = Math.max(10, Number(process.env.JOB_TIMEOUT_MS ?? 120_000) || 120_000);
     try {
       if (!handler) {
         result = { success: false, error: `No handler registered for job type ${job.type}` };
@@ -379,7 +383,16 @@ export async function processPendingJobs(
         // pre-claimed pending snapshot (runJobs' jobWorkspaces map), which
         // used to resolve to "" and make workspace-scoped handlers silently
         // no-op (SKIPPED → DONE → sweeper re-enqueues → hot loop).
-        result = await handler(job.payload as Record<string, unknown>, job.id, job.workspaceId);
+        result = await Promise.race([
+          handler(job.payload as Record<string, unknown>, job.id, job.workspaceId),
+          new Promise<never>((_, reject) => {
+            const t = setTimeout(
+              () => reject(new Error(`JOB_TIMEOUT: ${job.type} exceeded ${jobTimeoutMs}ms`)),
+              jobTimeoutMs
+            );
+            (t as { unref?: () => void }).unref?.();
+          }),
+        ]);
       }
     } catch (err) {
       result = { success: false, error: err instanceof Error ? err.message : String(err) };

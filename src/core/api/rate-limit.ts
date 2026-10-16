@@ -44,6 +44,34 @@ function limitExceeded(): never {
   throw new AppError("Too many requests", 429, "RATE_LIMITED");
 }
 
+// OCR-2026-10-16: الصفوف القديمة كانت تعاي ما تُمسح — جدول بلا نهاية.
+// كنس ساعي fire-and-forget بحد أقصى واحد لكل مرة (safe على قاعدة معطلة).
+const SWEEP_EVERY_MS = 3_600_000;
+let lastSweep = 0;
+function maybeSweepExpiredEntries(): void {
+  const now = Date.now();
+  if (now - lastSweep < SWEEP_EVERY_MS) return;
+  lastSweep = now;
+  // اختبارات/قواعد مزيفة بلا جدول الحدود — ما في كنس (حماية الاختبار الأصلية).
+  const store = (
+    prisma as unknown as {
+      rateLimitEntry?: {
+        deleteMany(args: { where: { resetAt: { lt: Date } } }): Promise<unknown>;
+      };
+    }
+  ).rateLimitEntry;
+  if (store) {
+    store
+      .deleteMany({ where: { resetAt: { lt: new Date(now - 60_000) } } })
+      .catch(() => {
+        /* كنس نظافة — لا يعطل ولا يوقع أعطال تخزين */
+      });
+  }
+  for (const [k, b] of memoryBuckets) {
+    if (b.resetAt < now) memoryBuckets.delete(k);
+  }
+}
+
 export async function rateLimitDb(
   key: string,
   limit: number,
@@ -52,6 +80,7 @@ export async function rateLimitDb(
 ): Promise<void> {
   const policy = opts.onStorageFailure ?? "memory-fallback";
   const db: RateLimitDb = opts.db ?? prisma;
+  maybeSweepExpiredEntries();
   try {
     const resetAt = new Date(Date.now() + windowMs);
     const rows = await db.$queryRaw<Array<{ count: number | bigint | string }>>`

@@ -2,6 +2,7 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { runJobs } from "@/modules/jobs/handlers";
 import { registerAutomationBridge } from "@/modules/automation/engine";
+import { timingSafeEqual } from "@/core/crypto";
 
 /**
  * Worker endpoint: processes pending background jobs. In production this is
@@ -18,7 +19,8 @@ export const POST = createHandler(
     const secret = process.env.JOBS_SECRET;
     if (secret) {
       const provided = req.headers.get("x-jobs-secret");
-      if (provided !== secret) {
+      // timing-safe: مقارنة السلاسل مباشرة كانت تفتح قياس زمن التسريب.
+      if (!provided || !timingSafeEqual(secret, provided)) {
         return new Response(JSON.stringify({ error: "AUTHORIZATION_ERROR" }), { status: 403 });
       }
     } else if (process.env.NODE_ENV === "production") {

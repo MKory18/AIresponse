@@ -26,6 +26,9 @@ export const POST = createHandler(
         return ok(handoff);
       }
       case "resolve": {
+        // OCR-2026-10-16: الإغلاق النهائي للتحويل قرار أعلى من الاستلام —
+        // صلاحية مستقلة (متاحة لSALES_AGENT فما فوق حسب الأدوار).
+        auth!.require("handoffs.resolve");
         const handoff = await resolveHandoff(prisma, ctx, id);
         return ok(handoff);
       }

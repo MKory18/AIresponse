@@ -4,7 +4,12 @@ import { AuthenticationError } from "@/core/errors";
 import { prisma } from "@/core/db/prisma";
 import { loginSchema } from "@/modules/auth/schemas";
 import { verifyPassword } from "@/modules/auth/password";
+import { hashPassword } from "@/modules/auth/password";
 import { setSessionCookie } from "@/modules/auth/session";
+
+// OCR-2026-10-16: مقارنة وهمية ثابتة كي يبقى زمن "بريد غير موجود" مطابقًا
+// لزمن "كلمة مرور خاطئة" — بلاها التوقيت كان يعدّ بريدات المنصة الواحدة.
+const DUMMY_HASH = hashPassword("timing-shield-unused");
 
 export const POST = createHandler(
   { body: loginSchema, public: true, rateLimit: { limit: 10, windowMs: 60_000 }, rateLimitStrict: true },
@@ -19,7 +24,10 @@ export const POST = createHandler(
         },
       },
     });
-    if (!user) throw new AuthenticationError("Invalid email or password");
+    if (!user) {
+      await verifyPassword(body.password, await DUMMY_HASH);
+      throw new AuthenticationError("Invalid email or password");
+    }
 
     const valid = await verifyPassword(body.password, user.passwordHash);
     if (!valid) throw new AuthenticationError("Invalid email or password");
