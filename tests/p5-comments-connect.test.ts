@@ -180,7 +180,11 @@ describe("P5 connect/disconnect/list", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].encryptedCredentials).not.toContain("123:ABC");
     expect(JSON.stringify(res)).not.toContain("123:ABC");
-    expect((rows[0].metadata as { tgWebhookSecret?: string }).tgWebhookSecret).toBeTruthy();
+    // OCR-2026-10-16: السّر مشفّر وسكونًا — لا قيمة نصية صريحة بالـ metadata.
+    const meta = rows[0].metadata as { tgWebhookSecretEnc?: string; tgWebhookSecret?: string };
+    expect(meta.tgWebhookSecretEnc).toBeTruthy();
+    expect(meta.tgWebhookSecret).toBeUndefined();
+    expect(String(meta.tgWebhookSecretEnc)).not.toBe("x"); // ليس نصًا صريحًا: قيمة مشفّرة
   });
 
   it("rejects bad tokens without storing anything", async () => {

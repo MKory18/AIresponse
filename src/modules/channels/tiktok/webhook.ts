@@ -1,4 +1,6 @@
 import { enqueueJob } from "@/modules/jobs/service";
+import { atomically } from "../webhook-tx";
+import { readChannelSecret } from "../secret-at-rest";
 import { childLogger } from "@/core/logger";
 import { deriveTikTokEventId, normalizeTikTokEvent, verifyTikTokWebhook, type AssumedTikTokEvent } from "./normalizer";
 import { TikTokChannelAdapter } from "./adapter";
@@ -42,32 +44,17 @@ export async function ingestTikTokWebhook(
   if (!account || !channel?.workspaceId || channel?.status !== "CONNECTED") {
     return { status: "UNKNOWN_ACCOUNT" };
   }
-  const meta = ((account as { metadata?: Record<string, unknown> }).metadata ?? {}) as { ttWebhookSecret?: string };
-  if (!verifyTikTokWebhook(secretHeader, meta.ttWebhookSecret)) {
+  const meta = ((account as { metadata?: Record<string, unknown> }).metadata ?? {}) as Record<string, unknown>;
+  // OCR-2026-10-16: السّر مشفّر وسكونًا (_Enc) مع قراءة متسامحة للصفوف القديمة.
+  if (!verifyTikTokWebhook(secretHeader, readChannelSecret(meta, "ttWebhookSecretEnc", "ttWebhookSecret"))) {
     log.warn("tiktok.webhook.rejected");
     return { status: "INVALID_SECRET" };
   }
   const workspaceId = channel.workspaceId as string;
 
   const externalEventId = deriveTikTokEventId(event);
-  let webhookEvent;
-  try {
-    webhookEvent = await (db as any).webhookEvent.create({
-      data: {
-        workspaceId,
-        channelType: "TIKTOK",
-        externalEventId,
-        source: "tiktok",
-        payload: payload as object,
-      },
-    });
-  } catch (err) {
-    if ((err as { code?: string })?.code === "P2002") {
-      return { status: "DUPLICATE" };
-    }
-    throw err;
-  }
 
+  // OCR-2026-10-16: التسوية النقية قبل فتح أي أثر.
   const adapter = getChannelAdapter("TIKTOK", {
     tiktok: { channelAccountId: (account as { id: string }).id, channelId: (channel as { id?: string }).id },
   });
@@ -75,23 +62,49 @@ export async function ingestTikTokWebhook(
     throw new ChannelNotSupportedError("TIKTOK");
   }
   const normalized = adapter.receiveMessage(payload);
-  if (normalized.length > 0) {
-    await enqueueJob(db, {
-      workspaceId,
-      type: "process_channel_inbound",
-      payload: {
-        webhookEventId: webhookEvent.id,
+
+  // OCR-2026-10-16 (سباق): «إنشاء الحدث ← الطابور» بمعاملة واحدة عند توفرها.
+  let webhookEvent: { id: string } | undefined;
+  let duplicate = false;
+  await atomically(db, async (tx) => {
+    try {
+      webhookEvent = (await tx.webhookEvent.create({
+        data: {
+          workspaceId,
+          channelType: "TIKTOK",
+          externalEventId,
+          source: "tiktok",
+          payload: payload as object,
+        },
+      })) as { id: string };
+    } catch (err) {
+      if ((err as { code?: string })?.code === "P2002") {
+        duplicate = true;
+        return;
+      }
+      throw err;
+    }
+    if (normalized.length > 0) {
+      await enqueueJob(tx, {
         workspaceId,
-        channelType: "TIKTOK",
-        channelId: (channel as { id?: string }).id,
-        messages: normalized,
-      },
-    });
-  } else {
-    await (db as any).webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: { processedAt: new Date() },
-    });
+        type: "process_channel_inbound",
+        payload: {
+          webhookEventId: webhookEvent.id,
+          workspaceId,
+          channelType: "TIKTOK",
+          channelId: (channel as { id?: string }).id,
+          messages: normalized,
+        },
+      });
+    } else {
+      await tx.webhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: { processedAt: new Date() },
+      });
+    }
+  });
+  if (duplicate) {
+    return { status: "DUPLICATE" };
   }
   // Non-text payloads normalize to zero messages (acknowledged, stored).
   return { status: "OK", normalizedCount: normalized.length };

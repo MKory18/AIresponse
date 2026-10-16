@@ -1,4 +1,5 @@
 import { enqueueJob } from "@/modules/jobs/service";
+import { atomically } from "../webhook-tx";
 import { childLogger } from "@/core/logger";
 import { deriveWhatsAppEventId } from "./normalizer";
 import { WhatsAppChannelAdapter } from "./adapter";
@@ -66,58 +67,70 @@ async function ingestSingleNumber(db: Db, payload: unknown, phoneNumberId: strin
   const workspaceId = channel.workspaceId as string;
 
   const externalEventId = deriveWhatsAppEventId(payload);
-  let webhookEvent;
-  try {
-    webhookEvent = await (db as any).webhookEvent.create({
-      data: {
-        workspaceId,
-        channelType: "WHATSAPP",
-        externalEventId,
-        source: "whatsapp",
-        payload: payload as object,
-      },
-    });
-  } catch (err) {
-    if ((err as { code?: string })?.code === "P2002") {
-      return { status: "DUPLICATE" };
-    }
-    throw err;
-  }
 
+  // OCR-2026-10-16: التسوية النقية قبل فتح أي أثر — الانهيار قبل هنا =
+  // إعادة تسليم نظيفة من واتساب بلا صف يتيم.
   const adapter = getChannelAdapter("WHATSAPP", {
     whatsapp: { phoneNumberId, channelAccountId: (account as { id: string }).id, channelId: (channel as { id?: string }).id },
   });
   if (!(adapter instanceof WhatsAppChannelAdapter)) {
     throw new ChannelNotSupportedError("WHATSAPP");
   }
+  const normalized = adapter.receiveMessage(payload).filter((m) =>
+    (m.metadata as { phoneNumberId?: string } | undefined)?.phoneNumberId === phoneNumberId
+  );
+
+  // OCR-2026-10-16 (سباق): «إنشاء الحدث ← الطابور» داخل معاملة واحدة عند
+  // توفرها؛ قاعدة الذاكر تسير بالتسلسل نفسه المثبت بالاختبارات.
+  let webhookEvent: { id: string } | undefined;
+  let duplicate = false;
+  await atomically(db, async (tx) => {
+    try {
+      webhookEvent = (await tx.webhookEvent.create({
+        data: {
+          workspaceId,
+          channelType: "WHATSAPP",
+          externalEventId,
+          source: "whatsapp",
+          payload: payload as object,
+        },
+      })) as { id: string };
+    } catch (err) {
+      if ((err as { code?: string })?.code === "P2002") {
+        duplicate = true;
+        return;
+      }
+      throw err;
+    }
+    if (normalized.length > 0) {
+      await enqueueJob(tx, {
+        workspaceId,
+        type: "process_channel_inbound",
+        payload: {
+          webhookEventId: webhookEvent.id,
+          workspaceId,
+          channelType: "WHATSAPP",
+          channelId: (channel as { id?: string }).id,
+          messages: normalized,
+        },
+      });
+    } else {
+      await tx.webhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: { processedAt: new Date() },
+      });
+    }
+  });
+  if (duplicate) {
+    return { status: "DUPLICATE" };
+  }
+
   // P12: إشارات التسليم (واصل · مقروء · فشل) لرسائلنا الصادرة — أرقام
-  // نتائج الحملات والكليبر منها. خفيفة: تحديث برقم الرسالة بس، بالطلب نفسه.
+  // نتائج الحملات والكليبر منها. مستقلة بمعرّفات رسائلنا، بعد المعاملة لا ضرر.
   const signals = extractWhatsAppStatuses(payload, phoneNumberId);
   if (signals.length > 0) {
     const n = await applyWhatsAppStatuses(db, workspaceId, signals);
     log.info({ phoneNumberId, signals: signals.length, updated: n }, "whatsapp_statuses_applied");
-  }
-
-  const normalized = adapter.receiveMessage(payload).filter((m) =>
-    (m.metadata as { phoneNumberId?: string } | undefined)?.phoneNumberId === phoneNumberId
-  );
-  if (normalized.length > 0) {
-    await enqueueJob(db, {
-      workspaceId,
-      type: "process_channel_inbound",
-      payload: {
-        webhookEventId: webhookEvent.id,
-        workspaceId,
-        channelType: "WHATSAPP",
-        channelId: (channel as { id?: string }).id,
-        messages: normalized,
-      },
-    });
-  } else {
-    await (db as any).webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: { processedAt: new Date() },
-    });
   }
   return { status: "OK", normalizedCount: normalized.length };
 }

@@ -135,6 +135,9 @@ const FINAL_CODES = new Set([
   "ORDER_NOT_CONFIRMED",
   "OMS_MANUAL_MODE",
   "OMS_NOT_CONFIGURED",
+  // OCR-2026-10-16: رابط مرفوض (أمان/صيغة) ما بينصلح بإعادة — قرار مالك
+  // بتعديل الإعداد، والدوران على المهمة كان ترسًا زائدًا بلا فايدة.
+  "OMS_URL_REJECTED",
   "NOT_FOUND",
 ]);
 

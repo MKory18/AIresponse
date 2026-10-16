@@ -1,4 +1,5 @@
 import { enqueueJob } from "@/modules/jobs/service";
+import { atomically } from "../webhook-tx";
 import { childLogger } from "@/core/logger";
 import { deriveEventId, extractFacebookReferralSignals, type MetaWebhookPayload } from "./normalizer";
 import { normalizeFeedComments } from "./comments";
@@ -68,33 +69,9 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
   const workspaceId = account.channel.workspaceId;
 
   const externalEventId = deriveEventId(payload);
-  let webhookEvent;
-  try {
-    webhookEvent = await db.webhookEvent.create({
-      data: {
-        workspaceId,
-        channelType: "FACEBOOK",
-        externalEventId,
-        source: "meta",
-        payload: payload as object,
-      },
-    });
-  } catch (err) {
-    // Only unique violations are duplicates; real DB errors must surface
-    // so the job retries instead of silently dropping the webhook.
-    const code = (err as { code?: string })?.code;
-    if (code === "P2002") {
-      log.info({ event: "facebook.webhook.duplicate", pageId });
-      return { status: "DUPLICATE" };
-    }
-    throw err;
-  }
 
-  await db.channelAccount.update({
-    where: { id: account.id },
-    data: { lastWebhookAt: new Date() },
-  });
-
+  // OCR-2026-10-16: التسوية قبل فتح أي أثر — التسوية نقية (بلا آثار)،
+  // والانهيار قبل هنا = إعادة تسليم نظيفة من ميتا بلا صف يتيم.
   // P1.1: normalization resolves through the channel registry — the real
   // Facebook adapter. receiveNative delegates to normalizeFacebookWebhook
   // (same function, same args, same output); only the resolution path is
@@ -108,9 +85,67 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
   }
   const normalized = adapter.receiveNative(payload, externalEventId);
 
+  // P12: إحالات بلا رسالة (زبون قديم كبس إعلانًا/رابط رمز) — لمسة إسناد فقط.
+  const referralSignals = extractFacebookReferralSignals(payload as MetaWebhookPayload, pageId, externalEventId);
+
+  // OCR-2026-10-16 (سباق): «إنشاء الحدث ← الطابور» داخل معاملة واحدة عند
+  // توفرها؛ قاعدة الذاكر (بلا معاملة) تسير بالتسلسل نفسه.
+  let webhookEvent: { id: string } | undefined;
+  let duplicate = false;
+  await atomically(db, async (tx) => {
+    try {
+      webhookEvent = (await tx.webhookEvent.create({
+        data: {
+          workspaceId,
+          channelType: "FACEBOOK",
+          externalEventId,
+          source: "meta",
+          payload: payload as object,
+        },
+      })) as { id: string };
+    } catch (err) {
+      // Only unique violations are duplicates; real DB errors must surface
+      // so the job retries instead of silently dropping the webhook.
+      if ((err as { code?: string })?.code === "P2002") {
+        duplicate = true;
+        return;
+      }
+      throw err;
+    }
+    if (normalized.length > 0 || referralSignals.length > 0) {
+      await enqueueJob(tx, {
+        workspaceId,
+        type: "process_webhook_event",
+        payload: {
+          webhookEventId: webhookEvent.id,
+          workspaceId,
+          channelAccountId: account.id,
+          messages: normalized,
+          ...(referralSignals.length > 0 ? { referralSignals } : {}),
+        },
+      });
+    } else {
+      await tx.webhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: { processedAt: new Date() },
+      });
+    }
+  });
+  if (duplicate) {
+    log.info({ event: "facebook.webhook.duplicate", pageId });
+    return { status: "DUPLICATE" };
+  }
+
+  await db.channelAccount.update({
+    where: { id: account.id },
+    data: { lastWebhookAt: new Date() },
+  });
+
   // P5-A: feed comments ride the same POST. They are persisted (deduplicated
   // by comment id) for operator moderation — never auto-processed, never
   // auto-replied, never merged into conversations (no trustworthy join key).
+  // مستقلة بمفتاح عدم تكرار خاص: أما بعد المعاملة فلا ضرر — إعادة التسليم
+  // تعيدها كاملة.
   let commentCount = 0;
   for (const comment of normalizeFeedComments(payload)) {
     try {
@@ -130,28 +165,6 @@ async function ingestSinglePage(db: Db, payload: unknown, pageId: string): Promi
   }
   if (commentCount > 0) {
     log.info({ pageId, commentCount }, "facebook.comments.persisted");
-  }
-
-  // P12: إحالات بلا رسالة (زبون قديم كبس إعلانًا/رابط رمز) — لمسة إسناد فقط.
-  const referralSignals = extractFacebookReferralSignals(payload as MetaWebhookPayload, pageId, externalEventId);
-
-  if (normalized.length > 0 || referralSignals.length > 0) {
-    await enqueueJob(db, {
-      workspaceId,
-      type: "process_webhook_event",
-      payload: {
-        webhookEventId: webhookEvent.id,
-        workspaceId,
-        channelAccountId: account.id,
-        messages: normalized,
-        ...(referralSignals.length > 0 ? { referralSignals } : {}),
-      },
-    });
-  } else {
-    await db.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: { processedAt: new Date() },
-    });
   }
 
   return { status: "OK", normalizedCount: normalized.length };

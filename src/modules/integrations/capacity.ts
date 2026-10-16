@@ -70,7 +70,12 @@ export async function capacityCore(
     else waiting.push(c);
   }
   if (looksAnswered.length > 0) {
-    const minCust = new Date(Math.min(...looksAnswered.map((c) => c.cust)));
+    // OCR-2026-10-16: Math.min(...values) انفجر المكدس بما فوق آلاف المحادثات —
+    // حلقة تدقيق بسيطة بدل الانتشار.
+    let minTs = Number.POSITIVE_INFINITY;
+    for (const c of looksAnswered) if (c.cust < minTs) minTs = c.cust;
+    if (!Number.isFinite(minTs)) minTs = Date.now();
+    const minCust = new Date(minTs);
     const replies = (await db.message.findMany({
       where: {
         workspaceId,

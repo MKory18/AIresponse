@@ -1,6 +1,7 @@
 import { checkSystemUrl } from "@/modules/integrations/connections";
 import { AppError } from "@/core/errors";
 import { decryptSecret } from "@/core/crypto";
+import { runPool } from "@/modules/util/pool";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import type { OmsProduct, OmsCustomer } from "./client";
@@ -192,18 +193,22 @@ export interface CustomerSyncResult {
 export async function syncCustomersFromOms(db: Db, ctx: ActorContext, phones: string[]): Promise<CustomerSyncResult> {
   const client = await buildOmsClient(db, ctx.workspaceId);
   const result: CustomerSyncResult = { updated: 0, skipped: 0 };
-  for (const phone of phones) {
+  // OCR-2026-10-16 (أداء): 500 نداء متسلسل كانوا دقائق — تجميع محدود
+  // التوازي (8) بنفس الدلالة: فشل النداء يقفل المزامنة كلها (سلوك مثبت).
+  let firstError: unknown = null;
+  await runPool(phones, 8, async (phone) => {
+    if (firstError !== null) return; // أعطال سابقة: ما عاد نداءات جديدة
     const omsCustomer: OmsCustomer | null = await client.getCustomer(phone);
     if (!omsCustomer) {
       result.skipped += 1;
-      continue;
+      return;
     }
     const existing = await db.customer.findUnique({
       where: { workspaceId_phone: { workspaceId: ctx.workspaceId, phone } },
     });
     if (!existing) {
       result.skipped += 1;
-      continue;
+      return;
     }
     const row = existing as { isBlacklisted?: boolean; blacklistSource?: string | null };
     if (omsCustomer.isBlacklisted) {
@@ -222,7 +227,10 @@ export async function syncCustomersFromOms(db: Db, ctx: ActorContext, phones: st
     } else {
       result.skipped += 1;
     }
-  }
+  }).catch((err) => {
+    firstError ??= err;
+  });
+  if (firstError !== null) throw firstError;
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
     userId: ctx.userId,
