@@ -251,7 +251,7 @@ export async function runGating(
         status: "AI_FAILED",
         error: `PERMANENT: ${message_text}`,
       });
-      if (!isHermesSelected(settings, process.env.AI_PROVIDER)) {
+      if (!isHermesSelected(settings, process.env.AI_PROVIDER) && process.env.AI_DISABLE_AUTO_HANDOFF !== "true") {
         const { createHandoff } = await import("@/modules/handoffs/handoff-service");
         await createHandoff(db, {
           workspaceId: params.workspaceId,

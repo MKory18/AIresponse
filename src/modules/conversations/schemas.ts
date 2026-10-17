@@ -17,6 +17,7 @@ export const conversationListQuerySchema = listQuerySchema.extend({
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
   assignee: z.string().max(64).optional(),
   channelType: z.enum(["FACEBOOK", "INSTAGRAM", "WHATSAPP", "TELEGRAM", "WEB"]).optional(),
+  channelId: z.string().cuid().optional(),
   dateFrom: z.string().datetime({ offset: true }).optional(),
   dateTo: z.string().datetime({ offset: true }).optional(),
 });

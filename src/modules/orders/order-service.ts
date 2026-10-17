@@ -268,6 +268,41 @@ export async function createOrderFromDraft(
     );
   }
 
+  // مستودع الطلبات — إشعار تلجرام (best-effort، ما يكسر إنشاء الطلب).
+  try {
+    let token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_ORDER_CHAT_ID;
+    if (!token) {
+      // Fallback: use the workspace's connected Telegram channel token.
+      try {
+        const account = await (db as any).channelAccount?.findFirst?.({
+          where: { channel: { workspaceId: ctx.workspaceId, type: "TELEGRAM", status: "CONNECTED" } },
+          select: { encryptedCredentials: true },
+        });
+        if (account?.encryptedCredentials) {
+          const { decryptSecret } = await import("@/core/crypto");
+          token = decryptSecret(account.encryptedCredentials);
+        }
+      } catch {
+        token = undefined;
+      }
+    }
+    if (token && chatId) {
+      const { getTelegramClient } = await import("@/modules/channels/telegram/client");
+      const client = getTelegramClient();
+      const text =
+        `📦 طلب جديد\n` +
+        `رقم: ${orderNumber}\n` +
+        `العميل: ${customer?.name ?? customer?.phone ?? "-"}\n` +
+        `المنتج: ${product.name} × ${draft.quantity}\n` +
+        `المجموع: ${breakdown.total} ${breakdown.currency}\n` +
+        `الحالة: ${status}`;
+      await client.sendMessage(token, chatId, { text });
+    }
+  } catch {
+    // الإشعار best-effort — غيابه ما يوقف الطلب
+  }
+
   return {
     orderId: order.id,
     orderNumber,

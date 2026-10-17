@@ -376,7 +376,7 @@ export async function runExtraction(
     extraction.intent === "COMPLAINT" ||
     extraction.confidence < handoffThreshold;
 
-  if (!hermesPersona && mustHandoff && !params.dryRun) {
+  if (!hermesPersona && mustHandoff && !params.dryRun && process.env.AI_DISABLE_AUTO_HANDOFF !== "true") {
     // Save memories even on handoff turns — complaints/requests carry facts.
     if (extraction.memories.length) {
       await saveMemories(db, {

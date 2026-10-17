@@ -72,6 +72,8 @@ export async function listConversations(
     assignee?: string;
     actorUserId?: string;
     channelType?: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP" | "TELEGRAM" | "WEB";
+    /** Filter by a specific connected page/channel (overrides channelType). */
+    channelId?: string;
     /** ISO dates bounding conversation activity (updatedAt). */
     dateFrom?: string;
     dateTo?: string;
@@ -95,7 +97,10 @@ export async function listConversations(
       where.assignedAgentId = params.assignee;
     }
   }
-  if (params.channelType) {
+  if (params.channelId) {
+    // Specific connected page/channel — scoped to this workspace for safety.
+    where.channelId = params.channelId;
+  } else if (params.channelType) {
     // Two-step (no relation join): identical on Postgres and the test double.
     const channels = await db.channel.findMany({
       where: { workspaceId: params.workspaceId, type: params.channelType },

@@ -288,7 +288,7 @@ export async function runResponse(
       error: categorized,
     });
     if (!params.dryRun) {
-      if (!hermesPersona) {
+      if (!hermesPersona && process.env.AI_DISABLE_AUTO_HANDOFF !== "true") {
         const { createHandoff } = await import("@/modules/handoffs/handoff-service");
         await createHandoff(db, {
           workspaceId: params.workspaceId,
