@@ -71,7 +71,8 @@ export default function Inbox() {
   const [filter, setFilter] = useState<FilterKey>("all");
   // P4 server-side filters (empty = all).
   const [statusSel, setStatusSel] = useState("");
-  const [prioritySel, setPrioritySel] = useState("");
+  const [pageSel, setPageSel] = useState("");
+  const [pages, setPages] = useState<{ id: string; label: string }[]>([]);
   const [assigneeSel, setAssigneeSel] = useState("");
   const [channelSel, setChannelSel] = useState("");
   const [openHandoff, setOpenHandoff] = useState<OpenHandoff>(null);
@@ -102,6 +103,27 @@ export default function Inbox() {
   const listSeq = useRef(0);
   const msgSeq = useRef(0);
   const toast = useToast();
+  // Load connected pages/channels for the page filter.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/channels")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.channels) return;
+        setPages(
+          (data.channels as Array<{ id: string; displayName?: string | null; externalId?: string | null; type?: string }>).map((c) => ({
+            id: c.id,
+            label: c.displayName || c.externalId || c.type || c.id,
+          }))
+        );
+      })
+      .catch(() => {
+        /* channels list is optional for filtering; ignore failures */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function loadDraft(conversationId: string) {
     const res = await fetch(`/api/order-drafts?conversationId=${conversationId}`);
@@ -122,7 +144,7 @@ export default function Inbox() {
       if (query) params.set("q", query);
       if (filter === "unread") params.set("unreadOnly", "true");
       if (statusSel) params.set("status", statusSel);
-      if (prioritySel) params.set("priority", prioritySel);
+      if (pageSel) params.set("channelId", pageSel);
       if (assigneeSel) params.set("assignee", assigneeSel);
       if (channelSel) params.set("channelType", channelSel);
       if (opts?.cursor) params.set("cursor", opts.cursor);
@@ -145,7 +167,7 @@ export default function Inbox() {
       });
       setCursor(data.nextCursor);
     },
-    [query, filter, statusSel, prioritySel, assigneeSel, channelSel]
+    [query, filter, statusSel, pageSel, assigneeSel, channelSel]
   );
 
   // Initial load + filter changes (debounced)
@@ -411,7 +433,7 @@ export default function Inbox() {
   }
 
   const unreadTotal = conversations.reduce((a, c) => a + c.unreadCount, 0);
-  const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || prioritySel || assigneeSel || channelSel);
+  const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || pageSel || assigneeSel || channelSel);
   const aiMode = selected?.aiState !== "HUMAN_ACTIVE";
 
   // Pick up ?q= from the topbar search.
@@ -471,12 +493,13 @@ export default function Inbox() {
               <option value="RESOLVED">محلولة</option>
               <option value="CLOSED">مغلقة</option>
             </Select>
-            <Select value={prioritySel} onChange={(e) => setPrioritySel(e.target.value)} aria-label="الأولوية" className="h-9 text-xs">
-              <option value="">كل الأولويات</option>
-              <option value="URGENT">عاجلة</option>
-              <option value="HIGH">عالية</option>
-              <option value="NORMAL">عادية</option>
-              <option value="LOW">منخفضة</option>
+            <Select value={pageSel} onChange={(e) => setPageSel(e.target.value)} aria-label="الصفحة" className="h-9 text-xs">
+              <option value="">كل الصفحات</option>
+              {pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
             </Select>
             <Select value={assigneeSel} onChange={(e) => setAssigneeSel(e.target.value)} aria-label="الإسناد" className="h-9 text-xs">
               <option value="">كل الموظفين</option>

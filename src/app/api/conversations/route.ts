@@ -18,6 +18,7 @@ export const GET = createHandler(
       assignee: query.assignee,
       actorUserId: auth!.userId,
       channelType: query.channelType,
+      channelId: query.channelId,
       dateFrom: query.dateFrom,
       dateTo: query.dateTo,
     });

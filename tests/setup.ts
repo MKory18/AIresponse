@@ -31,6 +31,7 @@ for (const k of [
   "HERMES_API_KEY",
   "HERMES_MODEL",
   "ALLOW_MOCK_AI",
+  "AI_DISABLE_AUTO_HANDOFF",
   // Empty-string overrides (e.g. `META_REDIRECT_URI=` in a local .env) defeat
   // `?? default` fallbacks (`""` is not nullish) — proven by the facebook-oauth
   // redirect test. Only optional-override keys are scrubbed here; keyed
