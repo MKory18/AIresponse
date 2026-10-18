@@ -356,6 +356,7 @@ export function createFakeDb() {
   const auditLog: Row[] = [];
   const product: Row[] = [];
   const productVariant: Row[] = [];
+  const productPriceRows: Row[] = [];
   const productMedia: Row[] = [];
   const mediaAsset: Row[] = [];
   const feedback: Row[] = [];
@@ -410,7 +411,7 @@ export function createFakeDb() {
   const db = {
     _stores: {
       customer, conversation, message, channelIdentity, channel, workspaceMember,
-      auditLog, product, productVariant, productMedia, mediaAsset, feedback,
+      auditLog, product, productVariant, productPrice: productPriceRows, productMedia, mediaAsset, feedback,
       order: orderRows, orderItem: orderItemRows, orderDraft: orderDraftRows, deliveryRule: deliveryRuleRows,
       channelAccount: channelAccountRows, webhookEvent: webhookEventRows, humanHandoff: humanHandoffRows, automation: automationRows, automationVersion: automationVersionRows, automationExecution: automationExecutionRows, user: userRows, followUp: followUpRows, workspaceUsage: workspaceUsageRows, dailyWorkspaceAnalytics: dailyAnalyticsRows,
       knowledgeDocument, knowledgeChunk, faq, backgroundJob,
@@ -442,6 +443,7 @@ export function createFakeDb() {
     auditLog: makeModel("auditLog", auditLog, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     product: makeModel("product", product, { currency: "USD", stockStatus: "IN_STOCK", stockQty: 0, tags: [], benefits: [], objections: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     productVariant: makeModel("productVariant", productVariant, { stockStatus: "IN_STOCK", stockQty: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    productPrice: makeModel("productPrice", productPriceRows, {}),
     productMedia: makeModel("productMedia", productMedia, { sortOrder: 0, isPrimary: false, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     mediaAsset: makeModel("mediaAsset", mediaAsset, { category: "OTHER", size: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     feedback: makeModel("feedback", feedback, { kind: "TEXT", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -742,7 +744,25 @@ export function createFakeDb() {
     }
     if (inc.faqs) row.faqs = faq.filter((f) => f.productId === row.id && f.isActive);
     if (inc.variants) row.variants = productVariant.filter((v) => v.productId === row.id);
+    if (inc.priceTiers) {
+      row.priceTiers = productPriceRows
+        .filter((t) => t.productId === row.id)
+        .sort((a, b) => (a.createdAt as Date).getTime() - (b.createdAt as Date).getTime());
+    }
     return row;
+  };
+  const baseProductFindMany = productModel.findMany.bind(productModel);
+  productModel.findMany = async (args: any) => {
+    const rows = (await baseProductFindMany(args)) as any[];
+    const inc = args?.include ?? {};
+    for (const row of rows) {
+      if (inc.priceTiers) {
+        row.priceTiers = productPriceRows
+          .filter((t) => t.productId === row.id)
+          .sort((a, b) => (a.createdAt as Date).getTime() - (b.createdAt as Date).getTime());
+      }
+    }
+    return rows;
   };
 
   // Hydrate the join-table read: real Prisma resolves

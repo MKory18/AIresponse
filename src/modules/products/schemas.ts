@@ -2,6 +2,11 @@ import { z } from "zod";
 
 const decimalString = z.union([z.number(), z.string()]).transform((v) => String(v));
 
+export const priceTierInputSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  price: decimalString,
+});
+
 export const productInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
   sku: z.string().trim().min(1).max(64),
@@ -20,6 +25,7 @@ export const productInputSchema = z.object({
   warnings: z.string().max(5000).nullable().optional(),
   objections: z.array(z.string().trim().max(500)).max(30).optional(),
   salesNotes: z.string().max(10000).nullable().optional(),
+  priceTiers: z.array(priceTierInputSchema).max(10).optional(),
   isActive: z.boolean().optional(),
 });
 

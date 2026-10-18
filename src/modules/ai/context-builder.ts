@@ -41,6 +41,8 @@ export interface AIContext {
     objections: string[];
     salesNotes: string | null;
     faqs: { id: string; question: string; answer: string }[];
+    /** أسعار إضافية مسمّاة — تُغذّى للذكاء كسنة رسمية من قاعدة البيانات. */
+    priceTiers?: { label: string; price: string }[];
     /** P12 — قواعد الادعاءات من سيستم 1 (إن رُبط المنتج بمرجعه). */
     compliance?: { allowedClaims: string[]; bannedClaims: string[]; verdict: string | null } | null;
   };
@@ -62,7 +64,10 @@ export interface AIContext {
 export async function buildProductContext(db: Db, workspaceId: string, productId: string) {
   const product = await db.product.findUnique({
     where: { id: productId },
-    include: { faqs: { where: { isActive: true }, take: 5 } },
+    include: {
+      faqs: { where: { isActive: true }, take: 5 },
+      priceTiers: { orderBy: { createdAt: "asc" } },
+    },
   });
   if (!product || product.workspaceId !== workspaceId) throw new NotFoundError("Product");
   // P12 — قواعد سيستم 1 (أفضل جهد: غيابها لا يوقف الرد — الحارس العام يبقى).
@@ -106,6 +111,9 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
       objections: product.objections,
       salesNotes: product.salesNotes,
       faqs: product.faqs.map((f) => ({ id: f.id, question: f.question, answer: f.answer })),
+      priceTiers: ((product as unknown as { priceTiers?: { label: string; price: string }[] }).priceTiers ?? []).map(
+        (t) => ({ label: t.label, price: t.price.toString() })
+      ),
       ...(compliance ? { compliance } : {}),
     } as AIContext["product"],
     citations: [

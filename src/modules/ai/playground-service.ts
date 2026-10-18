@@ -346,6 +346,7 @@ export async function sendPlaygroundMessage(
             warnings: productCtx.product.warnings,
             objections: productCtx.product.objections,
             salesNotes: productCtx.product.salesNotes,
+            priceTiers: productCtx.product.priceTiers ?? [],
             // P12 — قواعد سيستم 1 متل الإنتاج.
             compliance: productCtx.product.compliance ?? null,
             faqs: productCtx.product.faqs,

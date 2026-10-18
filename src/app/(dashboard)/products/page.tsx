@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ImagePlus, Package, Plus, Search, ArrowUpLeft } from "lucide-react";
+import { FileSpreadsheet, ImagePlus, Package, Plus, Search, ArrowUpLeft } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ type Product = {
   isActive: boolean;
   isArchived: boolean;
   mediaLinks: { mediaAsset: { url: string; type: string } }[];
+  priceTiers: { id: string; label: string; price: string }[];
 };
 
 export default function ProductsPage() {
@@ -35,6 +36,18 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  type ImportSummary = {
+    usedAI: boolean;
+    aiError: string | null;
+    mapping: Record<string, string | null>;
+    extraPriceColumns: string[];
+    created: { id: string; name: string; sku: string; price: string; priceTiers: { label: string; price: string }[] }[];
+    skipped: { row: number; reason: string }[];
+  };
+  const [importResult, setImportResult] = useState<ImportSummary | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   const load = useCallback(async () => {
@@ -86,6 +99,29 @@ export default function ProductsPage() {
     }
   }
 
+  async function importExcel(file: File) {
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/products/import", { method: "POST", body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setImportError(body?.message ?? `فشل الاستيراد (رمز ${res.status})`);
+        return;
+      }
+      const summary = (await res.json()) as ImportSummary;
+      setImportResult(summary);
+      load();
+    } catch {
+      setImportError("فشل رفع الملف — حاول مرة ثانية");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function toggleArchive(p: Product) {
     await fetch(`/api/products/${p.id}`, {
       method: "PATCH",
@@ -110,9 +146,14 @@ export default function ProductsPage() {
         title={t.pages.productsTitle}
         description={t.pages.productsDesc}
         actions={
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus size={15} /> منتج جديد
-          </Button>
+          <>
+            <Button size="sm" variant="secondary" onClick={() => { setShowImport(true); setImportError(null); setImportResult(null); }}>
+              <FileSpreadsheet size={15} /> استيراد اكسل
+            </Button>
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus size={15} /> منتج جديد
+            </Button>
+          </>
         }
       />
 
@@ -193,10 +234,18 @@ export default function ProductsPage() {
                     <StatusBadge value={p.isArchived ? "CLOSED" : p.isActive ? "IN_STOCK" : "PENDING"} />
                   </div>
                   <div className="mt-2 flex items-center justify-between">
-                    <p className="num text-[15px] font-semibold text-ink-muted" dir="ltr">
-                      {Number(p.price).toLocaleString()} {p.currency}
-                    </p>
-                    <span className="text-[11px] text-ink-subtle">{label(p.stockStatus)}{p.category ? ` · ${p.category}` : ""}</span>
+                    <div className="min-w-0">
+                      <p className="num text-[15px] font-semibold text-ink-muted" dir="ltr">
+                        {Number(p.price).toLocaleString()} {p.currency}
+                      </p>
+                      {p.priceTiers?.length > 0 && (
+                        <p className="num mt-0.5 truncate text-[11px] text-ink-subtle" dir="ltr">
+                          {p.priceTiers.slice(0, 2).map((tp) => `${tp.label}: ${Number(tp.price).toLocaleString()}`).join(" · ")}
+                          {p.priceTiers.length > 2 ? ` · +${p.priceTiers.length - 2}` : ""}
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-[11px] text-ink-subtle">{label(p.stockStatus)}{p.category ? ` · ${p.category}` : ""}</span>
                   </div>
                   <div className="mt-3 flex items-center gap-1.5 border-t border-line/60 pt-3">
                     <Button size="sm" variant="secondary" onClick={() => toggleActive(p)}>
@@ -255,6 +304,74 @@ export default function ProductsPage() {
             <Button type="submit" loading={creating}>{creating ? "جارٍ الإنشاء…" : "إنشاء المنتج"}</Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog open={showImport} onClose={() => setShowImport(false)} title="استيراد منتجات من ملف اكسل">
+        <div className="space-y-3">
+          <p className="text-xs leading-relaxed text-ink-muted">
+            اختر ملف <span className="font-bold" dir="ltr">.xlsx</span> أو <span className="font-bold" dir="ltr">.csv</span> —
+            أول صف يكون عناوين الأعمدة (اسم · كود · سعر · أسعار إضافية مثل «سعر الجملة» · تصنيف · كمية…).
+            الذكاء يتعرف على الأعمدة ويُدرج المنتجات تلقائيًا، وكل سعر إضافي بعمود بينحفظ على المنتج.
+          </p>
+          <input
+            type="file"
+            accept=".xlsx,.csv"
+            disabled={importing}
+            aria-label="ملف اكسل"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importExcel(f);
+              e.target.value = "";
+            }}
+          />
+          {importing && (
+            <p className="rounded-xl bg-brand-500/10 px-3 py-2 text-xs font-bold text-brand-700 dark:text-brand-300">
+              جارٍ التحليل والإدراج… ما تغلق الصفحة
+            </p>
+          )}
+          {importError && (
+            <p className="rounded-xl bg-red-500/10 px-3 py-2 text-xs font-bold leading-relaxed text-red-600 dark:text-red-400">
+              {importError}
+            </p>
+          )}
+          {importResult && (
+            <div className="space-y-2">
+              <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                ادرجت {importResult.created.length} منتج —
+                {importResult.usedAI ? " تحليل الأعمدة بالذكاء" : " تحليل الأعمدة تلقائي محلي"}.
+                {importResult.skipped.length > 0 ? ` وتخطّت ${importResult.skipped.length} صف (التفاصيل تحت).` : ""}
+              </p>
+              {importResult.aiError && (
+                <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                  ملاحظة الذكاء: {importResult.aiError}
+                </p>
+              )}
+              <div className="max-h-48 overflow-y-auto rounded-xl ring-1 ring-inset ring-line">
+                {importResult.created.map((p) => (
+                  <p key={p.id} className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-1.5 text-xs last:border-0">
+                    <span className="min-w-0 truncate font-semibold text-ink">{p.name}</span>
+                    <span className="num shrink-0 text-ink-muted" dir="ltr">
+                      {Number(p.price).toLocaleString()}
+                      {p.priceTiers.length > 0 ? ` + ${p.priceTiers.length} سعر` : ""}
+                    </span>
+                  </p>
+                ))}
+              </div>
+              {importResult.skipped.length > 0 && (
+                <div className="max-h-40 overflow-y-auto rounded-xl bg-amber-500/5 ring-1 ring-inset ring-amber-500/20">
+                  {importResult.skipped.map((s) => (
+                    <p key={s.row} className="border-b border-amber-500/10 px-3 py-1.5 text-[11px] leading-relaxed text-amber-700 last:border-0 dark:text-amber-300">
+                      صف {s.row} · {s.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button type="button" variant="ghost" onClick={() => setShowImport(false)}>{t.common.cancel}</Button>
+          </div>
+        </div>
       </Dialog>
 
     </div>

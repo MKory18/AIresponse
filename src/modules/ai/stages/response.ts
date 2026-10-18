@@ -114,6 +114,7 @@ export async function runResponse(
             warnings: context.product.warnings,
             objections: context.product.objections,
             salesNotes: context.product.salesNotes,
+            priceTiers: context.product.priceTiers ?? [],
             compliance: context.product.compliance ?? null,
             faqs: context.product.faqs,
           }
