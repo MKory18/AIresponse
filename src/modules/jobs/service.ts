@@ -23,9 +23,8 @@ export const JOB_TYPES = [
   // P9 — Campaigns (durable start + bounded ticks).
   "run_campaign",
   "campaign_tick",
-  // P12 — الربط مع المنظومة (ترحيل تلقائي للـ OMS · تحقق رمز الكليبر ·
-  // إعادة قراءة قواعد الادعاءات من سيستم 1).
-  "handoff_order_to_oms",
+  // P12 — الربط مع المنظومة (تحقق رمز الكليبر · إعادة قراءة قواعد
+  // الادعاءات من سيستم 1).
   "validate_attribution_code",
   "refresh_product_compliance",
   // وسائط واتساب الواردة: ميتا تبعت معرّف مش رابط — التحميل بتوكن القناة.

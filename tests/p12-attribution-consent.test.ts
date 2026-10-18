@@ -1033,7 +1033,7 @@ describe("P12 clipper — حملات إعادة التواصل (POST /api/v1/ret
     expect(wide.conditions[1]).toMatchObject({ maxDays: 90 });
   });
 
-  it("buildRetargetCampaign (المسار المشترك مع Hermes) يرفض غير واتساب قبل أي كتابة", async () => {
+  it("buildRetargetCampaign (المسار المشترك) يرفض غير واتساب قبل أي كتابة", async () => {
     const db = fake();
     await seedConv(db);
     await expect(

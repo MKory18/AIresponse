@@ -12,9 +12,9 @@ import { readFileSync } from "node:fs";
 import { SYSTEM_SPECS, TOKEN_PRESETS } from "@/modules/integrations/systems";
 
 /**
- * P12 × main (وضع Hermes للشخصية الخارجية) — دمج دلالي:
+ * P12 × main (المزوّد الخارجي OpenRouter) — دمج دلالي:
  * قواعد الامتثال من سيستم 1 (المسموح · الممنوع) لازم توصل للموديل بكل مسار
- * بيكتب رد: مسار الرد العادي (كان مغطّى) · مسار Hermes الجديد بالـ main ·
+ * بيكتب رد: مسار الرد العادي (كان مغطّى) · مسار المزوّد الخارجي بالـ main ·
  * والتجربة اليدوية (playground) بالمسارين — وإلا الحارس بيرفض ردود الموديل
  * ما كان بيعرف إنها ممنوعة (فشل بلا داعي)، أو التجربة بتختلف عن الإنتاج.
  */
@@ -23,8 +23,7 @@ type Db = Prisma.TransactionClient;
 type Row = Record<string, any>;
 const WS = "ws-p12-merge";
 const ctx = { userId: "agent-merge", workspaceId: WS };
-const HERMES_BASE = "http://127.0.0.1:8642/v1";
-const HERMES_KEY = "zz-merge-hermes-key-77";
+const OR_KEY = "sk-merge-openrouter-key-77";
 const BANNED = "نتيجة مضمونة";
 const ALLOWED = "مكونات طبيعية";
 
@@ -38,7 +37,7 @@ function okChat(text: string) {
   return new Response(JSON.stringify({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }), { status: 200 });
 }
 
-function stubHermesFetch() {
+function stubProviderFetch() {
   (globalThis as { fetch: unknown }).fetch = async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}"));
     const system = String(body?.messages?.[0]?.content ?? "");
@@ -85,10 +84,8 @@ const outbound = () => (db._stores.message as Row[]).filter((m) => m.direction =
 beforeEach(async () => {
   db = createFakeDb();
   (db._stores.workspaceMember as Row[]).push({ id: "m-merge", workspaceId: WS, userId: ctx.userId, status: "ACTIVE" });
-  prevEnv = { HERMES_BASE_URL: process.env.HERMES_BASE_URL, HERMES_API_KEY: process.env.HERMES_API_KEY, HERMES_MODEL: process.env.HERMES_MODEL };
-  process.env.HERMES_BASE_URL = HERMES_BASE;
-  process.env.HERMES_API_KEY = HERMES_KEY;
-  delete process.env.HERMES_MODEL;
+  prevEnv = { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY };
+  process.env.OPENROUTER_API_KEY = OR_KEY;
   setMockAIProvider(undefined);
   calls = [];
   reply = "أهلين فيك، ماء الكمأة بمكونات طبيعية 🌹";
@@ -104,10 +101,10 @@ afterEach(() => {
   }
 });
 
-describe("P12 × main — قواعد سيستم 1 بمسار Hermes للرد", () => {
+describe("P12 × main — قواعد سيستم 1 بمسار المزوّد الخارجي للرد", () => {
   beforeEach(async () => {
-    stubHermesFetch();
-    await db.aISettings.create({ data: { workspaceId: WS, provider: "hermes", responseModel: "hermes-agent", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true } } as never);
+    stubProviderFetch();
+    await db.aISettings.create({ data: { workspaceId: WS, provider: "openrouter", responseModel: "openai/gpt-4o-mini", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true } } as never);
     await seedChannel();
     await seedProductWithRules();
   });
@@ -120,7 +117,7 @@ describe("P12 × main — قواعد سيستم 1 بمسار Hermes للرد", (
     return processAIMessage(db as Db, { workspaceId: WS, conversationId: r.conversationId, messageId: r.messageId }, { vectorStore: { search: async () => [] } as never });
   }
 
-  it("المسموح والممنوع بيوصلوا لـ Hermes مع البيانات الموثوقة", async () => {
+  it("المسموح والممنوع بيوصلوا للمزوّد الخارجي مع البيانات الموثوقة", async () => {
     const res = await run("مرحبا، بكم ماء الكمأة؟", "a");
     expect(res.status).toBe("RESPONDED");
     const systems = replySystems();
@@ -129,7 +126,7 @@ describe("P12 × main — قواعد سيستم 1 بمسار Hermes للرد", (
     expect(systems[0]).toContain(ALLOWED);
   });
 
-  it("رد Hermes بادعاء ممنوع = ما بينبعت للزبون (الحارس شغّال بوضع Hermes)", async () => {
+  it("رد المزوّد الخارجي بادعاء ممنوع = ما بينبعت للزبون (الحارس شغّال بكل مسار)", async () => {
     reply = "ماء الكمأة نتيجه مضمونه من أول أسبوع";
     const res = await run("مرحبا، بكم ماء الكمأة لو سمحت؟", "b");
     expect(res.status).toBe("AI_FAILED");
@@ -155,9 +152,9 @@ describe("P12 × main — قواعد سيستم 1 بالتجربة اليدوي�
     expect(systems[0]).toContain(ALLOWED);
   });
 
-  it("مسار Hermes: القواعد بموجّه النظام متل الإنتاج", async () => {
-    stubHermesFetch();
-    await db.aISettings.create({ data: { workspaceId: WS, provider: "hermes", responseModel: "hermes-agent", temperature: 0.4, maxTokens: 500 } } as never);
+  it("مسار المزوّد الخارجي: القواعد بموجّه النظام متل الإنتاج", async () => {
+    stubProviderFetch();
+    await db.aISettings.create({ data: { workspaceId: WS, provider: "openrouter", responseModel: "openai/gpt-4o-mini", temperature: 0.4, maxTokens: 500 } } as never);
     const p = await seedProductWithRules();
     const s = (await createPlaygroundSession(db as Db, ctx, { productId: p.id, useKnowledge: false })) as Row;
     await sendPlaygroundMessage(db as Db, ctx, s.id, "بكم ماء الكمأة؟");
@@ -169,23 +166,13 @@ describe("P12 × main — قواعد سيستم 1 بالتجربة اليدوي�
 });
 
 /**
- * قرار المالك على main (67093e8): «لا Hermes بأي نص مرئي» — تسميات عامة
- * (الوكيل الذكي …) والقيم الداخلية (`hermes` · `hermes-bridge` · `HERMES_*` ·
- * `hermes-agent`) والتعليقات بتضل. نفس القاعدة على واجهات P12 والتسميات اللي بتعرضها.
+ * قرار المالك (67093e8): «لا تسميات داخلية بأي نص مرئي» — تسميات عامة
+ * («الوكيل الذكي» …). نفس القاعدة على واجهات P12 والتسميات اللي بتعرضها.
  */
-describe("P12 × main — ولا اسم Hermes بأي نص مرئي بواجهات P12", () => {
+describe("P12 × main — ولا اسم مزار داخلي بأي نص مرئي بواجهات P12", () => {
   const P12_UI = [
-    "src/app/(dashboard)/settings/agents/page.tsx",
-    "src/app/(dashboard)/settings/integrations/page.tsx",
     "src/app/(dashboard)/settings/page.tsx",
     "src/app/(dashboard)/settings/ai/page.tsx",
-    "src/components/agents/drafts-queue.tsx",
-    "src/components/agents/external-agent-risk.tsx",
-    "src/components/integrations/oms-card.tsx",
-    "src/components/integrations/system-card.tsx",
-    "src/components/integrations/settings-cards.tsx",
-    "src/components/integrations/token-manager.tsx",
-    "src/components/orders/oms-handoff-card.tsx",
     "src/components/products/compliance-card.tsx",
     "src/components/inbox/marketing-card.tsx",
   ];
@@ -204,12 +191,12 @@ describe("P12 × main — ولا اسم Hermes بأي نص مرئي بواجها
     expect(visible(readFileSync(f, "utf8"))).not.toMatch(/hermes/i);
   });
 
-  it("أسماء الأنظمة والتوكنات المعروضة عامة (والمعرّف الداخلي hermes-bridge ثابت)", () => {
-    expect(TOKEN_PRESETS["hermes-bridge"].nameAr).not.toMatch(/hermes/i);
+  it("أسماء الأنظمة والتوكنات المعروضة عامة بالكامل", () => {
     for (const spec of Object.values(SYSTEM_SPECS) as Array<Record<string, unknown>>) {
       for (const [k, v] of Object.entries(spec)) {
         if (typeof v === "string" && /Ar$/.test(k)) expect(v, k).not.toMatch(/hermes/i);
       }
     }
+    expect(TOKEN_PRESETS["hermes-bridge"]).toBeUndefined();
   });
 });

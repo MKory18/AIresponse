@@ -3,15 +3,15 @@ import { NextRequest } from "next/server";
 import { readFile } from "node:fs/promises";
 
 /**
- * Persona management under the external provider (Hermes):
+ * Persona management under the external provider (OpenRouter connection):
  *  - lifecycle (create/publish/rollback/activate/channel-binding) works
  *    through the REAL routes with NO 409 blocks;
  *  - the playground uses the same selected persona;
- *  - no "Hermes" brand string is user-visible on the site (connection
- *    internals — provider values, env names, logs, tests — are untouched).
+ *  - no internal brand string is user-visible on the site.
  */
 
 const WS_PM = "ws-persona-mgmt";
+const PM_KEY = "sk-pm-openrouter-key";
 
 vi.mock("@/core/db/prisma", async () => {
   const { createFakeDb } = await import("./helpers/inmemory-db");
@@ -56,12 +56,12 @@ const CUID = (s: string) => `ck${s.replace(/[^a-z0-9]/gi, "").toLowerCase().padE
 beforeEach(async () => {
   for (const store of Object.values((db as any)._stores)) (store as unknown[]).length = 0;
   await (db as any).aISettings.create({
-    data: { workspaceId: WS_PM, provider: "hermes", responseModel: "hermes-agent", temperature: 0.4, maxTokens: 500 },
+    data: { workspaceId: WS_PM, provider: "openrouter", responseModel: "openai/gpt-4o-mini", temperature: 0.4, maxTokens: 500 },
   });
 });
 
 describe("persona lifecycle routes stay open under the external provider (no 409s)", () => {
-  it("7. create + activate + publish + rollback + channel binding all succeed with Hermes selected", async () => {
+  it("7. create + activate + publish + rollback + channel binding all succeed with the external provider selected", async () => {
     const { POST: createPersona } = await import("@/app/api/personas/route");
     const { PATCH: updatePersona } = await import("@/app/api/personas/route");
     const { POST: createDraft } = await import("@/app/api/personas/[id]/versions/route");
@@ -119,12 +119,10 @@ describe("persona lifecycle routes stay open under the external provider (no 409
   });
 });
 
-describe("playground uses the same selected persona (Hermes connection)", () => {
+describe("playground uses the same selected persona (external provider)", () => {
   it("5. the selected persona's instructions reach the provider in the playground too", async () => {
-    const prevBase = process.env.HERMES_BASE_URL;
-    const prevKey = process.env.HERMES_API_KEY;
-    process.env.HERMES_BASE_URL = "http://127.0.0.1:8642/v1";
-    process.env.HERMES_API_KEY = "playground-probe-key";
+    const prevKey = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = PM_KEY;
     const calls: { url: string; body: any }[] = [];
     const orig = globalThis.fetch;
     (globalThis as { fetch: unknown }).fetch = async (url: string, init: RequestInit) => {
@@ -158,22 +156,20 @@ describe("playground uses the same selected persona (Hermes connection)", () => 
       const reply = await sendPlaygroundMessage(db as never, { userId: "agent-pm", workspaceId: WS_PM }, s.id, "مرحبا");
       expect(reply.response).toBe("رد تجريبي");
       expect(calls.length).toBeGreaterThan(0);
-      expect(calls[0].url).toBe("http://127.0.0.1:8642/v1/chat/completions");
+      expect(calls[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
       const systems = calls.map((c) => String(c.body?.messages?.[0]?.content ?? "")).join("\n");
       expect(systems).toContain("بائع-الملعب-UNIQUE");
       expect(systems).toContain("PG-MARKER-789");
       expect(systems).toContain("ملعب-UNIQUE");
     } finally {
       (globalThis as { fetch: typeof fetch }).fetch = orig;
-      if (prevBase === undefined) delete process.env.HERMES_BASE_URL;
-      else process.env.HERMES_BASE_URL = prevBase;
-      if (prevKey === undefined) delete process.env.HERMES_API_KEY;
-      else process.env.HERMES_API_KEY = prevKey;
+      if (prevKey === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = prevKey;
     }
   });
 });
 
-describe("no Hermes brand in user-visible site text (static; connection internals untouched)", () => {
+describe("no internal brand string in user-visible site text (static)", () => {
   const PAGES = [
     "src/app/(dashboard)/personas/page.tsx",
     "src/app/(dashboard)/channels/page.tsx",
@@ -182,23 +178,20 @@ describe("no Hermes brand in user-visible site text (static; connection internal
     "src/app/(dashboard)/ai/playground/page.tsx",
     "src/components/auth-form.tsx",
   ];
-  it("8. pages render generic labels; the internal provider value stays intact", async () => {
+  it("8. pages render generic labels only (any provider choice is a generic one)", async () => {
     for (const f of PAGES) {
       const src = await readFile(f, "utf8");
-      // The connection value must survive (form/API contract unchanged)…
-      if (f.includes("settings/ai") || f.includes("studio")) {
-        expect(src, `${f} keeps the provider value`).toMatch(/["']hermes["']/);
-      }
-      // …but no user-visible brand string may remain. Allowed to stay:
-      // technical identifiers explicitly preserved by the requirements
-      // (provider values, HERMES_* env names, the hermes-agent model id).
       const visible = src
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|\s)\/\/.*$/gm, "$1")
         .replace(/value="hermes"/g, "")
         .replace(/["']hermes["']/g, "")
         .replace(/\bhermes(?=\s*:)/g, "")
         .replace(/HERMES_[A-Z_]+/g, "")
         .replace(/hermes-agent/g, "");
-      expect(visible, `${f} shows no Hermes brand`).not.toMatch(/hermes/i);
+      expect(visible, `${f} shows no internal brand`).not.toMatch(/hermes/i);
     }
+    const aiSrc = await readFile("src/app/(dashboard)/settings/ai/page.tsx", "utf8");
+    expect(aiSrc).not.toMatch(/HERMES_/);
   });
 });

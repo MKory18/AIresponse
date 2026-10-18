@@ -45,7 +45,6 @@ export async function runResponse(
     message,
     conversation,
     persona,
-    hermesPersona,
     activePersona,
     customer,
     channelRow,
@@ -247,14 +246,12 @@ export async function runResponse(
     }
   } catch (err) {
     // AI failure: never fabricate. Keep the message; surface AI_FAILED.
-    // External-provider path (Hermes): NO HumanHandoff record — activating a
-    // persona must not reintroduce automatic handoffs. The conversation stays
-    // OPEN and the failure is reprocessable via job retry under the same
-    // idempotency key (no duplicate sends).
-    // Record usage + create a visible handoff so the failure never disappears.
-    // Error category (TRANSIENT vs PERMANENT) tells operators whether a retry
-    // can succeed or configuration must be corrected first — either way the
-    // message stays recoverable via job retry + the orphan sweeper.
+    // NO HumanHandoff record from the AI path — every message stays with the
+    // AI and remains reprocessable via job retry under the same idempotency
+    // key (no duplicate sends). Error category (TRANSIENT vs PERMANENT)
+    // tells operators whether a retry can succeed or configuration must be
+    // corrected first — either way the message stays recoverable via job
+    // retry + the orphan sweeper.
     const retryable = err instanceof AIProviderError ? err.retryable : true;
     const rawMessage = err instanceof AIProviderError ? err.message : String(err);
     const categorized = `${retryable ? "TRANSIENT" : "PERMANENT"}: ${rawMessage}`;
@@ -288,17 +285,6 @@ export async function runResponse(
       error: categorized,
     });
     if (!params.dryRun) {
-      if (!hermesPersona && process.env.AI_DISABLE_AUTO_HANDOFF !== "true") {
-        const { createHandoff } = await import("@/modules/handoffs/handoff-service");
-        await createHandoff(db, {
-          workspaceId: params.workspaceId,
-          conversationId: conversation.id,
-          customerId: customer.id,
-          reason: "AI_FAILURE",
-          metadata: { messageId: message.id, error: err instanceof Error ? err.message : String(err) },
-          actorUserId: "ai-agent",
-        });
-      }
       // State machine: alert only — the thread stays AI_ACTIVE so the next
       // inbound (or job retry) is processed by AI again. Ownership changes
       // exclusively via manual takeover.

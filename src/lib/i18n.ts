@@ -412,7 +412,6 @@ export const LABELS: Record<string, string> = {
   ORDER_CONFIRMED: "عند تأكيد طلب",
   ORDER_CANCELLED: "عند إلغاء طلب",
   ORDER_DELIVERED: "عند تسليم الطلب",
-  ORDER_STATUS_CHANGED_FROM_OMS: "عند تحديث حالة الطلب من OMS",
   // Condition operators
   EQ: "يساوي",
   NEQ: "لا يساوي",

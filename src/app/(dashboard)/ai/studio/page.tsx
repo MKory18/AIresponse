@@ -54,13 +54,12 @@ const TASK_AR: Record<string, string> = {
   RETRIEVAL: "الاسترجاع",
 };
 
-// Display names for provider ids — the internal "hermes" value never shows.
+// Display names for provider ids — internal values never show on the page.
 const PROVIDER_AR: Record<string, string> = {
   mock: "وهمي (تجريبي)",
   openai: "OpenAI",
   openrouter: "OpenRouter",
   internal: "داخلي",
-  hermes: "الوكيل الذكي",
 };
 const providerLabel = (id: string | null | undefined) => (id ? PROVIDER_AR[id] ?? id : "—");
 

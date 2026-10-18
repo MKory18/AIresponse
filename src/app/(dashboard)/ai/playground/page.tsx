@@ -383,7 +383,7 @@ export default function AIPlaygroundPage() {
               </button>
               {showDebug && lastAssistant.metadata && (
                 <dl className="num mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-ink-muted sm:grid-cols-3">
-                  <div><dt className="font-bold">{t.playground.provider}</dt><dd>{lastAssistant.metadata.provider === "hermes" ? "الوكيل الذكي" : (lastAssistant.metadata.provider ?? "—")}</dd></div>
+                  <div><dt className="font-bold">{t.playground.provider}</dt><dd>{lastAssistant.metadata.provider ?? "—"}</dd></div>
                   <div><dt className="font-bold">{t.playground.model}</dt><dd dir="ltr">{lastAssistant.metadata.model ?? "—"}</dd></div>
                   <div><dt className="font-bold">{t.playground.persona}</dt><dd>{lastAssistant.metadata.persona?.name ?? "—"}</dd></div>
                   <div><dt className="font-bold">{t.playground.responseTime}</dt><dd>{lastAssistant.metadata.latencyMs ?? 0}ms</dd></div>

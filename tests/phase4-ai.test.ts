@@ -205,7 +205,7 @@ describe("Phase 4 — orchestrator pipeline", () => {
     expect(result.status).toBe("NOT_INBOUND");
   });
 
-  it("handoffs on human request create a review alert, AI stays active", async () => {
+  it("human request still gets an AI reply (no auto handoff), AI stays active", async () => {
     // Production FIFO: the seeded first message is answered before the
     // second turn runs — otherwise the ordering guard correctly defers the
     // newer turn until the older sibling is decided.
@@ -220,14 +220,13 @@ describe("Phase 4 — orchestrator pipeline", () => {
     const result = await processAIMessage(db as Db, {
       workspaceId: WS_A, conversationId: inbound.conversationId, messageId: inbound.messageId,
     }, { vectorStore: vectorsFromDb() });
-    expect(result.status).toBe("HANDOFF");
+    expect(result.status).toBe("RESPONDED");
     const conv = db._stores.conversation[0];
-    // State machine: alert only — ownership stays AI_ACTIVE until manual takeover.
+    // State machine: ownership stays AI_ACTIVE — the AI handles everything.
     expect(conv.aiState).toBe("AI_ACTIVE");
     expect(conv.aiEnabled).toBe(true);
-    // handoff record + audit logged
-    expect((db._stores.humanHandoff as any[]).some((h) => h.reason === "CUSTOMER_REQUEST")).toBe(true);
-    expect((db._stores.auditLog as any[]).some((a) => a.action === "human.handoff_created")).toBe(true);
+    // No HumanHandoff record is created automatically anymore.
+    expect((db._stores.humanHandoff as any[]).some((h) => h.reason === "CUSTOMER_REQUEST")).toBe(false);
   });
 
   it("ignores further messages after human takeover", async () => {
@@ -250,11 +249,11 @@ describe("Phase 4 — orchestrator pipeline", () => {
     expect(result.status).toBe("AI_FAILED");
     const aiMsgs = (db._stores.message as any[]).filter((m) => m.senderType === "AI");
     expect(aiMsgs).toHaveLength(0);
-    // Alert only: stays AI_ACTIVE with an OPEN handoff for review.
+    // Alert only: stays AI_ACTIVE — recovery via job retry + orphan sweeper.
     expect(db._stores.conversation[0].aiState).toBe("AI_ACTIVE");
     expect(
       (db._stores.humanHandoff as any[]).some((h) => h.reason === "AI_FAILURE" && h.status === "OPEN")
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("provider retries before failing", async () => {
@@ -273,9 +272,9 @@ describe("Phase 4 — orchestrator pipeline", () => {
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 
-  it("prompt injection from customer triggers handoff, not compliance", async () => {
+  it("prompt injection from customer is responded to (untrusted text), never handoff", async () => {
     // Same FIFO note as above: answer the seeded first message so the
-    // handoff decision for the second turn is isolated from ordering.
+    // second turn is isolated from ordering.
     await processAIMessage(db as Db, {
       workspaceId: WS_A, conversationId, messageId: lastInboundMessageId(),
     }, { vectorStore: vectorsFromDb() });
@@ -288,16 +287,17 @@ describe("Phase 4 — orchestrator pipeline", () => {
     const result = await processAIMessage(db as Db, {
       workspaceId: WS_A, conversationId: inbound.conversationId, messageId: inbound.messageId,
     }, { vectorStore: vectorsFromDb() });
-    expect(result.status).toBe("HANDOFF");
-    expect(result.response).toBeUndefined();
+    // The AI still answers (every message gets a reply); the injection body
+    // stays untrusted data via delimiters + INJECTION_ECHO guardrail.
+    expect(["RESPONDED", "CLARIFIED"]).toContain(result.status);
   });
 
-  it("low confidence triggers clarification handoff policy", async () => {
+  it("low confidence still gets an AI clarification reply", async () => {
     mock.intentHandler = () => ({ intent: "UNKNOWN", confidence: 0.2 });
     const result = await processAIMessage(db as Db, {
       workspaceId: WS_A, conversationId, messageId: lastInboundMessageId(),
     }, { vectorStore: vectorsFromDb() });
-    expect(result.status).toBe("HANDOFF");
+    expect(result.status).toBe("CLARIFIED");
   });
 
   it("saves curated memories, not greetings", async () => {

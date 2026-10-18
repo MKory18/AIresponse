@@ -64,7 +64,7 @@ export function hashToken(raw: string): string {
   return crypto.createHash("sha256").update(raw, "utf8").digest("hex");
 }
 
-const SYSTEM_SHORT: Record<TokenSystem, string> = { mediabuyer: "mb", clipper: "clp", "hermes-bridge": "hrm" };
+const SYSTEM_SHORT: Record<TokenSystem, string> = { mediabuyer: "mb", clipper: "clp" };
 
 function newRawToken(system: TokenSystem): string {
   return `zr_${SYSTEM_SHORT[system]}_${crypto.randomBytes(24).toString("base64url")}`;

@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { AppError } from "@/core/errors";
 import { decryptSecret, encryptSecret } from "@/core/crypto";
 import { recordAudit } from "@/modules/audit/service";
-import { assertHermesEndpointResolves, validateHermesEndpoint } from "@/modules/ai/endpoint-guard";
+import { lookup } from "node:dns/promises";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { GENERIC_SYSTEMS, SYSTEM_SPECS, type GenericSystem } from "./systems";
 import { newSigningSecret } from "./signing";
@@ -74,6 +74,17 @@ function isPrivateHost(host: string): boolean {
   );
 }
 
+/** المضيف ممنوع دائمًا حتى تحت العلم: بِانات وصفية للسحابة ونطاقاتها المحجوزة. */
+function isMetadataHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return (
+    h === "metadata.google.internal" ||
+    h === "localhost.localdomain" ||
+    /^169\.254\./.test(h) ||
+    /^0\./.test(h)
+  );
+}
+
 /**
  * رابط نظام: http(s) بلا بيانات دخول بالرابط، وبلا عناوين البيانات الوصفية
  * للسحابة. الشبكة الخاصة (localhost · RFC1918 · اسم خدمة docker) مسموحة فقط
@@ -94,15 +105,19 @@ export function validateSystemUrl(raw: string): { ok: true; url: string } | { ok
   if (privateHost && !allowPrivate) return { ok: false, reason: "PRIVATE_NETWORK_NOT_ALLOWED" };
   if (!privateHost && url.protocol !== "https:") return { ok: false, reason: "HTTPS_REQUIRED" };
   if (url.username || url.password) return { ok: false, reason: "CREDENTIALS_IN_URL" };
-  // اسم خدمة docker بلا نقطة: الحارس الصارم يقبله كاسم، ونقبله هنا فقط تحت العلم.
+  // المضيف ممنوع دائمًا حتى تحت العلم (بِانات وصفية للسحابة · link-local).
+  if (isMetadataHost(host)) return { ok: false, reason: "HOST_BLOCKED" };
+  // اسم خدمة docker بلا نقطة: مرور سريع تحت العلم (قد لا يحل DNS الآن).
   if (privateHost && /^[a-z0-9-]+$/i.test(host) && host.toLowerCase() !== "localhost") return { ok: true, url: value };
-  const verdict = validateHermesEndpoint(value, { allowPrivateNetwork: allowPrivate });
-  if (!verdict.ok) return { ok: false, reason: verdict.reason };
   return { ok: true, url: value };
 }
 
 type LookupFn = (host: string) => Promise<Array<{ address: string; family: number }>>;
 let lookupOverride: LookupFn | null = null;
+const defaultLookup: LookupFn = async (h) => {
+  const resolved = await lookup(h, { all: true });
+  return resolved.map((x) => ({ address: x.address, family: x.family }));
+};
 
 /** للاختبارات فقط: محلّل DNS بديل (الاختبارات لا تلمس الشبكة). */
 export function setIntegrationDnsLookup(fn: LookupFn | null): void {
@@ -118,14 +133,30 @@ export async function checkSystemUrl(raw: string): Promise<{ ok: true; url: stri
   const sync = validateSystemUrl(raw);
   if (!sync.ok) return { ok: false, reason: sync.reason, transient: false };
   const host = new URL(sync.url).hostname.replace(/^\[|\]$/g, "");
-  // الحرفيات (localhost · IP) مصنّفة أعلاه؛ أي اسم آخر — حتى اسم خدمة docker —
-  // يُحلّ DNS ويُرفض إذا أشار لعنوان محجوب (بيانات السحابة الوصفية مثلًا).
-  if (host === "localhost" || host.includes(":") || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return { ok: true, url: sync.url };
-  const dns = await assertHermesEndpointResolves(sync.url, {
-    allowPrivateNetwork: privateNetworkAllowed(),
-    ...(lookupOverride ? { lookupFn: lookupOverride } : {}),
-  });
-  if (!dns.ok) return { ok: false, reason: dns.reason, transient: dns.reason === "DNS_RESOLUTION_FAILED" };
+  // الحرفيات (localhost · IP) مصنّفة في validateSystemUrl؛ أي اسم آخر — حتى اسم
+  // خدمة docker — يُحلّ DNS ويُرفض إذا أشار لعنوان محجوب (بِانات السحابة مثال).
+  if (host === "localhost" || host.includes(":") || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    return isMetadataHost(host) ? { ok: false, reason: "HOST_BLOCKED", transient: false } : { ok: true, url: sync.url };
+  }
+  const lookupFn = lookupOverride ?? defaultLookup;
+  let addrs: Array<{ address: string; family: number }>;
+  try {
+    addrs = await lookupFn(host);
+  } catch {
+    return { ok: false, reason: "DNS_RESOLUTION_FAILED", transient: true };
+  }
+  if (!addrs.length) return { ok: false, reason: "DNS_RESOLUTION_FAILED", transient: true };
+  const allowPrivate = privateNetworkAllowed();
+  for (const a of addrs) {
+    const addr = a.address.toLowerCase().split("%")[0];
+    if (a.family === 6 || addr.includes(":")) {
+      if (addr !== "::1" || !allowPrivate) return { ok: false, reason: "DNS_NOT_GLOBAL_UNICAST", transient: false };
+      continue;
+    }
+    if (!/\d+\.\d+\.\d+\.\d+/.test(addr)) return { ok: false, reason: "DNS_NOT_GLOBAL_UNICAST", transient: false };
+    if (isMetadataHost(addr)) return { ok: false, reason: "DNS_NOT_GLOBAL_UNICAST", transient: false };
+    if (isPrivateHost(addr) && !allowPrivate) return { ok: false, reason: "DNS_NOT_GLOBAL_UNICAST", transient: false };
+  }
   return { ok: true, url: sync.url };
 }
 

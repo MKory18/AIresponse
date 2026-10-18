@@ -145,13 +145,14 @@ describe("P7-2 trigger mapping (trusted events only)", () => {
     expect(eventToWorkflowTrigger("MessageReceived", {})).toBe("MESSAGE_RECEIVED");
     expect(eventToWorkflowTrigger("ConversationCreated", {})).toBe("CONVERSATION_CREATED");
     expect(eventToWorkflowTrigger("ConversationUpdated", { type: "HumanHandoffCreated" })).toBe("HANDOFF_CREATED");
-    expect(eventToWorkflowTrigger("ConversationUpdated", { type: "OmsStatusChanged" })).toBe("ORDER_STATUS_CHANGED_FROM_OMS");
+    // OMS sub-events no longer have a trigger (the AI-only path orders internally).
+    expect(eventToWorkflowTrigger("ConversationUpdated", { type: "OmsStatusChanged" })).toBeNull();
     expect(eventToWorkflowTrigger("ConversationUpdated", { status: "RESOLVED" })).toBe("CONVERSATION_STATUS_CHANGED");
     expect(eventToWorkflowTrigger("ConversationAssigned", {})).toBe("CONVERSATION_ASSIGNED");
     expect(eventToWorkflowTrigger("CustomerUpdated", { type: "tag" })).toBe("CUSTOMER_TAGGED");
     expect(eventToWorkflowTrigger("CustomerUpdated", { fields: ["name"] })).toBeNull();
     expect(eventToWorkflowTrigger("OrderConfirmed", {})).toBe("ORDER_CONFIRMED");
-    expect(eventToWorkflowTrigger("OrderStateChanged", {})).toBe("ORDER_STATUS_CHANGED_FROM_OMS");
+    expect(eventToWorkflowTrigger("OrderStateChanged", {})).toBeNull();
     expect(eventToWorkflowTrigger("ProductCreated", {})).toBeNull();
   });
 });

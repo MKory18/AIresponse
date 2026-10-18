@@ -1,14 +1,10 @@
 /**
  * Wave 2 — دفعة تكميلية من نفس الفحص الكامل (docs/CODE-REVIEW-OCR-2026-10-16.md):
- * سباق إنشاء الحدث ← طابور المهمة · تجميع العاملات المحدود لمزامنة الـ OMS ·
- * أسرار القنوات مشفّرة وسكونًا مع قراءة متسامحة للصفوف القديمة · رموز الرفض
- * النهائي للترحيل التلقائي.
+ * سباق إنشاء الحدث ← طابور المهمة · تجميع العاملات المحدود ·
+ * أسرار القنوات مشفّرة وسكونًا مع قراءة متسامحة للصفوف القديمة.
  * كل اختبار هون كان بيفشل قبل التصليح (قاعدة المشروع).
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Prisma } from "@prisma/client";
-import { createFakeDb } from "./helpers/inmemory-db";
-import { AppError } from "@/core/errors";
+import { describe, expect, it } from "vitest";
 import { atomically } from "@/modules/channels/webhook-tx";
 import { runPool } from "@/modules/util/pool";
 import {
@@ -104,41 +100,5 @@ describe("OCR wave2 — channel secrets at rest (encrypted write, lenient read)"
     const meta = { tgWebhookSecretEnc: encryptSecret("x") };
     const enc = (meta as { tgWebhookSecretEnc: string }).tgWebhookSecretEnc;
     expect(decryptSecret(enc)).toBe("x");
-  });
-});
-
-// ── 4) رموز الرفض النهائي للترحيل التلقائي ──
-describe("OCR wave2 — auto-handoff definitive refusals", () => {
-  afterEach(() => {
-    vi.doUnmock("@/modules/oms/handoff");
-    vi.resetModules();
-  });
-
-  it("OMS_URL_REJECTED is final: audited refusal, no retry churn", async () => {
-    vi.doMock("@/modules/oms/handoff", () => ({
-      handoffOrderToOms: async () => {
-        throw new AppError("رابط مرفوض", 422, "OMS_URL_REJECTED");
-      },
-    }));
-    const { handleAutoHandoffJob } = await import("@/modules/oms/auto-handoff");
-    const db = createFakeDb();
-    const res = await handleAutoHandoffJob(db as unknown as Prisma.TransactionClient, { orderId: "ord-1" }, "ws-x");
-    expect(res.success).toBe(true);
-    const audits = (db as unknown as { _stores: { auditLog: Array<{ action: string; metadata?: { code?: string } }> } })
-      ._stores.auditLog;
-    const refusal = audits.find((a) => a.action === "oms.auto_handoff_refused");
-    expect(refusal?.metadata?.code).toBe("OMS_URL_REJECTED");
-  });
-
-  it("transient codes keep retrying (success:false)", async () => {
-    vi.doMock("@/modules/oms/handoff", () => ({
-      handoffOrderToOms: async () => {
-        throw new AppError("شبكة", 503, "OMS_UNREACHABLE");
-      },
-    }));
-    const { handleAutoHandoffJob } = await import("@/modules/oms/auto-handoff");
-    const db = createFakeDb();
-    const res = await handleAutoHandoffJob(db as unknown as Prisma.TransactionClient, { orderId: "ord-2" }, "ws-x");
-    expect(res.success).toBe(false);
   });
 });

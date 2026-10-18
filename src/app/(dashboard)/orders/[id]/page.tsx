@@ -11,11 +11,8 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
-import { OmsHandoffCard, type OmsConnSummary, type OmsOrderFields, type OmsOrderState } from "@/components/orders/oms-handoff-card";
 
-type OrderDetail = OmsOrderFields & {
-  oms: OmsConnSummary | null;
-  omsState?: OmsOrderState | null;
+type OrderDetail = {
   canWrite?: boolean;
   id: string;
   orderNumber: string;
@@ -209,8 +206,7 @@ export default function OrderDetailPage() {
               </>
             )}
           </GlassCard>
-          {/* P12 — ترحيل الطلب للـ OMS (API أو يدوي) ومصدره (إعلان · رمز) */}
-          <OmsHandoffCard order={order} oms={order.oms} state={order.omsState ?? null} canWrite={order.canWrite !== false} onChanged={load} />
+          {/* مصدر الطلب (إعلان · رمز نقرة) */}
           <GlassCard className="space-y-1.5 p-4 text-xs">
             <h2 className="mb-1 text-sm font-bold text-ink">الحالات</h2>
             <p className="flex items-center justify-between text-ink-muted">الطلب <StatusBadge value={order.status} dot /></p>

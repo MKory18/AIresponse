@@ -9,7 +9,7 @@
 import { childLogger } from "@/core/logger";
 import { NotFoundError } from "@/core/errors";
 import type { AIProvider } from "../provider";
-import { loadAISettings, logUsage, getWorkspaceProvider, isHermesSelected, isHermesPersonaMode, type AISettingsLike } from "../router";
+import { loadAISettings, logUsage, getWorkspaceProvider, type AISettingsLike } from "../router";
 import { PROMPT_VERSIONS, type PersonaConfig } from "../prompts";
 import { resolveChannelPersona } from "../channel-persona";
 import { recordAudit } from "@/modules/audit/service";
@@ -223,8 +223,7 @@ export async function runGating(
 
   // Fail-closed: a misconfigured real provider must never produce fake
   // replies. Surface AI_FAILED (job retry + audit) with zero outbound sends
-  // and zero order/memory writes. On the external-provider path (Hermes) no
-  // HumanHandoff is created either — the conversation stays OPEN and the
+  // and zero order/memory writes — the conversation stays OPEN and the
   // failure remains visible and reprocessable.
   // P6: the workspace AISettings.provider choice is EFFECTIVE (not display-
   // only): resolution prefers it when its key exists, else ENV, else throws.
@@ -251,17 +250,6 @@ export async function runGating(
         status: "AI_FAILED",
         error: `PERMANENT: ${message_text}`,
       });
-      if (!isHermesSelected(settings, process.env.AI_PROVIDER) && process.env.AI_DISABLE_AUTO_HANDOFF !== "true") {
-        const { createHandoff } = await import("@/modules/handoffs/handoff-service");
-        await createHandoff(db, {
-          workspaceId: params.workspaceId,
-          conversationId: conversation.id,
-          customerId: customer.id,
-          reason: "AI_FAILURE",
-          metadata: { messageId: message.id, error: message_text },
-          actorUserId: "ai-agent",
-        });
-      }
       await recordAudit(db, {
         workspaceId: params.workspaceId,
         action: "conversation.ai_failed",
@@ -273,15 +261,11 @@ export async function runGating(
     return { terminal: { status: "AI_FAILED", error: `PERMANENT: ${message_text}` } };
   }
 
-  // External-provider reply path (Hermes): the selected local persona still
-  // drives voice (resolved below); automatic handoffs stay suspended.
-  const hermesPersona = isHermesPersonaMode(provider);
-
   // Persona resolution — ALWAYS active. The selected persona (channel →
   // workspace default → builtin) drives reply voice in every provider mode:
-  // the external gateway carries no personaId parameter, so the published
-  // local instructions travel inside the request via the standard message
-  // builder (proven by tests). Telemetry records the real persona id/version.
+  // the published local instructions travel inside the request via the
+  // standard message builder (proven by tests). Telemetry records the real
+  // persona id/version.
   const persona: PersonaConfig = {
     name: resolvedPersona.name,
     language: resolvedPersona.language,
@@ -319,7 +303,6 @@ export async function runGating(
       settings,
       persona,
       activePersona,
-      hermesPersona,
       customer,
       channelRow,
       customerText,

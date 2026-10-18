@@ -123,7 +123,7 @@ describe("fail-closed orchestrator: no fake replies, visible failure", () => {
     return { conversationId: res.conversationId, messageId: inbound.id };
   }
 
-  it("misconfigured provider → AI_FAILED + handoff + zero outbound AI sends", async () => {
+  it("misconfigured provider → AI_FAILED + zero outbound AI sends (no handoff row)", async () => {
     const { conversationId, messageId } = await seedInbound("بكم السعر؟");
     setMockAIProvider(undefined);
     process.env.AI_PROVIDER = "openrouter";
@@ -146,12 +146,12 @@ describe("fail-closed orchestrator: no fake replies, visible failure", () => {
       (m) => m.direction === "OUTBOUND" && m.senderType === "AI"
     );
     expect(outboundAI).toHaveLength(0);
-    // Failure is visible: OPEN handoff + failed usage log. The thread stays
-    // AI_ACTIVE (alert only — takeover is manual).
+    // Failure is visible in the failed usage log; the thread stays AI_ACTIVE
+    // (recovery via job retry + the orphan sweeper — no human handoff row).
     const handoffs = (db._stores.humanHandoff as any[]).filter(
       (h) => h.conversationId === conversationId && h.status === "OPEN"
     );
-    expect(handoffs.length).toBeGreaterThanOrEqual(1);
+    expect(handoffs.length).toBe(0);
     const conv = (db._stores.conversation as any[]).find((c) => c.id === conversationId);
     expect(conv.aiState).toBe("AI_ACTIVE");
     const usage = (db._stores.aIUsageLog as any[]).filter(

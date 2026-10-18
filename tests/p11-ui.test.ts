@@ -10,7 +10,7 @@ describe("P11-1 Arabic labels cover raw enums rendered in UI", () => {
     const triggers = [
       "MESSAGE_RECEIVED", "CONVERSATION_CREATED", "CONVERSATION_STATUS_CHANGED",
       "CONVERSATION_ASSIGNED", "HANDOFF_CREATED", "CUSTOMER_TAGGED", "CUSTOMER_CREATED",
-      "ORDER_CREATED", "ORDER_CONFIRMED", "ORDER_CANCELLED", "ORDER_STATUS_CHANGED_FROM_OMS",
+      "ORDER_CREATED", "ORDER_CONFIRMED", "ORDER_CANCELLED",
       "ORDER_DELIVERED",
     ];
     for (const tr of triggers) expect(LABELS[tr], `missing label for ${tr}`).toBeTruthy();

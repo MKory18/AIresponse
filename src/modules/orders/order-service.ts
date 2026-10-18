@@ -234,12 +234,6 @@ export async function createOrderFromDraft(
   } catch {
     // الإسناد معلومة إضافية — غيابها ما بيوقف الطلب
   }
-  try {
-    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
-    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, order.id);
-  } catch {
-    // الترحيل التلقائي بيتأجل للزر اليدوي بصفحة الطلب
-  }
 
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,

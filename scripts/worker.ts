@@ -20,14 +20,14 @@ import { runIntegrationScheduler } from "../src/modules/integrations/scheduler";
 import { childLogger } from "../src/core/logger";
 
 const log = childLogger("worker");
-const POLL_INTERVAL_RAW = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
+const POLL_INTERVAL_RAW = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 1000);
 const POLL_INTERVAL_MS =
-  Number.isFinite(POLL_INTERVAL_RAW) && POLL_INTERVAL_RAW >= 1000 ? POLL_INTERVAL_RAW : 5000;
+  Number.isFinite(POLL_INTERVAL_RAW) && POLL_INTERVAL_RAW >= 250 ? POLL_INTERVAL_RAW : 1000;
 // PERF — short re-poll after a full batch (backlog draining); idle cadence
 // unchanged. Tunable without code changes; safe default.
 const BUSY_POLL_RAW = Number(process.env.WORKER_BUSY_POLL_MS ?? 250);
 const BUSY_POLL_MS = Number.isFinite(BUSY_POLL_RAW) && BUSY_POLL_RAW >= 50 ? BUSY_POLL_RAW : 250;
-const CYCLE_LIMIT = 10;
+const CYCLE_LIMIT = 25;
 const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
 
 let stopping = false;
