@@ -34,8 +34,10 @@ const PROVIDER_AR: Record<string, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
   internal: "داخلي",
+  hermes: "الوكيل الذكي (سيرفرك)",
 };
 const providerLabel = (p: string) => PROVIDER_AR[p] ?? p;
+const PROVIDER_OPTIONS = ["hermes", "openai", "openrouter", "internal", "mock"];
 
 export default function AISettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -148,12 +150,12 @@ export default function AISettingsPage() {
         </h2>
         <p className="mt-2.5 flex items-start gap-1.5 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300">
           <KeyRound size={14} className="mt-0.5 shrink-0" />
-          مفاتيح الـ API تُدار حصراً عبر متغيرات البيئة على الخادم ولا تُعرض أو تُعدّل من هنا.
+          المفاتيح وعناوين الاتصال تُضبط على بيئة الخادم فقط ولا تُعدل من هنا (أسماء المتغيرات موثّقة في التوثيق التقني).
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="المزود">
+          <Field label="المزود" hint="الوكيل الذكي على سيرفرك هو المسؤول عن الذكاء؛ OpenAI وOpenRouter بوابات بديلة.">
             <Select name="provider" defaultValue={settings.provider}>
-              {["mock", "openai", "openrouter", "internal"].map((p) => (
+              {PROVIDER_OPTIONS.map((p) => (
                 <option key={p} value={p}>{providerLabel(p)}</option>
               ))}
             </Select>
@@ -170,13 +172,13 @@ export default function AISettingsPage() {
               <Input name={key} defaultValue={(settings as never as Record<string, string | null>)[key] ?? ""} dir="ltr" className="num" />
             </Field>
           ))}
-          <Field label="عنوان النموذج الداخلي (OpenAI-compatible، اختياري)">
+          <Field label="عنوان الوكيل الذكي أو النموذج الداخلي (OpenAI-compatible، اختياري)" hint="العناوين العامة تُفحص تلقائيًا هنا؛ العناوين المحلية (سيرفرك) تُضبط من بيئة الخادم.">
             <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://…" />
           </Field>
           <Field label="مزود البديل (عند الفشل فقط)">
             <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>
               <option value="">بلا بديل</option>
-              {["mock", "openai", "openrouter", "internal"].map((p) => (
+              {PROVIDER_OPTIONS.map((p) => (
                 <option key={p} value={p}>{providerLabel(p)}</option>
               ))}
             </Select>

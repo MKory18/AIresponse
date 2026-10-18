@@ -469,6 +469,7 @@ model Product {
 
   workspace  Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   variants   ProductVariant[]
+  priceTiers ProductPrice[]
   mediaLinks ProductMedia[]
   catalogLinks CatalogProduct[]
   orderItems OrderItem[]
@@ -497,6 +498,23 @@ model ProductVariant {
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([productId, sku])
+}
+
+// أسعار متعددة للمنتج الواحد (سعر الجملة · سعر العرض · سعر الموزع …)
+// على السعر الأساسي الموجود في Product.price — وحدة العملة نفسها.
+// كل صف = تعريف سعر بوصفه نصيًا، بلا أي سلوك حساب (بلا خصم تلقائي).
+model ProductPrice {
+  id        String   @id @default(cuid())
+  productId String
+  label     String
+  price     Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, label])
+  @@index([productId])
 }
 
 // Ordered product ↔ media relation with a primary asset.

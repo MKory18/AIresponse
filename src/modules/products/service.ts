@@ -5,6 +5,11 @@ import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
 import { CUSTOMER_INBOUND } from "@/modules/media/service";
 
+export interface ProductPriceTierInput {
+  label: string;
+  price: number | string;
+}
+
 export interface ProductInput {
   name: string;
   sku: string;
@@ -23,7 +28,65 @@ export interface ProductInput {
   warnings?: string | null;
   objections?: string[];
   salesNotes?: string | null;
+  priceTiers?: ProductPriceTierInput[];
   isActive?: boolean;
+}
+
+/** تسميات الأسعار المنظمة: بلا فراغات، فريدة، وسعر رقمي ≥ 0 — وبحد أعلى 10. */
+function normalizeTiers(
+  tiers: ProductPriceTierInput[] | undefined,
+  db: Db,
+  productId?: string
+): { label: string; price: string }[] {
+  if (!tiers || tiers.length === 0) return [];
+  if (tiers.length > 10) {
+    throw new AppError("الأسعار الإضافية بحد أقصى 10 أسعار للمنتج", 422, "TOO_MANY_PRICE_TIERS");
+  }
+  const seen = new Set<string>();
+  const out: { label: string; price: string }[] = [];
+  for (const t of tiers) {
+    const label = String(t.label ?? "").trim();
+    const amount = parsePriceAmount(t.price);
+    if (!label || amount === null) {
+      throw new AppError("كل سعر إضافي يحتاج تسمية وسعرًا رقميًا صحيحًا", 422, "INVALID_PRICE_TIER");
+    }
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push({ label, price: amount });
+  }
+  void db; void productId; // دالة صرفة — التوقيع ثابت للاستخدامات الجاية (فحص تعارض)
+  return out;
+}
+
+/**
+ * تحليل قيمة سعر مرنة: رقم أو نص يحوي أرقامًا (كما تأتي من اكسل):
+ * «1,250.00» · «١٥٠» · «JD 12.5» → رقم. null = غير مرموز/سالب.
+ */
+export function parsePriceAmount(v: unknown): string | null {
+  if (typeof v === "number") {
+    if (!Number.isFinite(v) || v < 0) return null;
+    return String(v);
+  }
+  if (typeof v !== "string") return null;
+  const arabicFixed = v.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  const cleaned = arabicFixed.replace(/[^\d.,-]/g, "").replace(/,(\d{3})/g, "$1").replace(/,/g, ".");
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return String(Math.round(n * 100) / 100);
+}
+
+/** استبدال كامل لأشعار السعر: بلا صفوف = حذف الكل (على رؤية الأخير دائمًا). */
+async function applyPriceTiers(db: Db, productId: string, tiers: { label: string; price: string }[]) {
+  const anyDb = db as unknown as { $transaction?: (fn: (tx: Db) => Promise<unknown>) => Promise<unknown> };
+  const write = async (tx: Db) => {
+    await tx.productPrice.deleteMany({ where: { productId } });
+    if (tiers.length > 0) {
+      await tx.productPrice.createMany({ data: tiers.map((t) => ({ productId, label: t.label, price: t.price })) });
+    }
+  };
+  if (typeof anyDb.$transaction === "function") return anyDb.$transaction(write);
+  return write(db);
 }
 
 export async function createProduct(db: Db, ctx: ActorContext, input: ProductInput) {
@@ -33,9 +96,14 @@ export async function createProduct(db: Db, ctx: ActorContext, input: ProductInp
   });
   if (clash) throw new ConflictError("A product with this SKU already exists");
 
+  // تدقيق الأسعار قبل الإنشاء — رفض صريح ما يخلّي منتج مأكول بلا أسعار سليمة.
+  const tiers = normalizeTiers(input.priceTiers, db);
+
   const product = await db.product.create({
-    data: { ...input, workspaceId: ctx.workspaceId } as Prisma.ProductUncheckedCreateInput,
+    data: { ...input, priceTiers: undefined, workspaceId: ctx.workspaceId } as Prisma.ProductUncheckedCreateInput,
   });
+
+  if (tiers.length > 0) await db.productPrice.createMany({ data: tiers.map((t) => ({ productId: product.id, label: t.label, price: t.price })) });
 
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
@@ -53,12 +121,23 @@ export async function getOwnedProduct(db: Db, workspaceId: string, productId: st
     where: { id: productId },
     include: {
       variants: true,
+      priceTiers: true,
       mediaLinks: { include: { mediaAsset: true }, orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }] },
       faqs: { where: { isActive: true } },
     },
   });
   if (!product || product.workspaceId !== workspaceId) throw new NotFoundError("Product");
   return product;
+}
+
+/** أسعار المنتج الإضافية بلغة العرض — تُغذّى للذكاء كسنة موثوقة. */
+export function priceTierLines(
+  tiers: { label: string; price: string | number }[] | undefined | null
+): string[] {
+  if (!tiers || tiers.length === 0) return [];
+  return tiers
+    .filter((t) => t.label && t.price !== undefined && t.price !== null && String(t.price) !== "")
+    .map((t) => `${String(t.label).trim()}: ${Number(t.price).toLocaleString()}`);
 }
 
 export async function listProducts(
@@ -89,7 +168,10 @@ export async function listProducts(
 
   const products = await db.product.findMany({
     where,
-    include: { mediaLinks: { include: { mediaAsset: true }, orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }], take: 1 } },
+    include: {
+      mediaLinks: { include: { mediaAsset: true }, orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }], take: 1 },
+      priceTiers: true,
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
@@ -115,10 +197,20 @@ export async function updateProduct(
     if (clash) throw new ConflictError("A product with this SKU already exists");
   }
 
+  // تدقيق الأسعار قبل التحديث — رفض صريح ما يخلّي تحديث جزئي متضارب.
+  const tiers =
+    data.priceTiers !== undefined ? normalizeTiers(data.priceTiers, db) : null;
+
   const updated = await db.product.update({
     where: { id: productId },
-    data: data as Prisma.ProductUncheckedUpdateInput,
+    data: { ...data, priceTiers: undefined } as Prisma.ProductUncheckedUpdateInput,
   });
+
+  // الأسعار الإضافية: نفس منطق «آخر حالة مرسلة هي الحقيقة» —
+  // غياب المفتاح = ما في تغيير؛ وجوده (حتى فارغ) = استبدال كامل.
+  if (tiers !== null) {
+    await applyPriceTiers(db, productId, tiers);
+  }
 
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,

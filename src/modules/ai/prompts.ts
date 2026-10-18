@@ -110,6 +110,8 @@ export function trustedDataPrompt(data: {
     objections: string[];
     salesNotes: string | null;
     faqs: { question: string; answer: string }[];
+    /** أسعار إضافية مسمّاة (سعر الجملة · موزع …) — بيانات رسمية من النظام. */
+    priceTiers?: { label: string; price: string }[];
     /** P12 — قواعد الادعاءات من سيستم 1. */
     compliance?: { allowedClaims: string[]; bannedClaims: string[] } | null;
   };
@@ -147,6 +149,9 @@ export function trustedDataPrompt(data: {
         "بيانات المنتج (المصدر الرسمي — لا تغير أي رقم):",
         `اسم المنتج: ${p.name}`,
         `السعر الرسمي: ${p.price} ${p.currency}`,
+        p.priceTiers?.length
+          ? `أسعار إضافية مسمّاة (السعر الرسمي فوق هو الأساس): ${p.priceTiers.map((tp) => `${tp.label} ${tp.price}`).join(" · ")}`
+          : null,
         `التوفر: ${p.stockStatus}`,
         p.shortDescription ? `وصف: ${p.shortDescription}` : null,
         p.benefits.length ? `الفوائد: ${p.benefits.join("، ")}` : null,

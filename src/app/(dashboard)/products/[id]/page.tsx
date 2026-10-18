@@ -37,6 +37,7 @@ type ProductDetail = {
   salesNotes: string | null;
   isActive: boolean;
   isArchived: boolean;
+  priceTiers: { id: string; label: string; price: string }[];
   variants: { id: string; name: string; sku: string; price: string; stockQty: number }[];
   mediaLinks: { mediaAsset: MediaAsset; isPrimary: boolean; sortOrder: number }[];
   faqs: Faq[];
@@ -63,6 +64,7 @@ export default function ProductDetailPage() {
   const [mediaSearch, setMediaSearch] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const productFileRef = useRef<HTMLInputElement>(null);
+  const [tiers, setTiers] = useState<{ label: string; price: string }[]>([]);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/products/${params.id}`);
@@ -70,7 +72,9 @@ export default function ProductDetailPage() {
       setError("المنتج غير موجود");
       return;
     }
-    setProduct(await res.json());
+    const data = (await res.json()) as ProductDetail;
+    setProduct(data);
+    setTiers(data.priceTiers.map((t) => ({ label: t.label, price: String(Number(t.price)) })));
     const mediaRes = await fetch("/api/media?limit=50");
     if (mediaRes.ok) setMediaAssets((await mediaRes.json()).items);
   }, [params.id]);
@@ -79,7 +83,7 @@ export default function ProductDetailPage() {
     load();
   }, [load]);
 
-  async function patchSection(section: string, form: HTMLFormElement) {
+  async function patchSection(section: string, form: HTMLFormElement, extra: Record<string, unknown> = {}) {
     const fd = new FormData(form);
     setSaving(true);
     setSaved(false);
@@ -93,6 +97,7 @@ export default function ProductDetailPage() {
         payload[key] = value === "" ? null : value;
       }
     }
+    Object.assign(payload, extra);
     const res = await fetch(`/api/products/${params.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -290,7 +295,10 @@ export default function ProductDetailPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              patchSection("pricing", e.currentTarget);
+              const filled = tiers
+                .map((t) => ({ label: t.label.trim(), price: t.price }))
+                .filter((t) => t.label !== "" && t.price !== "");
+              patchSection("pricing", e.currentTarget, { priceTiers: filled });
             }}
             className="space-y-3 xl:col-span-2"
           >
@@ -314,6 +322,60 @@ export default function ProductDetailPage() {
                 <Field label="العملة">
                   <Input name="currency" defaultValue={product.currency} dir="ltr" className="num" />
                 </Field>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-ink-muted">أسعار إضافية (سعر الجملة · سعر الموزع …)</h3>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    type="button"
+                    disabled={tiers.length >= 10}
+                    onClick={() => setTiers((s) => [...s, { label: "", price: "" }])}
+                  >
+                    + سعر إضافي
+                  </Button>
+                </div>
+                {tiers.length === 0 ? (
+                  <p className="glass-subtle rounded-lg px-3 py-2 text-[11px] text-ink-subtle">
+                    ما في أسعار إضافية — السعر الأساسي فوق هو الوحيد. الكمية إلى غاية 10 أسعار.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {tiers.map((tr, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <Input
+                          value={tr.label}
+                          onChange={(e) => setTiers((s) => s.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                          placeholder="التسمية (مثل سعر الجملة)"
+                          aria-label={`تسمية السعر الإضافي ${i + 1}`}
+                          className="flex-1"
+                        />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={tr.price}
+                          onChange={(e) => setTiers((s) => s.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))}
+                          placeholder="0.00"
+                          aria-label={`قيمة السعر الإضافي ${i + 1}`}
+                          dir="ltr"
+                          className="num w-28 shrink-0"
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          type="button"
+                          className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                          aria-label={`حذف السعر ${i + 1}`}
+                          onClick={() => setTiers((s) => s.filter((_, j) => j !== i))}
+                        >
+                          حذف
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               {product.variants.length > 0 && (
                 <div>

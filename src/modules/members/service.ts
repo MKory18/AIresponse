@@ -1,6 +1,7 @@
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { isPermission } from "@/modules/rbac/permissions";
+import { hashPassword, verifyPassword } from "@/modules/auth/password";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import type { MemberStatus, Prisma, UserRole } from "@prisma/client";
 
@@ -335,4 +336,101 @@ export async function removeMember(db: Db, ctx: ActorContext, memberId: string) 
     entityId: member.id,
   });
   return { removed: true };
+}
+
+/**
+ * إنشاء حساب جديد مباشرة من إدارة الفريق (اسم + بريد + كلمة مرور).
+ * يختلف عن الدعوة: الدعوة تتطلب أن يكون صاحب البريد قد سجّل سابقًا، وهنا
+ * ينشئ الإدارة المستخدم نفسه + عضوية ACTIVE في الطلب الواحد — لا بريد ولا
+ * رابط مطلوب (لا SMTP في النظام). كلمة المرور تُخزَّن معماة فقط.
+ */
+export async function createMember(
+  db: Db,
+  ctx: ActorContext,
+  input: { name: string; email: string; password: string; role: string; permissions?: string[] }
+) {
+  const email = input.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) {
+    throw new AppError("Invalid email address", 422, "INVALID_EMAIL");
+  }
+  if (input.name.trim().length < 2 || input.name.trim().length > 100) {
+    throw new AppError("Name must be 2-100 characters", 422, "INVALID_NAME");
+  }
+  if (input.password.length < 8 || input.password.length > 128) {
+    throw new AppError("Password must be 8-128 characters", 422, "INVALID_PASSWORD");
+  }
+  assertAssignableRole(input.role);
+  if (input.permissions !== undefined) assertValidPermissions(input.permissions);
+  if (input.role === "OWNER") {
+    assertOwnerRank(await getActorRole(db, ctx));
+  }
+
+  const existing = (await db.user.findUnique({ where: { email } })) as { id: string } | null;
+  if (existing) {
+    throw new AppError(
+      "هذا البريد مسجل بحساب موجود مسبقًا — استعمل الدعوة العادية لربطه بالفريق",
+      409,
+      "EMAIL_TAKEN"
+    );
+  }
+
+  const passwordHash = await hashPassword(input.password);
+  const user = (await db.user.create({
+    data: { email, name: input.name.trim(), passwordHash },
+  })) as { id: string };
+  const member = await db.workspaceMember.create({
+    data: {
+      workspaceId: ctx.workspaceId,
+      userId: user.id,
+      role: input.role,
+      permissions: input.permissions ?? [],
+      status: "ACTIVE",
+    },
+  });
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "member.created",
+    entityType: "WorkspaceMember",
+    entityId: (member as { id: string }).id,
+    // كلمة المرور لا تُسجَّل بأي شكل — البريد والرتبة فقط.
+    metadata: { email, role: input.role, createdDirectly: true },
+  });
+  return member;
+}
+
+/**
+ * إعادة تعيين كلمة مرور عضو من الإدارة (مثلاً نسيانها). التعديل الذاتي
+ * ممنوع — لذلك باب «حسابي» بكلمة المرور الحالية. اللمس لصف OWNER يطلب
+ * رتبة OWNER، والقيمة المعماة فقط هي التي تُكتب، وما يُسجَّل بالتدقيق.
+ */
+export async function resetMemberPassword(
+  db: Db,
+  ctx: ActorContext,
+  memberId: string,
+  input: { newPassword: string }
+) {
+  const member = await getOwnedMember(db, ctx.workspaceId, memberId);
+  if (member.userId === ctx.userId) {
+    throw new AppError("Members cannot reset their own password here — use account settings", 403, "CANNOT_EDIT_SELF");
+  }
+  if (input.newPassword.length < 8 || input.newPassword.length > 128) {
+    throw new AppError("Password must be 8-128 characters", 422, "INVALID_PASSWORD");
+  }
+  if (member.role === "OWNER") {
+    assertOwnerRank(await getActorRole(db, ctx));
+  }
+  await db.user.update({
+    where: { id: member.userId },
+    data: { passwordHash: await hashPassword(input.newPassword) },
+  });
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "member.password_reset",
+    entityType: "WorkspaceMember",
+    entityId: member.id,
+    metadata: { targetUserId: member.userId },
+  });
+  return { id: member.id, userId: member.userId, passwordReset: true };
 }
