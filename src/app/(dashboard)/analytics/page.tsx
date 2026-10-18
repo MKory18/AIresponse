@@ -292,8 +292,7 @@ export default function AnalyticsPage() {
                 </div>
               )}
               <p className="text-xs text-ink-muted">
-                القمع: مسودة طلب ≠ بيع — المؤكد فقط يُحسب مبيعًا مؤكدًا، والمسلَّم بعد قبول OMS الفعلي.
-                تكامل OMS الحي: <span className="font-bold">غير متحقق</span> — قيم OMS تظهر بحالة صريحة.
+                القمع: مسودة طلب ≠ بيع — المؤكد فقط يُحسب مبيعًا مؤكدًا، والمسلَّم بعد القبول الفعلي.
               </p>
             </GlassCard>
           )}
@@ -336,8 +335,7 @@ export default function AnalyticsPage() {
                     <KV k="متوسط قيمة الطلب المؤكد" v={Number(jget(data.orders, "confirmed") ?? 0) > 0 ? Number(jget(data.orders, "gmv", "confirmedGmv") ?? 0) / Number(jget(data.orders, "confirmed")) : null} />
                   </div>
                   <p className="text-xs text-ink-muted">
-                    مسودة الطلب (OrderDraft) لا تُحسب بيعًا؛ ترحيل الطلب إلى OMS ≠ تسليم ≠ تحصيل.
-                    بيانات الشحن/التسليم الحية من OMS: <span className="font-bold">غير متحققة</span> (تكامل OMS الحي غير متحقق).
+                    مسودة الطلب (OrderDraft) لا تُحسب بيعًا؛ الطلب المؤكد ≠ تسليم ≠ تحصيل.
                   </p>
                 </>
               ) : null}

@@ -350,9 +350,9 @@ describe("P12 tokens — أقل صلاحية · تجزئة فقط · إيقاف 
 
   it("النص يُعرض مرة ويُحفظ كتجزئة، والإيقاف يقتله فورًا", async () => {
     const db = fake();
-    const { token, view } = await createIntegrationToken(db, ctx, { system: "hermes-bridge" });
-    expect(token).toMatch(/^zr_hrm_/);
-    expect(view.scopes).toEqual(["agent.read", "agent.draft"]);
+    const { token, view } = await createIntegrationToken(db, ctx, { system: "clipper" });
+    expect(token).toMatch(/^zr_clp_/);
+    expect(view.scopes).toEqual(["retarget.create", "retarget.read"]);
     const row = (db as any)._stores.integrationToken[0];
     expect(row.tokenHash).toBe(hashToken(token));
     expect(JSON.stringify(row)).not.toContain(token);

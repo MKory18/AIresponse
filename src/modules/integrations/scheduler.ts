@@ -9,7 +9,6 @@ import {
   enqueueWeeklyQuestionsIdea,
 } from "./ops-signals";
 import { emitRetargetResult, sweepUnverifiedCodes } from "./clipper";
-import { sweepStuckOmsHandoffs } from "@/modules/oms/auto-handoff";
 import { timezoneOffsetMinutes } from "@/core/analytics/time";
 
 /**
@@ -59,10 +58,6 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
   const fiveMin = due("capacity", FIVE_MIN, t);
   const hourly = due("hourly", HOUR, t);
   if (!fiveMin && !hourly) return;
-
-  // الـ OMS بجدوله الخاص (مش IntegrationConnection): ترحيل تلقائي فشل لأن الـ
-  // OMS كان واقف ← إعادة بنفس المفتاح.
-  if (hourly) await sweepStuckOmsHandoffs(db, now).catch((err) => log.error({ err }, "oms_handoff_sweep_failed"));
 
   // مدة الاحتفاظ بوسائط الزبون الواردة: كنس عام (الوسيط مربوط برسالته،
   // مش بمساحة مربوطة بنظام) — بيحذف الملف والصف ويختم الرسالة بعلامة.

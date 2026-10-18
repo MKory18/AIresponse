@@ -7,12 +7,10 @@ import { saveIntegrationConnection, setIntegrationDnsLookup } from "@/modules/in
 import { createIntegrationToken, revokeIntegrationToken } from "@/modules/integrations/tokens";
 import { signZakiPayload, unixSeconds } from "@/modules/integrations/signing";
 import { captureAttribution } from "@/modules/integrations/attribution";
-import { saveOmsConnection } from "@/modules/oms/connection";
 import { GET as capacityGET } from "@/app/api/v1/capacity/route";
 import { POST as retargetPOST } from "@/app/api/v1/retarget-campaigns/route";
 import { GET as retargetGET } from "@/app/api/v1/retarget-campaigns/[id]/route";
 import { POST as zakiWebhookPOST } from "@/app/api/v1/webhooks/[system]/route";
-import { POST as omsWebhookPOST } from "@/app/api/webhooks/oms/[key]/route";
 
 /**
  * P12 — مسارات HTTP الحقيقية التي تناديها أنظمة المنظومة، فوق حدود قاعدة
@@ -40,7 +38,6 @@ const WS = "ws-p12-routes-0001";
 const WS_B = "ws-p12-routes-b";
 const ctx = { userId: "owner-1", workspaceId: WS };
 const ctxB = { userId: "owner-b", workspaceId: WS_B };
-const OMS_SECRET = "test-oms-webhook-secret-0000000000000001";
 
 beforeAll(() => setIntegrationDnsLookup(async () => [{ address: "93.184.216.34", family: 4 }]));
 afterAll(() => setIntegrationDnsLookup(null));
@@ -62,7 +59,7 @@ async function json(res: Response): Promise<Row> {
   return (await res.json()) as Row;
 }
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
-async function token(system: "mediabuyer" | "clipper" | "hermes-bridge", c = ctx, extra: Row = {}) {
+async function token(system: "mediabuyer" | "clipper", c = ctx, extra: Row = {}) {
   return (await createIntegrationToken(asDb(), c, { system, ...extra })).token;
 }
 
@@ -321,7 +318,7 @@ describe("P12 POST /api/v1/webhooks/[system] — أحداث سيستم 1 الم�
   });
 
   it("نظام بلا أحداث واردة أو غير معروف · مساحة ناقصة/مجهولة = 404", async () => {
-    for (const system of ["clipper", "oms", "nope", "mediabuyer"]) expect((await signed(envelope(), { system })).status).toBe(404);
+    for (const system of ["clipper", "nope", "mediabuyer"]) expect((await signed(envelope(), { system })).status).toBe(404);
     expect((await signed(envelope(), { ws: null })).status).toBe(404);
     expect((await signed(envelope(), { ws: "ghost" })).status).toBe(404);
     expect((await signed(envelope(), { ws: "bad slug!" })).status).toBe(404);
@@ -353,166 +350,3 @@ describe("P12 POST /api/v1/webhooks/[system] — أحداث سيستم 1 الم�
   });
 });
 
-// ───────────────────── POST /api/webhooks/oms/{key} ─────────────────────
-
-describe("P12 POST /api/webhooks/oms/[key] — أحداث تطبيقات الـ OMS الحقيقية", () => {
-  let key: string;
-  let shippedOrder: Row;
-  let manualOrder: Row;
-
-  async function seedOrder(o: Row) {
-    const cu = (await db().customer.create({ data: { workspaceId: o.workspaceId ?? WS, phone: `09${Math.floor(Math.random() * 1e8)}` } } as never)) as Row;
-    return (await db().order.create({
-      data: { workspaceId: WS, orderNumber: `ORD-${Math.random()}`, customerId: cu.id, status: "CONFIRMED", confirmationStatus: "CONFIRMED_BY_CUSTOMER", omsOrderId: null, omsOrderNumber: null, ...o },
-    } as never)) as Row;
-  }
-
-  beforeEach(async () => {
-    await saveOmsConnection(asDb(), ctx, { baseUrl: "https://oms.zaki.io", mode: "manual", webhookSecret: OMS_SECRET });
-    key = db()._stores.omsConnection[0].webhookKey;
-    shippedOrder = await seedOrder({ omsOrderId: "cm_oms_1" });
-    manualOrder = await seedOrder({ omsOrderNumber: "1001", handoffMode: "manual" });
-  });
-
-  /** توقيع الـ OMS الحقيقي: X-Zaki-Timestamp بالميلي ثانية و sha256= على "<ts>.<body>". */
-  function omsSign(raw: string, secret = OMS_SECRET, ts = String(Date.now())) {
-    return { ts, sig: `sha256=${nodeCrypto.createHmac("sha256", secret).update(`${ts}.${raw}`).digest("hex")}` };
-  }
-  function send(raw: string, o: { key?: string; delivery?: string; secret?: string; ts?: string; sig?: string; event?: string } = {}) {
-    const s = omsSign(raw, o.secret, o.ts);
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "x-zaki-event": o.event ?? "order.shipped",
-      "x-zaki-delivery": o.delivery ?? `dlv_${Math.random().toString(36).slice(2)}`,
-      "x-zaki-timestamp": o.ts ?? s.ts,
-      "x-zaki-signature": o.sig ?? s.sig,
-    };
-    const k = o.key ?? key;
-    return omsWebhookPOST(req(`/api/webhooks/oms/${k}`, { method: "POST", headers, body: raw }), { params: { key: k } });
-  }
-  const event = (ev: string, data: Row) => JSON.stringify({ event: ev, at: new Date().toISOString(), data });
-  const order = (id: string) => db()._stores.order.find((o) => o.id === id)!;
-
-  it("مفتاح المسار المولّد يطابق صيغة المسار، والحدث الموقّع يحرّك المرآة (مؤكد ← بالتوصيل)", async () => {
-    expect(key).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
-    const res = await send(event("order.shipped", { orderId: "cm_oms_1", orderNumber: "77", shippingStatus: "SHIPPED", total: "455000.00", currency: "SYP" }), { delivery: "dlv_1" });
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ ok: true, outcome: "applied", orderId: shippedOrder.id, appliedLocalStatus: "OUT_FOR_DELIVERY", duplicate: false, stale: false });
-    expect(order(shippedOrder.id)).toMatchObject({ status: "OUT_FOR_DELIVERY", omsStatus: "SHIPPED" });
-    expect(db()._stores.omsConnection[0].lastWebhookAt).toBeTruthy();
-  });
-
-  it("طلب ملتقط بيتعاد بـ X-Zaki-Delivery جديد (غير موقّع) خلال 5 دقايق = مكرر بلا أثر", async () => {
-    const raw = event("order.delivered", { orderId: "cm_oms_1" });
-    const first = await send(raw, { delivery: "dlv_real" });
-    expect(await json(first)).toMatchObject({ outcome: "applied", duplicate: false });
-    const auditsBefore = db()._stores.auditLog.length;
-    const replay = await send(raw, { delivery: "dlv_replayed_new_id" });
-    expect(replay.status).toBe(200);
-    expect(await json(replay)).toMatchObject({ outcome: "applied", duplicate: true, appliedLocalStatus: null });
-    expect(db()._stores.auditLog.length).toBe(auditsBefore);
-  });
-
-  it("نفس X-Zaki-Delivery = 200 مكرر بلا معالجة ثانية", async () => {
-    const raw = event("order.delivered", { orderId: "cm_oms_1" });
-    await send(raw, { delivery: "dlv_dup" });
-    const auditsBefore = db()._stores.auditLog.length;
-    const again = await send(raw, { delivery: "dlv_dup" });
-    expect(again.status).toBe(200);
-    expect(await json(again)).toMatchObject({ ok: true, outcome: "applied", duplicate: true, appliedLocalStatus: null });
-    expect(db()._stores.auditLog.length).toBe(auditsBefore);
-    expect(db()._stores.webhookEvent).toHaveLength(1);
-  });
-
-  it("طلب مش إلنا = 200 «تجاهل» (حتى لا يعيد الـ OMS المحاولة ست ساعات) · حدث غير مدعوم = 200 تجاهل", async () => {
-    const res = await send(event("order.shipped", { orderId: "cm_not_ours", orderNumber: "5555" }));
-    expect(res.status).toBe(200);
-    expect(await json(res)).toEqual({ ok: true, outcome: "ignored", reason: "UNKNOWN_ORDER" });
-    const unsupported = await send(event("order.updated", { orderId: "cm_oms_1" }), { event: "order.updated" });
-    expect(await json(unsupported)).toEqual({ ok: true, outcome: "ignored", reason: "UNSUPPORTED_EVENT" });
-    expect(order(shippedOrder.id).status).toBe("CONFIRMED");
-  });
-
-  it("الربط اليدوي بالرقم يكتمل من أول حدث", async () => {
-    const res = await send(event("order.confirmed", { orderId: "cm_real_1001", orderNumber: "1001" }), { event: "order.confirmed" });
-    expect(res.status).toBe(200);
-    expect(order(manualOrder.id)).toMatchObject({ omsOrderId: "cm_real_1001", omsOrderNumber: "1001", omsStatus: "CONFIRMED" });
-  });
-
-  it("الوقت بالثواني مقبول أيضًا (صيغة المنظومة)", async () => {
-    const raw = event("order.shipped", { orderId: "cm_oms_1" });
-    const ts = String(Math.floor(Date.now() / 1000));
-    const res = await send(raw, { ts, sig: `sha256=${nodeCrypto.createHmac("sha256", OMS_SECRET).update(`${ts}.${raw}`).digest("hex")}` });
-    expect(res.status).toBe(200);
-  });
-
-  it("401: توقيع غلط · سر مساحة أخرى · أقدم من 5 دقائق · رؤوس ناقصة — بلا أي أثر", async () => {
-    const raw = event("order.delivered", { orderId: "cm_oms_1" });
-    const bad = await send(raw, { sig: `sha256=${"0".repeat(64)}` });
-    expect(bad.status).toBe(401);
-    expect(await json(bad)).toEqual({ error: "INVALID_SIGNATURE", reason: "BAD_SIGNATURE" });
-    expect((await send(raw, { secret: "zk_other_workspace_secret_0000000" })).status).toBe(401);
-    const stale = await send(raw, { ts: String(Date.now() - 6 * 60_000) });
-    expect(stale.status).toBe(401);
-    expect((await json(stale)).reason).toBe("STALE_TIMESTAMP");
-    const s = omsSign(raw);
-    const tampered = await send(raw.replace("cm_oms_1", "cm_oms_2"), { ts: s.ts, sig: s.sig });
-    expect(tampered.status).toBe(401);
-    const noHeaders = await omsWebhookPOST(req(`/api/webhooks/oms/${key}`, { method: "POST", body: raw }), { params: { key } });
-    expect(noHeaders.status).toBe(401);
-    expect((await json(noHeaders)).reason).toBe("MISSING_HEADERS");
-    expect(order(shippedOrder.id).status).toBe("CONFIRMED");
-    expect(db()._stores.webhookEvent).toHaveLength(0);
-  });
-
-  it("400: JSON مكسور (موقّع) · غلاف غير صالح", async () => {
-    const broken = await send("{not json");
-    expect(broken.status).toBe(400);
-    expect((await json(broken)).error).toBe("MALFORMED_JSON");
-    const env = await send(JSON.stringify({ event: "order.shipped" }));
-    expect(env.status).toBe(400);
-    expect((await json(env)).error).toBe("INVALID_ENVELOPE");
-  });
-
-  it("404: مفتاح بصيغة غلط · مفتاح مجهول · اتصال موقوف — 401 إذا ما في سر توقيع", async () => {
-    const raw = event("order.shipped", { orderId: "cm_oms_1" });
-    expect((await send(raw, { key: "short" })).status).toBe(404);
-    expect((await send(raw, { key: "has.dots.and.more.chars" })).status).toBe(404);
-    expect((await send(raw, { key: "A".repeat(24) })).status).toBe(404);
-    db()._stores.omsConnection[0].isActive = false;
-    expect((await send(raw)).status).toBe(404);
-    db()._stores.omsConnection[0].isActive = true;
-    db()._stores.omsConnection[0].webhookSecretEncrypted = null;
-    const noSecret = await send(raw);
-    expect(noSecret.status).toBe(401);
-    expect((await json(noSecret)).error).toBe("WEBHOOK_SECRET_NOT_SET");
-  });
-
-  it("المساحة من مفتاح المسار: نفس الرقم بمساحة أخرى لا يُلمس — ومفتاح المساحة B لا يقبل سر A", async () => {
-    const foreign = await seedOrder({ workspaceId: WS_B, omsOrderNumber: "2002" });
-    const res = await send(event("order.delivered", { orderId: "cm_x", orderNumber: "2002" }));
-    expect(await json(res)).toEqual({ ok: true, outcome: "ignored", reason: "UNKNOWN_ORDER" });
-    expect(order(foreign.id).status).toBe("CONFIRMED");
-    await saveOmsConnection(asDb(), ctxB, { baseUrl: "https://oms-b.zaki.io", mode: "manual", webhookSecret: "test-oms-webhook-secret-0000000000000002" });
-    const keyB = db()._stores.omsConnection.find((c) => c.workspaceId === WS_B)!.webhookKey;
-    expect(keyB).not.toBe(key);
-    expect((await send(event("order.delivered", { orderNumber: "2002" }), { key: keyB })).status).toBe(401);
-    const ok = await send(event("order.delivered", { orderId: "cm_b_1", orderNumber: "2002" }), { key: keyB, secret: "test-oms-webhook-secret-0000000000000002" });
-    expect(await json(ok)).toMatchObject({ outcome: "applied", orderId: foreign.id });
-  });
-
-  it("خطأ داخلي = 500 (الـ OMS يعيد حسب جدوله)", async () => {
-    const original = db().webhookEvent.create;
-    (db().webhookEvent as Row).create = async () => {
-      throw new Error("db down");
-    };
-    try {
-      const res = await send(event("order.delivered", { orderId: "cm_oms_1" }));
-      expect(res.status).toBe(500);
-      expect(await json(res)).toEqual({ error: "OMS_WEBHOOK_ERROR" });
-      expect(order(shippedOrder.id).status).toBe("CONFIRMED");
-    } finally {
-      (db().webhookEvent as Row).create = original;
-    }
-  });
-});

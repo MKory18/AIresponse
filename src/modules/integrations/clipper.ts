@@ -181,7 +181,7 @@ const CHANNEL_TYPE: Record<RetargetRequest["channel"], string> = {
   telegram: "TELEGRAM",
 };
 
-/** حصر الشريحة بمنتج (مسودات Hermes بـ product_code): معرّفه بالردود + رمزه. */
+/** حصر الشريحة بمنتج (من مسدودة إعادة تواصل خارجية بـ product_code): معرّفه بالردود + رمزه. */
 export interface RetargetProductScope {
   productId: string;
   productCode: string;
@@ -284,18 +284,18 @@ export interface RetargetSpec {
   frequencyCapDays?: number;
   approvedBy: string;
   note?: string | null;
-  /** حصر بمنتج (مسودات Hermes) — نفس الحصر وقت المسودة ووقت الاعتماد. */
+  /** حصر بمنتج من المواصفة الواردة — نفس الحصر وقت التكوين ووقت الاعتماد. */
   product?: RetargetProductScope | null;
 }
 
 /**
  * يبني شريحة + حملة (READY بانتظار الاعتماد) من مواصفة إعادة تواصل —
- * نفس المسار للكليبر ولمسودات Hermes. الرسائل لا تطلع إلا بعد اعتماد حملات
+ * مسار موحّد بغض النظر عن المصدر. الرسائل لا تطلع إلا بعد اعتماد حملات
  * سيستم 7 القائم (campaigns.approve) أو ثقة صريحة باعتماد الكليبر.
  */
 export async function buildRetargetCampaign(
   db: Db,
-  input: { workspaceId: string; source: "clipper" | "hermes"; actor: string; spec: RetargetSpec; idempotencyKey?: string | null }
+  input: { workspaceId: string; source: string; actor: string; spec: RetargetSpec; idempotencyKey?: string | null }
 ): Promise<{ campaignId: string }> {
   const spec = input.spec;
   // إعادة التواصل بقالب واتساب معتمد بس: العقد بيبعت template_ref، وقناة
@@ -326,8 +326,7 @@ export async function buildRetargetCampaign(
     },
     spec.product ?? null
   );
-  const label = input.source === "clipper" ? "كليبر" : "الوكيل الذكي";
-  const segment = (await db.audienceSegment.create({
+  const label = input.source === "clipper" ? "كليبر" : "الوكيل الذكي";  const segment = (await db.audienceSegment.create({
     data: {
       workspaceId: input.workspaceId,
       name: `${label} · ${spec.externalRef}`.slice(0, 120),

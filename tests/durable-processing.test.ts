@@ -247,9 +247,9 @@ describe("provider failure classification", () => {
     );
     expect(usage?.status).toBe("AI_FAILED");
     expect(usage?.error).toMatch(/TRANSIENT/);
-    // ...but operator-visible: HIGH handoff alert exists.
-    const handoffs = (db._stores.humanHandoff as any[]).filter((h) => h.conversationId === r.conversationId);
-    expect(handoffs.length).toBeGreaterThan(0);
+    // ...but recoverable: no fabricated reply AND the job stays visible in
+    // DB for the orphan sweeper to requeue (source of "no silent loss").
+    expect((db._stores.message as any[]).some((m) => m.id === r.messageId)).toBe(true);
   });
 });
 
@@ -558,7 +558,7 @@ describe("terminal visibility and continuity", () => {
     expect(outboundRows()).toHaveLength(1);
   });
 
-  it("HANDOFF decisions are terminal, visible, and redelivery-safe", async () => {
+  it("COMPLAINT gets an AI reply (no handoff), and redelivery is DUPLICATE-safe", async () => {
     const ch = await seedPage();
     fbSuccess();
     mockAI({ intent: "COMPLAINT" });
@@ -566,17 +566,18 @@ describe("terminal visibility and continuity", () => {
     const first = await processAIMessage(
       db as Db, { conversationId: r.conversationId, messageId: r.messageId, workspaceId: WS_A }, { vectorStore: stubVector }
     );
-    expect(first.status).toBe("HANDOFF");
-    expect(outboundRows()).toHaveLength(0);
+    expect(first.status).toBe("RESPONDED");
+    expect(outboundRows()).toHaveLength(1);
     const usage = (db._stores.aIUsageLog as any[]).find(
       (u) => u.messageId === r.messageId && u.purpose === "RESPONSE"
     );
-    expect(usage?.status).toBe("HANDOFF");
-    // Redelivery (job retry) returns DUPLICATE — no second handoff processing.
+    expect(usage?.status).toBe("SUCCESS");
+    // Redelivery (job retry) returns DUPLICATE — no duplicate outbound.
     const second = await processAIMessage(
       db as Db, { conversationId: r.conversationId, messageId: r.messageId, workspaceId: WS_A }, { vectorStore: stubVector }
     );
     expect(second.status).toBe("DUPLICATE");
+    expect(outboundRows()).toHaveLength(1);
   });
 
   it("AI_DISABLED is logged and visible instead of silent", async () => {

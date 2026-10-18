@@ -8,7 +8,6 @@ import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { encryptSecret } from "@/core/crypto";
 import { AppError } from "@/core/errors";
-import { OMS_NO_TOKEN, resolveOmsWebhookSecret } from "@/modules/oms/connection";
 import { getWorkspaceProvider } from "@/modules/ai/router";
 import { calculatePricing } from "@/modules/orders/pricing";
 import { resolveRange } from "@/core/analytics/time";
@@ -19,55 +18,12 @@ import { inviteMember, removeMember, updateMember } from "@/modules/members/serv
 
 type Db = Prisma.TransactionClient;
 
-// ── 1) توقيع ويب هوك الـ OMS — العلامة اليدوية "أبدًا" ما تكون سرًا (HIGH 1) ──
-describe("OCR — OMS webhook secret resolution", () => {
-  const ws = "ws-ocr-oms";
-  it("manual mode with the public placeholder token resolves to NO secret", () => {
-    const conn = {
-      mode: "manual",
-      tokenEncrypted: encryptSecret(OMS_NO_TOKEN),
-      webhookSecretEncrypted: null,
-    };
-    expect(resolveOmsWebhookSecret(conn)).toBeNull();
-  });
-
-  it("webhook secret wins over the legacy token when both exist", () => {
-    const conn = {
-      mode: "api",
-      tokenEncrypted: encryptSecret("api-token-value"),
-      webhookSecretEncrypted: encryptSecret("webhook-secret-value"),
-    };
-    expect(resolveOmsWebhookSecret(conn)).toBe("webhook-secret-value");
-  });
-
-  it("legacy api row keeps its real token as the signing secret", () => {
-    const conn = {
-      mode: "api",
-      tokenEncrypted: encryptSecret("api-token-value"),
-      webhookSecretEncrypted: null,
-    };
-    expect(resolveOmsWebhookSecret(conn)).toBe("api-token-value");
-  });
-
-  it("manual mode never falls back to the token even with a real one", () => {
-    const conn = {
-      mode: "manual",
-      tokenEncrypted: encryptSecret("real-token-value"),
-      webhookSecretEncrypted: null,
-    };
-    expect(resolveOmsWebhookSecret(conn)).toBeNull();
-  });
-});
-
-// ── 2) متوسطة — مفاتيح المنصة ما تترحل لعناوين مخصصة من مساحة عمل (HIGH 2) ──
+// ── 1) متوسطة — مفاتيح المنصة ما تترحل لعناوين مخصصة من مساحة عمل (HIGH 2) ──
 describe("OCR — workspace customBaseUrl never leaks platform env keys", () => {
   const env = {
     aiProvider: "openai",
     openaiKey: "sk-platform-secret",
     openrouterKey: undefined,
-    hermesBaseUrl: undefined,
-    hermesKey: undefined,
-    hermesModel: undefined,
     responseModel: "gpt-4o-mini",
     nodeEnv: "test",
     allowMockAi: undefined,

@@ -248,7 +248,6 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
     freeze(T);
     db = fake({ capacityUnansweredWarn: 2, capacityP50WarnMin: 1000, capacityCriticalMultiplier: 2 });
     await saveIntegrationConnection(asDb(db), ctx, "mediabuyer", { baseUrl: "https://mb.zakai.io", generateEventsSecret: true });
-    await saveIntegrationConnection(asDb(db), ctx, "bridge", { baseUrl: "https://bridge.zakai.io", generateEventsSecret: true });
     await saveIntegrationConnection(asDb(db), ctx, "crisis", { baseUrl: "https://crisis.zakai.io", token: "crisis-token-1" });
     wa = await channel(db, "WHATSAPP");
     unansweredConvs.length = 0;
@@ -266,10 +265,10 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
     expect(db._stores.integrationDelivery).toHaveLength(0);
   });
 
-  it("إنذار للميديا باير والجسر بعقد حرفي — ولا يتكرر بنفس الساعة، ويعاد بعد ساعة", async () => {
+  it("إنذار للميديا باير بعقد حرفي — ولا يتكرر بنفس الساعة، ويعاد بعد ساعة", async () => {
     await waiting(2);
     expect(await evaluateCapacityAlerts(asDb(db), WS, new Date())).toBe("warning");
-    expect(levelsBySystem().sort()).toEqual(["bridge:warning", "mediabuyer:warning"]);
+    expect(levelsBySystem().sort()).toEqual(["mediabuyer:warning"]);
     const data = bodyOf(alerts()[0]).data;
     expect(data).toEqual({ level: "warning", unanswered: 2, first_response_p50_min: null, by_channel: { whatsapp: 2 }, threshold_unanswered: 2, threshold_p50_min: 1000 });
     expect(EVENT_SCHEMAS["capacity.alert"].safeParse(data).success).toBe(true);
@@ -277,10 +276,10 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
     expect(deliveries(db, { system: "crisis" })).toHaveLength(0); // الإنذار العادي لا يروح للأزمات
     vi.setSystemTime(T.getTime() + 20 * MIN);
     await evaluateCapacityAlerts(asDb(db), WS, new Date());
-    expect(alerts()).toHaveLength(2);
+    expect(alerts()).toHaveLength(1);
     vi.setSystemTime(T.getTime() + 61 * MIN);
     await evaluateCapacityAlerts(asDb(db), WS, new Date());
-    expect(alerts()).toHaveLength(4);
+    expect(alerts()).toHaveLength(2);
   });
 
   it("حرج = capacity.alert حرج + نداء أزمات /api/v1/alerts بمفتاح الساعة — مرة واحدة", async () => {
@@ -289,7 +288,7 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
     vi.setSystemTime(T.getTime() + 5 * MIN);
     await waiting(2);
     expect(await evaluateCapacityAlerts(asDb(db), WS, new Date())).toBe("critical");
-    expect(levelsBySystem().filter((l) => l.endsWith(":critical")).sort()).toEqual(["bridge:critical", "mediabuyer:critical"]);
+    expect(levelsBySystem().filter((l) => l.endsWith(":critical")).sort()).toEqual(["mediabuyer:critical"]);
     const crisis = deliveries(db, { system: "crisis", type: "alerts" });
     expect(crisis).toHaveLength(1);
     const hourBucket = Math.floor((T.getTime() + 5 * MIN) / HOUR);
@@ -301,7 +300,7 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
     vi.setSystemTime(T.getTime() + 10 * MIN);
     await evaluateCapacityAlerts(asDb(db), WS, new Date());
     expect(deliveries(db, { system: "crisis" })).toHaveLength(1);
-    expect(alerts()).toHaveLength(4);
+    expect(alerts()).toHaveLength(2);
   });
 
   it("الرجوع للطبيعي = «recovered» مرة واحدة فقط", async () => {
@@ -313,7 +312,7 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
       await msg(db, c, new Date(), { direction: "OUTBOUND", senderType: "HUMAN" });
     }
     expect(await evaluateCapacityAlerts(asDb(db), WS, new Date())).toBe("ok");
-    expect(levelsBySystem().filter((l) => l.endsWith(":recovered")).sort()).toEqual(["bridge:recovered", "mediabuyer:recovered"]);
+    expect(levelsBySystem().filter((l) => l.endsWith(":recovered")).sort()).toEqual(["mediabuyer:recovered"]);
     const rec = bodyOf(alerts().find((d) => bodyOf(d).data.level === "recovered")!).data;
     expect(rec).toMatchObject({ level: "recovered", unanswered: 0 });
     expect(EVENT_SCHEMAS["capacity.alert"].safeParse(rec).success).toBe(true);
@@ -321,7 +320,7 @@ describe("P12 evaluateCapacityAlerts — مرة لكل مستوى بالساعة
     await evaluateCapacityAlerts(asDb(db), WS, new Date());
     vi.setSystemTime(T.getTime() + 90 * MIN);
     await evaluateCapacityAlerts(asDb(db), WS, new Date());
-    expect(alerts()).toHaveLength(4);
+    expect(alerts()).toHaveLength(2);
   });
 });
 

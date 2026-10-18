@@ -62,8 +62,6 @@ async function seed(workspaceId = WS, o: Row = {}): Promise<Row> {
       notes: "قديم",
       ctwaClidEnc: encryptSecret("CLID-SECRET-1"),
       psidEnc: encryptSecret("PSID-SECRET-1"),
-      omsOrderId: null,
-      omsOrderNumber: null,
       ...o,
     },
   } as never)) as Row;
@@ -76,16 +74,16 @@ beforeEach(() => {
 });
 
 describe("P12 GET/PATCH /api/orders/[id]", () => {
-  it("GET: بلا ctwaClidEnc/psidEnc · فيه حالة الترحيل وصلاحية الكتابة", async () => {
+  it("GET: بلا ctwaClidEnc/psidEnc · فيه صلاحية الكتابة وبلا OMS", async () => {
     const o = await seed();
-    db()._stores.omsConnection.push({ id: "oc", workspaceId: WS, baseUrl: "https://oms.zakai.io", tokenEncrypted: "x", isActive: true, mode: "api", autoHandoff: true, apiVersion: "v1" });
     const res = await orderGET(req(`/api/orders/${o.id}`), { params: { id: o.id } });
     expect(res.status).toBe(200);
     const body = await json(res);
     const raw = JSON.stringify(body);
     expect(raw).not.toContain("ctwaClidEnc");
     expect(raw).not.toContain("psidEnc");
-    expect(body).toMatchObject({ id: o.id, canWrite: true, oms: { mode: "api", autoHandoff: true }, omsState: { autoHandoff: null, linkIssue: null } });
+    expect(raw).not.toMatch(/[Oo]ms/);
+    expect(body).toMatchObject({ id: o.id, canWrite: true });
     canWrite = false;
     expect((await json(await orderGET(req(`/api/orders/${o.id}`), { params: { id: o.id } }))).canWrite).toBe(false);
   });

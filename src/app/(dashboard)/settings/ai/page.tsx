@@ -9,8 +9,6 @@ import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
-import { ExternalAgentRisk } from "@/components/agents/external-agent-risk";
-import { RiskWithFix } from "@/components/integrations/ui";
 
 type Settings = {
   provider: string;
@@ -27,7 +25,6 @@ type Settings = {
   maxTokens: number;
   confidenceExecute: number;
   confidenceRespond: number;
-  humanHandoffThreshold: number;
   aiEnabled: boolean;
   autoRespond: boolean;
 };
@@ -37,7 +34,6 @@ const PROVIDER_AR: Record<string, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
   internal: "داخلي",
-  hermes: "الوكيل الذكي الخارجي",
 };
 const providerLabel = (p: string) => PROVIDER_AR[p] ?? p;
 
@@ -47,11 +43,6 @@ export default function AISettingsPage() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // P12: اختيار المزوّد/البديل الحي — تنبيه الوكيل الخارجي الأحمر لحظة الاختيار (قبل الحفظ).
-  const [providerSel, setProviderSel] = useState<string | null>(null);
-  const [fallbackSel, setFallbackSel] = useState<string | null>(null);
-  const externalMain = (providerSel ?? settings?.provider) === "hermes";
-  const externalFallback = !externalMain && (fallbackSel ?? settings?.fallbackProvider ?? "") === "hermes";
 
   const loadSettings = useCallback(async () => {
     setLoadError(null);
@@ -88,10 +79,9 @@ export default function AISettingsPage() {
       aiEnabled: form.get("aiEnabled") === "on",
       autoRespond: form.get("autoRespond") === "on",
     };
-    for (const k of ["temperature", "maxTokens", "confidenceExecute", "confidenceRespond", "humanHandoffThreshold", "fallbackProvider", "fallbackModel"]) {
+    for (const k of ["temperature", "maxTokens", "confidenceExecute", "confidenceRespond", "fallbackProvider", "fallbackModel"]) {
       const v = form.get(k);
-      if (v !== null && v !== "") payload[k] = k === "fallbackProvider" || k === "fallbackModel" ? v : Number(v);
-    }
+      if (v !== null && v !== "") payload[k] = k === "fallbackProvider" || k === "fallbackModel" ? v : Number(v);}
     try {
       const res = await fetch("/api/ai/settings", {
         method: "PATCH",
@@ -162,8 +152,8 @@ export default function AISettingsPage() {
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="المزود">
-            <Select name="provider" defaultValue={settings.provider} onChange={(e) => setProviderSel(e.target.value)}>
-              {["mock", "openai", "openrouter", "internal", "hermes"].map((p) => (
+            <Select name="provider" defaultValue={settings.provider}>
+              {["mock", "openai", "openrouter", "internal"].map((p) => (
                 <option key={p} value={p}>{providerLabel(p)}</option>
               ))}
             </Select>
@@ -180,21 +170,13 @@ export default function AISettingsPage() {
               <Input name={key} defaultValue={(settings as never as Record<string, string | null>)[key] ?? ""} dir="ltr" className="num" />
             </Field>
           ))}
-          <Field label="عنوان الوكيل الخارجي / النموذج الداخلي (OpenAI-compatible، اختياري)">
-            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://… (للعناوين المحلية فعّل HERMES_ALLOW_PRIVATE_NETWORK في الخادم)" />
+          <Field label="عنوان النموذج الداخلي (OpenAI-compatible، اختياري)">
+            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://…" />
           </Field>
-          <p className="-mt-1 rounded-xl bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-700 ring-1 ring-inset ring-sky-500/25 dark:text-sky-300 md:col-span-2">
-            الوكيل الذكي الخارجي: شغّل بوابة الوكيل ثم ضع في الخادم <span dir="ltr" className="num">HERMES_BASE_URL=http://127.0.0.1:8642/v1</span> و <span dir="ltr" className="num">HERMES_API_KEY</span> (يساوي مفتاح خادم الوكيل) واختر المزود <span dir="ltr" className="num">الوكيل الذكي الخارجي</span> والنموذج <span dir="ltr" className="num">hermes-agent</span>. لإدخال عنوان محلي/داخلي هنا مباشرة يجب تفعيل <span dir="ltr" className="num">HERMES_ALLOW_PRIVATE_NETWORK=true</span> في بيئة الخادم أولًا. بعدها يستلم الوكيل رسائل العملاء ويولّد الردود بالشخصية المختارة من صفحة الشخصيات — مع بقاء حماية الأسعار والطلبات والخصوصية كما هي، وبدون تحويل تلقائي للموظف (المحادثات تبقى مفتوحة).
-          </p>
-          {(externalMain || externalFallback) && (
-            <div className="md:col-span-2">
-              <ExternalAgentRisk asFallback={!externalMain} />
-            </div>
-          )}
           <Field label="مزود البديل (عند الفشل فقط)">
-            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""} onChange={(e) => setFallbackSel(e.target.value)}>
+            <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>
               <option value="">بلا بديل</option>
-              {["mock", "openai", "openrouter", "internal", "hermes"].map((p) => (
+              {["mock", "openai", "openrouter", "internal"].map((p) => (
                 <option key={p} value={p}>{providerLabel(p)}</option>
               ))}
             </Select>
@@ -227,25 +209,14 @@ export default function AISettingsPage() {
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
             <Bot size={15} />
           </span>
-          الثقة والتحكم
+          الثقة والتوليد
         </h2>
-        {externalMain && (
-          <RiskWithFix
-            className="mt-2.5"
-            risk="عتبات الثقة والتحويل التلقائي ما بتشتغل مع الوكيل الذكي الخارجي"
-            detail="الوكيل بيرد حتى لو الثقة منخفضة أو الزبون بيشتكي أو طالب موظف — ما في تحويل تلقائي، والمحادثة بتضل مفتوحة."
-            fix="راجع عيّنة من الردود والشكاوى يوميًا من المحادثات، وارجع لمزود داخلي إذا لقيت ردود مش مضبوطة."
-          />
-        )}
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <Field label="حد التنفيذ الآمن">
             <Input name="confidenceExecute" type="number" step="0.05" min="0" max="1" defaultValue={settings.confidenceExecute} dir="ltr" className="num" />
           </Field>
           <Field label="حد الرد المحدود">
             <Input name="confidenceRespond" type="number" step="0.05" min="0" max="1" defaultValue={settings.confidenceRespond} dir="ltr" className="num" />
-          </Field>
-          <Field label="تحويل للموظف تحت">
-            <Input name="humanHandoffThreshold" type="number" step="0.05" min="0" max="1" defaultValue={settings.humanHandoffThreshold} dir="ltr" className="num" />
           </Field>
         </div>
         <div className="mt-4 flex flex-wrap gap-5">

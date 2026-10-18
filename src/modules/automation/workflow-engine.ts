@@ -76,7 +76,6 @@ const TRIGGER_MAP: Partial<Record<string, string>> = {
   OrderCreated: "ORDER_CREATED",
   OrderConfirmed: "ORDER_CONFIRMED",
   OrderCancelled: "ORDER_CANCELLED",
-  OrderStateChanged: "ORDER_STATUS_CHANGED_FROM_OMS",
 };
 
 export function eventToWorkflowTrigger(eventName: string, payload: Record<string, unknown>): string | null {
@@ -86,7 +85,6 @@ export function eventToWorkflowTrigger(eventName: string, payload: Record<string
   if (base === "CONVERSATION_UPDATED") {
     const type = String(payload.type ?? "");
     if (type === "HumanHandoffCreated") return "HANDOFF_CREATED";
-    if (type === "OmsStatusChanged") return "ORDER_STATUS_CHANGED_FROM_OMS";
     if (payload.status) return "CONVERSATION_STATUS_CHANGED";
     return null;
   }

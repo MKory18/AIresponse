@@ -67,13 +67,6 @@ export interface GatingState {
   settings: AISettingsLike | null;
   persona: PersonaConfig;
   activePersona: { id: string | null; name: string; source: string; version: number | null };
-  /**
-   * External-provider reply path (Hermes): the SELECTED local persona still
-   * drives voice (the gateway carries no personaId parameter). This flag only
-   * suspends AUTOMATIC handoffs — activating a persona never reintroduces
-   * them, and failures keep conversations OPEN with no HumanHandoff records.
-   */
-  hermesPersona: boolean;
   customer: Customer;
   channelRow: { displayName: string | null; externalId: string | null } | null;
   customerText: string;

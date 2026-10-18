@@ -8,22 +8,11 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z
     .string()
     .min(32, "ENCRYPTION_KEY must be at least 32 chars (hex/base64)"),
-  AI_PROVIDER: z.enum(["openai", "openrouter", "anthropic", "google", "hermes"]).optional(),
+  AI_PROVIDER: z.enum(["openai", "openrouter", "anthropic", "google"]).optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_API_KEY: z.string().optional(),
-  // Hermes Agent (OpenAI-compatible gateway, e.g. http://127.0.0.1:8642/v1).
-  // Server-side only — never exposed to the client. Base URL may target
-  // loopback/LAN (self-hosted gateway); workspace customBaseUrl stays
-  // SSRF-guarded, so local Hermes must be configured via ENV, not the UI.
-  HERMES_BASE_URL: z.string().optional(),
-  HERMES_API_KEY: z.string().optional(),
-  HERMES_MODEL: z.string().optional(),
-  // Deployer opt-in: allow a workspace-configured Hermes endpoint to target
-  // loopback/RFC1918 (self-hosted gateway). "1"/"true"/"yes" enables.
-  // Metadata/reserved ranges stay blocked regardless. Never set from the UI.
-  HERMES_ALLOW_PRIVATE_NETWORK: z.string().optional(),
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
   META_VERIFY_TOKEN: z.string().optional(),

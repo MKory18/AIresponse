@@ -5,7 +5,6 @@ import {
   MockAIProvider,
   OpenAICompatibleProvider,
   getInjectedMockProvider,
-  normalizeHermesEndpoint,
   resolveAIProvider,
   type AIProvider,
 } from "./provider";
@@ -285,32 +284,7 @@ export function validateTaskModel(
 // present; otherwise ENV is the fallback; otherwise fail-closed. A workspace
 // customBaseUrl builds an INTERNAL OpenAI-compatible provider (delivery
 // "internal", tested independently — never claimed internal by name alone).
-
-// ── External-provider reply path (Hermes) ──────────────────────────────────
-// When the EFFECTIVE reply provider is Hermes, the SELECTED local persona
-// still drives voice (the gateway carries no personaId parameter, so the
-// published instructions travel inside the request). These helpers are the
-// single definition of that path, so the pipeline agrees on when automatic
-// handoffs stay suspended: activating a persona must never reintroduce
-// auto-handoffs, and failures keep conversations OPEN without records.
-
-/** Settings-level intent: would resolution pick Hermes (no I/O)? */
-export function isHermesSelected(
-  settings: { provider?: string | null } | null,
-  aiProvider?: string
-): boolean {
-  const ws = settings?.provider ?? null;
-  const wsReal = ws === "openai" || ws === "openrouter" || ws === "internal" || ws === "hermes";
-  if (wsReal) return ws === "hermes";
-  const envChoice = aiProvider ?? process.env.AI_PROVIDER;
-  return envChoice === "hermes";
-}
-
-/** Runtime truth: the resolved reply provider IS Hermes. */
-export function isHermesPersonaMode(provider: { name: string }): boolean {
-  return provider.name === "hermes";
-}
-
+// ── P6: configured fallback (failover only, never policy bypass) ──────────
 export function getWorkspaceProvider(
   settings: {
     provider?: string | null;
@@ -321,9 +295,6 @@ export function getWorkspaceProvider(
     aiProvider?: string;
     openaiKey?: string;
     openrouterKey?: string;
-    hermesBaseUrl?: string;
-    hermesKey?: string;
-    hermesModel?: string;
     responseModel?: string;
     nodeEnv?: string;
     allowMockAi?: string;
@@ -337,48 +308,22 @@ export function getWorkspaceProvider(
     aiProvider: process.env.AI_PROVIDER,
     openaiKey: process.env.OPENAI_API_KEY,
     openrouterKey: process.env.OPENROUTER_API_KEY,
-    hermesBaseUrl: process.env.HERMES_BASE_URL,
-    hermesKey: process.env.HERMES_API_KEY,
-    hermesModel: process.env.HERMES_MODEL,
     responseModel: process.env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: process.env.ALLOW_MOCK_AI,
     allowWorkspaceGatewayKeys: process.env.AI_WORKSPACE_GATEWAY_KEYS,
   };
   // Precedence (P6): an explicit workspace choice of a REAL provider
-  // (openai/openrouter/internal/hermes) is effective and fail-closed on a
+  // (openai/openrouter/internal) is effective and fail-closed on a
   // missing key. A workspace "mock"/unset DEFERS to ENV — so a misconfigured
   // ENV still fail-closes exactly as before (no behavior change for existing
   // deployments), while a workspace can still opt into a real provider whose
   // key exists even when ENV names no provider.
   const wsChoice = settings?.provider ?? null;
-  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "hermes";
+  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal";
   const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? null;
   const keyFor = (p: string | null | undefined) =>
-    p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : p === "hermes" ? e.hermesKey : undefined;
-  // Hermes Agent (OpenAI-compatible gateway). Endpoint comes from server ENV
-  // (HERMES_BASE_URL — localhost/LAN allowed, it is deployer-trusted, not a
-  // workspace-user URL, so the SSRF guard for customBaseUrl does not apply).
-  // A workspace customBaseUrl may still override it for public Hermes
-  // endpoints (then the save/probe SSRF guard applies as usual).
-  if (choice === "hermes") {
-    const override = settings?.customBaseUrl?.trim();
-    const base = override || e.hermesBaseUrl?.trim();
-    const key = e.hermesKey?.trim();
-    if (!base || !key) {
-      throw new AIProviderError(
-        `AI_NOT_CONFIGURED: provider "hermes" needs HERMES_BASE_URL + HERMES_API_KEY in server env${override ? "" : " (or a public customBaseUrl on the workspace)"}. Refusing mock fallback — no fake replies will be sent.`
-      );
-    }
-    return new OpenAICompatibleProvider({
-      name: "hermes",
-      apiKey: key,
-      baseUrl: normalizeHermesEndpoint(base),
-      defaultModel: settings?.responseModel ?? e.hermesModel ?? e.responseModel ?? "hermes-agent",
-      // Never follow gateway redirects with the key + prompts (fail fast).
-      followRedirects: false,
-    });
-  }
+    p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : undefined;
   // Self-hosted endpoint: explicit opt-in per workspace. Delivery is declared
   // "internal" at construction (privacy-gate trusts the flag, not the name).
   const base = settings?.customBaseUrl?.trim();
@@ -392,7 +337,7 @@ export function getWorkspaceProvider(
     const optedIn = ["1", "true", "yes"].includes((e.allowWorkspaceGatewayKeys ?? "").toLowerCase());
     if ((choice === "openai" || choice === "openrouter") && envKey && !optedIn) {
       throw new AIProviderError(
-        `AI_NOT_CONFIGURED: refusing platform ${choice.toUpperCase()} key on workspace customBaseUrl ("${base}") — key exfiltration risk. Use provider "internal"/"hermes", or set AI_WORKSPACE_GATEWAY_KEYS=1 to accept deliberately.`
+        `AI_NOT_CONFIGURED: refusing platform ${choice.toUpperCase()} key on workspace customBaseUrl ("${base}") — key exfiltration risk. Use provider "internal", or set AI_WORKSPACE_GATEWAY_KEYS=1 to accept deliberately.`
       );
     }
     const key = envKey ?? "internal-endpoint";
@@ -426,9 +371,6 @@ export function getWorkspaceProvider(
     aiProvider: e.aiProvider,
     openaiKey: e.openaiKey,
     openrouterKey: e.openrouterKey,
-    hermesBaseUrl: e.hermesBaseUrl,
-    hermesKey: e.hermesKey,
-    hermesModel: e.hermesModel,
     responseModel: e.responseModel,
     nodeEnv: e.nodeEnv,
     allowMockAi: e.allowMockAi,

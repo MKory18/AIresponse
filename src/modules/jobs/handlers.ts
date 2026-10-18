@@ -515,12 +515,6 @@ async function handleCampaignTick(db: HandlerDb, payload: Record<string, unknown
   return { success: true };
 }
 
-/** handoff_order_to_oms: P12 — ترحيل تلقائي بعد التأكيد (نفس مفتاح عدم التكرار). */
-async function handleHandoffOrderToOms(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string }> {
-  const { handleAutoHandoffJob } = await import("@/modules/oms/auto-handoff");
-  return handleAutoHandoffJob(db as never, payload, workspaceId);
-}
-
 /** validate_attribution_code: P12 — تحقق رمز الكليبر ثم conversation.coded. */
 async function handleValidateAttributionCode(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
   const { validateCodeTouch } = await import("@/modules/integrations/clipper");
@@ -551,8 +545,6 @@ export function getJobHandlers(): Record<string, JobHandler> {
     resume_workflow_executions: () => handleResumeWorkflowExecutions(getDb()),
     run_campaign: (payload) => handleRunCampaign(getDb(), payload),
     campaign_tick: (payload) => handleCampaignTick(getDb(), payload),
-    handoff_order_to_oms: (payload, jobId, workspaceId) =>
-      handleHandoffOrderToOms(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),
     validate_attribution_code: (payload) => handleValidateAttributionCode(getDb(), payload),
     refresh_product_compliance: (payload, jobId, workspaceId) =>
       handleRefreshProductCompliance(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),

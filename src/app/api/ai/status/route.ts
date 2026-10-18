@@ -8,7 +8,7 @@ import {
   validateTaskModel,
   type AiTask,
 } from "@/modules/ai/router";
-import { testProviderConnection, normalizeHermesEndpoint } from "@/modules/ai/provider";
+import { testProviderConnection } from "@/modules/ai/provider";
 import { getCurrentEmbeddingIdentity } from "@/modules/knowledge/embeddings";
 
 /**
@@ -33,10 +33,6 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
   }
   const hasOpenaiKey = Boolean(env.OPENAI_API_KEY);
   const hasOpenrouterKey = Boolean(env.OPENROUTER_API_KEY);
-  const hasHermes = Boolean(env.HERMES_BASE_URL && env.HERMES_API_KEY);
-  const hermesEndpoint = env.HERMES_BASE_URL?.trim()
-    ? normalizeHermesEndpoint(env.HERMES_BASE_URL.trim())
-    : ((settings.customBaseUrl as string | null) ?? null);
   const allowMock = ["1", "true", "yes"].includes(((env.ALLOW_MOCK_AI ?? "") as string).toLowerCase());
   const isProd = process.env.NODE_ENV === "production";
 
@@ -58,12 +54,6 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
       configured: Boolean(settings.customBaseUrl),
       status: settings.customBaseUrl ? ("configured" as const) : ("unconfigured" as const),
       endpoint: (settings.customBaseUrl as string | null) ?? null,
-    },
-    {
-      id: "hermes",
-      configured: hasHermes,
-      status: hasHermes ? ("configured" as const) : (!env.HERMES_BASE_URL ? ("unconfigured" as const) : ("needs_key" as const)),
-      endpoint: hermesEndpoint,
     },
     {
       id: "mock",

@@ -138,13 +138,18 @@ describe("page assignment — one active catalog per page", () => {
     expect(await db.catalog.findUnique({ where: { id: b.id } })).not.toBeNull();
   });
 
-  it("refuses an inactive catalog, a non-messenger channel and a dead link", async () => {
+  it("refuses an inactive catalog, a non-conversational channel and a dead link", async () => {
     const off = (await createCatalog(db as Db, WS, { name: "Off", isActive: false })) as any;
     const ch = await channel();
     await expect(assignCatalogPage(db as Db, WS, { catalogId: off.id, channelId: ch.id })).rejects.toThrow(/متوقف/);
+    // WhatsApp (and every conversational channel) binds its own catalog now;
+    // only modeling-only channel types stay out (TIKTOK local adapter).
     const wa = await channel({ type: "WHATSAPP" });
     const on = (await createCatalog(db as Db, WS, { name: "On" })) as any;
-    await expect(assignCatalogPage(db as Db, WS, { catalogId: on.id, channelId: wa.id })).rejects.toThrow(/ماسنجر/);
+    await assignCatalogPage(db as Db, WS, { catalogId: on.id, channelId: wa.id });
+    expect((await resolveCatalogForChannel(db as Db, WS, wa.id)).catalog).toMatchObject({ id: on.id });
+    const tt = await channel({ type: "TIKTOK" });
+    await expect(assignCatalogPage(db as Db, WS, { catalogId: on.id, channelId: tt.id })).rejects.toThrow(/CHANNEL_NOT_SUPPORTED|قنوات المحادثة/);
     const dead = await channel({ status: "DISCONNECTED" });
     await expect(assignCatalogPage(db as Db, WS, { catalogId: on.id, channelId: dead.id })).rejects.toThrow(/متصلة/);
   });

@@ -121,11 +121,12 @@ describe("conversation state machine: AI stays AI_ACTIVE", () => {
     expect(conv.aiState).toBe("AI_ACTIVE");
     expect(
       (db._stores.humanHandoff as any[]).some((h) => h.conversationId === r.conversationId && h.status === "OPEN")
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("3. low confidence does NOT switch to HUMAN_ACTIVE", async () => {
-    const r = await seedInbound(WS_A, "psid-lc", "???");
+  it("3. low confidence still gets an AI reply (no handoff switch)", async () => {
+    const ch = await seedPage(WS_A, "page-lc", "صفحة");
+    const r = await seedInbound(WS_A, "psid-lc", "???", ch.id);
     const low = new MockAIProvider();
     (low as any).intentHandler = () => ({ intent: "UNKNOWN", confidence: 0.05, entities: {}, memories: [] });
     const res = await processAIMessage(
@@ -133,7 +134,7 @@ describe("conversation state machine: AI stays AI_ACTIVE", () => {
       { conversationId: r.conversationId, messageId: r.messageId, workspaceId: WS_A },
       { provider: low, vectorStore: emptyVectors() }
     );
-    expect(res.status).toBe("HANDOFF");
+    expect(res.status).toBe("CLARIFIED");
     const conv = (db._stores.conversation as any[]).find((c) => c.id === r.conversationId);
     expect(conv.aiState).toBe("AI_ACTIVE");
   });

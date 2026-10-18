@@ -193,8 +193,9 @@ export async function getCatalogDetail(db: Db, workspaceId: string, catalogId: s
 }
 
 /**
- * Attach a page-channel to a catalog. Messenger only — the feature does
- * not cover Instagram, WhatsApp or Telegram. The channel must belong to
+ * Attach a page-channel to a catalog. Available for every conversational
+ * channel (Messenger, Instagram, WhatsApp, Telegram) — each page/manual
+ * number answers with its own bound products. The channel must belong to
  * this workspace and be CONNECTED; anything else is refused out loud,
  * with its state shown, rather than stored as a dead link.
  */
@@ -206,7 +207,9 @@ export async function assignCatalogPage(
   const catalog = await ownCatalog(db, workspaceId, input.catalogId);
   if (!catalog.isActive) throw new AppError("الكتالوج متوقف — فعّله قبل الربط", 422, "CATALOG_INACTIVE");
   const channel = await ownChannel(db, workspaceId, input.channelId);
-  if (channel.type !== "FACEBOOK") throw new AppError("ربط الكتالوجات متاح لقنوات ماسنجر فقط", 422, "CHANNEL_NOT_MESSENGER");
+  if (!["FACEBOOK", "INSTAGRAM", "WHATSAPP", "TELEGRAM"].includes(channel.type as string)) {
+    throw new AppError("ربط الكتالوجات متاح لقنوات المحادثة (ماسنجر · إنستغرام · واتساب · تيليجرام) فقط", 422, "CHANNEL_NOT_SUPPORTED");
+  }
   if (channel.status !== "CONNECTED") throw new AppError("الصفحة غير متصلة — اربطها أولاً ثم أسند الكتالوج", 422, "CHANNEL_NOT_CONNECTED");
   // One row per channel: a switch replaces it atomically, so a partial
   // failure can never leave the page with no valid setting.

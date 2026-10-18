@@ -6,12 +6,11 @@
  * (الرابط والتوكن والسر)، وهذا الملف يقول ماذا يعني كل نظام.
  *
  * المرجع: ملفات العقود لكل نظام (الميديا باير IN03/IN04 · الكليبر IN02–IN04 ·
- * المالية IN02/IN03 · سيستم 1 IN04 · Hermes IN01–IN04). أسماء الأحداث
+ * المالية IN02/IN03 · سيستم 1 IN04). أسماء الأحداث
  * والمسارات هنا حرفية من تلك العقود.
  */
 
 export const ZAKI_SYSTEMS = [
-  "oms",
   "mediabuyer",
   "clipper",
   "finance",
@@ -19,13 +18,12 @@ export const ZAKI_SYSTEMS = [
   "crisis",
   "tasks",
   "workspace",
-  "bridge",
 ] as const;
 export type ZakiSystem = (typeof ZAKI_SYSTEMS)[number];
 
-/** الأنظمة التي تُحفظ اتصالاتها في IntegrationConnection (الـ OMS له جدوله). */
-export const GENERIC_SYSTEMS = ZAKI_SYSTEMS.filter((s) => s !== "oms") as Exclude<ZakiSystem, "oms">[];
-export type GenericSystem = (typeof GENERIC_SYSTEMS)[number];
+/** الأنظمة التي تُحفظ اتصالاتها في IntegrationConnection. */
+export const GENERIC_SYSTEMS = ZAKI_SYSTEMS;
+export type GenericSystem = ZakiSystem;
 
 export function isZakiSystem(v: string): v is ZakiSystem {
   return (ZAKI_SYSTEMS as readonly string[]).includes(v);
@@ -40,8 +38,8 @@ export const OUTBOUND_EVENT_ROUTES = {
   "conversation.coded": ["clipper"],
   "retarget.result": ["clipper"],
   opt_out: ["clipper"],
-  // الميديا باير IN04 (قاعدة قدرة الرد) + جسر Hermes IN04 (درجة «عاجل»)
-  "capacity.alert": ["mediabuyer", "bridge"],
+  // الميديا باير IN04 (قاعدة قدرة الرد)
+  "capacity.alert": ["mediabuyer"],
 } as const satisfies Record<string, readonly GenericSystem[]>;
 export type OutboundEventType = keyof typeof OUTBOUND_EVENT_ROUTES;
 export const OUTBOUND_EVENT_TYPES = Object.keys(OUTBOUND_EVENT_ROUTES) as OutboundEventType[];
@@ -57,8 +55,6 @@ export const TOKEN_SCOPES = [
   "capacity.read",
   "retarget.create",
   "retarget.read",
-  "agent.read",
-  "agent.draft",
 ] as const;
 export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
@@ -66,7 +62,6 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 export const TOKEN_PRESETS = {
   mediabuyer: { nameAr: "الميديا باير", scopes: ["capacity.read"] },
   clipper: { nameAr: "الكليبر", scopes: ["retarget.create", "retarget.read"] },
-  "hermes-bridge": { nameAr: "جسر الوكيل الذكي (zaki-bridge)", scopes: ["agent.read", "agent.draft"] },
 } as const satisfies Record<string, { nameAr: string; scopes: readonly TokenScope[] }>;
 export type TokenSystem = keyof typeof TOKEN_PRESETS;
 export const TOKEN_SYSTEMS = Object.keys(TOKEN_PRESETS) as TokenSystem[];
@@ -95,23 +90,6 @@ export interface SystemSpec {
 }
 
 export const SYSTEM_SPECS: Record<ZakiSystem, SystemSpec> = {
-  oms: {
-    key: "oms",
-    nameAr: "Zaki OMS — الطلبات",
-    summaryAr: "مالك الطلبات بعد التأكيد والأسعار والعروض والقائمة السوداء. سيستم 7 يرحّل الطلب المؤكد ويستقبل حالاته.",
-    sendsEvents: [],
-    calls: [
-      { name: "products", method: "GET", path: "/api/v1/products?for=replies", descAr: "المنتجات والعروض وسقف الخصم" },
-      { name: "customer-lookup", method: "GET", path: "/api/v1/customers/lookup?phone=", descAr: "هل الزبون موجود · القائمة السوداء" },
-      { name: "create-order", method: "POST", path: "/api/v1/orders", descAr: "طلب مؤكد + مفتاح عدم تكرار + الإسناد" },
-      { name: "order-note", method: "POST", path: "/api/v1/orders/{id}/notes", descAr: "ملاحظة متابعة مصنّفة" },
-    ],
-    inbound: [
-      { method: "POST", path: "/api/webhooks/oms/{key}", descAr: "أحداث تطبيقات الـ OMS: order.created/confirmed/shipped/delivered/returned/cancelled" },
-    ],
-    needsToken: true,
-    needsEventsSecret: true,
-  },
   mediabuyer: {
     key: "mediabuyer",
     nameAr: "الميديا باير",
@@ -186,20 +164,6 @@ export const SYSTEM_SPECS: Record<ZakiSystem, SystemSpec> = {
     inbound: [],
     needsToken: true,
     needsEventsSecret: false,
-  },
-  bridge: {
-    key: "bridge",
-    nameAr: "جسر الوكيل الذكي (zaki-bridge)",
-    summaryAr: "الوكيل الذكي يقرأ أرقام الردود ويجهّز مسودات عبر باب الوكلاء، والجسر يستقبل إنذار القدرة.",
-    eventsPath: "/events/replies",
-    sendsEvents: OUTBOUND_EVENT_TYPES.filter((t) => (OUTBOUND_EVENT_ROUTES[t] as readonly string[]).includes("bridge")),
-    calls: [],
-    inbound: [
-      { method: "GET", path: "/api/agent/tools", descAr: "دليل أدوات الردود لهالتوكن" },
-      { method: "POST", path: "/api/agent/call", descAr: "نداء أداة قراءة أو مسودة" },
-    ],
-    needsToken: false,
-    needsEventsSecret: true,
   },
 };
 

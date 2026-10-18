@@ -133,7 +133,7 @@ export function Sidebar({
     });
   }
 
-  // الرابط الأطول المطابق بس هو النشط (/settings/integrations مش /settings كمان).
+  // الرابط الأطول المطابق بس هو النشط (/orders/[id] مش /orders كمان).
   const activeHref = items
     .map((i) => i.href)
     .filter((href) => pathname === href || pathname.startsWith(href + "/"))

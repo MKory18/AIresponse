@@ -53,7 +53,6 @@ export async function runExtraction(
     conversation,
     settings,
     activePersona,
-    hermesPersona,
     customer,
     customerText,
     recentMessages,
@@ -285,7 +284,7 @@ export async function runExtraction(
   }
 
   if (orderResult?.needsHumanReview) {
-    // Persist any extracted memories before handing off — never lose facts.
+    // Persist any extracted memories before the review alert — never lose facts.
     if (extraction.memories.length && !params.dryRun) {
       await saveMemories(db, {
         workspaceId: params.workspaceId,
@@ -294,151 +293,19 @@ export async function runExtraction(
         memories: extraction.memories,
       });
     }
-    // External-provider path: NO HumanHandoff records, NO HANDOFF
-    // terminal. The order stays blocked by OrderService rules (nothing is
+    // NO HumanHandoff records, NO HANDOFF terminal — every message gets an AI
+    // reply. The order stays blocked by OrderService rules (nothing is
     // confirmed), the block is audit-visible, and the reply still goes out
     // with the selected persona so the conversation stays OPEN.
-    if (hermesPersona) {
-      if (!params.dryRun) {
-        await recordAudit(db, {
-          workspaceId: params.workspaceId,
-          action: "conversation.review_requested",
-          entityType: "Conversation",
-          entityId: conversation.id,
-          metadata: { reason: "ORDER_REQUIRES_HUMAN" },
-        });
-      }
-    } else {
-    const { createHandoff } = await import("@/modules/handoffs/handoff-service");
     if (!params.dryRun) {
-      await createHandoff(db, {
-        workspaceId: params.workspaceId,
-        conversationId: conversation.id,
-        customerId: customer.id,
-        reason: "ORDER_BLOCKED",
-        metadata: { messageId: message.id, confidence: extraction.confidence },
-        actorUserId: "ai-agent",
-      });
-      // State machine: review alert only — the thread stays AI_ACTIVE.
-      // Ownership changes exclusively via manual takeover.
       await recordAudit(db, {
         workspaceId: params.workspaceId,
-        action: "conversation.review_requested",
+        action: "conversation.review_flagged",
         entityType: "Conversation",
         entityId: conversation.id,
-        metadata: { reason: "ORDER_REQUIRES_HUMAN" },
-      });
-      // Terminal + visible: marks this message decided so redeliveries return
-      // DUPLICATE and the orphan sweeper never mistakes it for lost work.
-      await logUsage(db, {
-        workspaceId: params.workspaceId,
-        conversationId: conversation.id,
-        messageId: message.id,
-        purpose: "RESPONSE",
-        provider: provider.name,
-        model: responseModelCfg.model,
-        intent: extraction.intent,
-        confidence: extraction.confidence,
-        promptVersion: PROMPT_VERSIONS.RESPONSE,
-        personaId: activePersona.id,
-        personaVersion: activePersona.version,
-        handoffReason: "ORDER_BLOCKED",
-        promptTokens: 0,
-        completionTokens: 0,
-        latencyMs: Date.now() - pipelineStarted,
-        success: true,
-        status: "HANDOFF",
+        metadata: { reason: "ORDER_BLOCKED" },
       });
     }
-    return {
-      terminal: {
-        status: "HANDOFF",
-        intent: extraction.intent as Intent,
-        confidence: extraction.confidence,
-        plan,
-        response: undefined,
-        persona: activePersona,
-      },
-    };
-    }
-  }
-
-  // 9. Handoff policy — SUSPENDED on the external-provider path: no
-  // automatic handoff on injection/complaint/request/low confidence, no
-  // confidence thresholds gating replies, no HANDOFF terminals. The selected
-  // persona still handles the wording; injection content stays untrusted
-  // data (delimiters + INJECTION_ECHO guardrail stay).
-  const handoffThreshold = settings?.humanHandoffThreshold ?? 0.5;
-  const mustHandoff =
-    injection ||
-    extraction.requestedAction === "HANDOFF_HUMAN" ||
-    extraction.intent === "HUMAN_REQUEST" ||
-    extraction.intent === "COMPLAINT" ||
-    extraction.confidence < handoffThreshold;
-
-  if (!hermesPersona && mustHandoff && !params.dryRun && process.env.AI_DISABLE_AUTO_HANDOFF !== "true") {
-    // Save memories even on handoff turns — complaints/requests carry facts.
-    if (extraction.memories.length) {
-      await saveMemories(db, {
-        workspaceId: params.workspaceId,
-        customerId: customer.id,
-        source: `ai_extraction:${message.id}`,
-        memories: extraction.memories,
-      });
-    }
-    const { createHandoff } = await import("@/modules/handoffs/handoff-service");
-    const handoffReasonMap: Record<string, "INJECTION_DETECTED" | "COMPLAINT" | "CUSTOMER_REQUEST" | "LOW_CONFIDENCE"> = {
-      PROMPT_INJECTION: "INJECTION_DETECTED",
-      COMPLAINT: "COMPLAINT",
-      CUSTOMER_REQUEST: "CUSTOMER_REQUEST",
-      LOW_CONFIDENCE: "LOW_CONFIDENCE",
-    };
-    await createHandoff(db, {
-      workspaceId: params.workspaceId,
-      conversationId: conversation.id,
-      customerId: customer.id,
-      reason: handoffReasonMap[handoffReason(extraction, injection)] ?? "LOW_CONFIDENCE",
-      metadata: { messageId: message.id, confidence: extraction.confidence },
-      actorUserId: "ai-agent",
-    });
-    await recordAudit(db, {
-      workspaceId: params.workspaceId,
-      action: "conversation.review_requested",
-      entityType: "Conversation",
-      entityId: conversation.id,
-      metadata: { reason: handoffReason(extraction, injection), intent: extraction.intent, confidence: extraction.confidence },
-    });
-    // Handoff is an alert/review request only — NO auto-reply to customer.
-    // Human agent will respond manually.
-    await logUsage(db, {
-      workspaceId: params.workspaceId,
-      conversationId: conversation.id,
-      messageId: message.id,
-      purpose: "RESPONSE",
-      provider: provider.name,
-      model: responseModelCfg.model,
-      intent: extraction.intent,
-      confidence: extraction.confidence,
-      promptVersion: PROMPT_VERSIONS.RESPONSE,
-      personaId: activePersona.id,
-      personaVersion: activePersona.version,
-      handoffReason: handoffReason(extraction, injection),
-      promptTokens: 0,
-      completionTokens: 0,
-      latencyMs: Date.now() - pipelineStarted,
-      success: true,
-      status: "HANDOFF",
-    });
-    return {
-      terminal: {
-        status: "HANDOFF",
-        intent: extraction.intent as Intent,
-        confidence: extraction.confidence,
-        plan,
-        response: undefined,
-        persona: activePersona,
-      },
-    };
   }
 
   return {
@@ -538,14 +405,6 @@ function buildPlan(
     useFeedback: extraction.intent === "FEEDBACK_REQUEST",
     knowledgeSources: ["product", "faq", "policy"],
   };
-}
-
-function handoffReason(extraction: ExtractionResult, injection: boolean): string {
-  if (injection) return "PROMPT_INJECTION";
-  if (extraction.intent === "COMPLAINT") return "COMPLAINT";
-  if (extraction.intent === "HUMAN_REQUEST") return "CUSTOMER_REQUEST";
-  if (extraction.requestedAction === "HANDOFF_HUMAN") return "CUSTOMER_REQUEST";
-  return "LOW_CONFIDENCE";
 }
 
 function getVectorStore(): VectorStore {
