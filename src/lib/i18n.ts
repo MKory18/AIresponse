@@ -122,9 +122,9 @@ export const t = {
     unknownCustomer: "عميل",
     pageBadge: "فيسبوك",
     deleteConversation: "حذف المحادثة",
-    deleteConversationTitle: "حذف المحادثة؟",
+    deleteConversationTitle: "حذف المحادثة نهائيًا؟",
     deleteConversationBody:
-      "سيتم حذف هذه المحادثة من صندوق المحادثات. لن يتم حذف العميل أو الطلبات المرتبطة بها.",
+      "سيتم حذف المحادثة بشكل نهائي: الرسائل، ذاكرة الذكاء الاصطناعي المرتبطة بها، والمسودة الجاري بناؤها. الطلبات تبقى موجودة كمستندات مالية بدون ربط بالمحادثة. لا يمكن التراجع بعد الحذف.",
     deleteConversationDone: "تم حذف المحادثة",
     deleteConversationFailed: "تعذّر حذف المحادثة",
     lastMessage: "آخر رسالة",

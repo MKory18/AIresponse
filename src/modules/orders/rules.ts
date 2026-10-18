@@ -123,18 +123,43 @@ export async function detectDuplicate(
   const windowHours = params.windowHours ?? 24;
   const since = new Date(Date.now() - windowHours * 3600_000);
 
-  // Same conversation with a recent non-cancelled order → LIKELY.
-  const conversationOrders = await db.order.findMany({
-    where: {
-      workspaceId: params.workspaceId,
-      conversationId: params.conversationId,
-      createdAt: { gte: since },
-      status: { notIn: ["CANCELLED", "FAILED"] },
-    },
-    take: 1,
-    select: { id: true },
-  });
-  if (conversationOrders.length > 0) return "LIKELY";
+  // Same conversation + the SAME product recently → LIKELY (accidental
+  // double confirmation of one cart). A different product in the same
+  // conversation is a legitimate follow-up order, NOT a duplicate — the
+  // customer+product clauses below still cover that repetition.
+  if (params.productId) {
+    const conversationOrders = await db.order.findMany({
+      where: {
+        workspaceId: params.workspaceId,
+        conversationId: params.conversationId,
+        createdAt: { gte: since },
+        status: { notIn: ["CANCELLED", "FAILED"] },
+      },
+      take: 5,
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (conversationOrders.length > 0) {
+      const sameProduct = await db.orderItem.findMany({
+        where: { orderId: { in: conversationOrders.map((o) => o.id) }, productId: params.productId },
+        take: 1,
+        select: { id: true },
+      });
+      if (sameProduct.length > 0) return "LIKELY";
+    }
+  } else {
+    const conversationOrders = await db.order.findMany({
+      where: {
+        workspaceId: params.workspaceId,
+        conversationId: params.conversationId,
+        createdAt: { gte: since },
+        status: { notIn: ["CANCELLED", "FAILED"] },
+      },
+      take: 1,
+      select: { id: true },
+    });
+    if (conversationOrders.length > 0) return "LIKELY";
+  }
 
   // Same customer + same product recently → POSSIBLE (LIKELY if same quantity).
   if (params.productId) {

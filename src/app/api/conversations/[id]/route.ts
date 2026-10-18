@@ -1,7 +1,7 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { updateConversationSchema } from "@/modules/conversations/schemas";
-import { deleteConversation, getConversationDetail, updateConversation } from "@/modules/conversations/service";
+import { purgeConversation, getConversationDetail, updateConversation } from "@/modules/conversations/service";
 
 type Params = { id: string };
 
@@ -25,15 +25,17 @@ export const PATCH = createHandler(
 );
 
 /**
- * DELETE — soft-delete only: hides the thread from inbox/list/polling while
- * Customer, Orders, Messages, and audit history are fully preserved.
+ * DELETE — FULL PURGE: the thread, its messages, its cart, the AI memory it
+ * seeded and its ancillary atoms are physically deleted (irreversible).
+ * Orders survive as financial records, unlinked. Audited + event-published.
+ * The soft-delete function stays available for tests/tooling.
  */
 export const DELETE = createHandler(
   { permission: "conversations.delete" },
   async ({ auth, params, req }) => {
     const { id } = params as Params;
     const ctx = { ...auth!, ip: req.headers.get("x-forwarded-for") ?? undefined };
-    await deleteConversation(prisma, ctx, id);
-    return ok({ ok: true, id });
+    const result = await purgeConversation(prisma, ctx, id);
+    return ok({ ok: true, id, ...result });
   }
 );

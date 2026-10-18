@@ -2,9 +2,9 @@ import type { Db } from "@/modules/customers/service";
 import { AppError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { parseQuantity, parseConfirmation, normalizePhone, type ResolvableProduct } from "./primitives";
-import { getOrCreateDraft, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft } from "./draft-service";
+import { getOrCreateDraft, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, recycleDraftForNewOrder } from "./draft-service";
 import { evaluateOrderRules, aggregateVerdict, publishDuplicateEvent, detectDuplicate } from "./rules";
-import { createOrderFromDraft, mergeCustomerData } from "./order-service";
+import { createOrderFromDraft, mergeCustomerData, updateOrderFromChat, cancelLatestOrderFromConversation } from "./order-service";
 import type { ExtractionResult } from "@/modules/ai/structured";
 
 export interface OrderIntelligenceResult {
@@ -16,6 +16,7 @@ export interface OrderIntelligenceResult {
     | "REQUEST_CONFIRMATION"
     | "ORDER_CONFIRMED"
     | "ORDER_CANCELLED"
+    | "ORDER_UPDATED"
     | "RULES_BLOCKED";
   missingFields?: string[];
   summaryText?: string;
@@ -52,6 +53,13 @@ export async function handleOrderIntent(
     customerText: string;
     source?: string;
     actorUserId?: string;
+    /**
+     * The page's catalog allowlist, resolved once in the reply path. Same
+     * gate as the reply: a page orders only what its assigned catalog
+     * holds; undefined keeps the legacy open behaviour for catalog-less
+     * workspaces.
+     */
+    allowedProductIds?: string[];
   }
 ): Promise<OrderIntelligenceResult> {
   const { extraction } = params;
@@ -69,6 +77,20 @@ export async function handleOrderIntent(
         entityId: draft.id,
       });
       return { handled: true, action: "ORDER_CANCELLED", summaryText: "تم إلغاء الطلب." };
+    }
+    // Closed draft (order already placed) → the cancel targets the ORDER.
+    if (draft && draft.state === "CONVERTED") {
+      const actor = { userId: params.actorUserId ?? "ai-agent", workspaceId: params.workspaceId };
+      const cancelled = await cancelLatestOrderFromConversation(db, actor, params.conversationId);
+      if (cancelled) {
+        return {
+          handled: true,
+          action: "ORDER_CANCELLED",
+          orderId: cancelled.orderId,
+          orderNumber: cancelled.orderNumber,
+          summaryText: `تم إلغاء الطلب رقم ${cancelled.orderNumber}.`,
+        };
+      }
     }
     return { handled: true, action: "NONE" };
   }
@@ -159,10 +181,11 @@ export async function handleOrderIntent(
     }
 
     // Deterministic product re-resolution from raw text when the AI missed it
-    // ("بدي 3" after "بدي ماء الكمأة" — context product).
+    // ("بدي 3" after "بدي ماء الكمأة" — context product). Scoped to the page's
+    // catalog allowlist the same way the direct merge below is.
     if (!draftInput.productName && !draftInput.productId) {
       const { resolveProduct } = await import("./primitives");
-      const products = await listResolvableProducts(db, params.workspaceId);
+      const products = await listResolvableProducts(db, params.workspaceId, params.allowedProductIds);
       const resolution = resolveProduct(params.customerText, products);
       if (resolution.status === "RESOLVED" && resolution.product) {
         draftInput.productId = resolution.product.id;
@@ -170,7 +193,53 @@ export async function handleOrderIntent(
     }
 
     const draft = await getOrCreateDraft(db, params.workspaceId, params.conversationId, params.customerId);
-    const previousProductId = draft.productId;
+
+    // MULTI-ORDER: a closed draft (order placed or cart cancelled) is either
+    // edited (update of the PLACED order) or recycled into a fresh cart for a
+    // new order in the same conversation.
+    if (draft.state === "CONVERTED" || draft.state === "CANCELLED") {
+      const wantsNewProduct = Boolean(draftInput.productName || draftInput.productId);
+      const wantsEdit = Boolean(draftInput.quantity || draftInput.rawAddress || draftInput.province || draftInput.notes);
+      if (intent === "ORDER_UPDATE" && !wantsNewProduct) {
+        if (!wantsEdit) return { handled: false, action: "NONE" };
+        const actor = { userId: params.actorUserId ?? "ai-agent", workspaceId: params.workspaceId };
+        const edit = await updateOrderFromChat(db, actor, {
+          conversationId: params.conversationId,
+          quantity: draftInput.quantity,
+          rawAddress: draftInput.rawAddress,
+          province: draftInput.province,
+          notes: draftInput.notes,
+          phone: draftInput.phone,
+        });
+        if (edit.ok) {
+          return {
+            handled: true,
+            action: "ORDER_UPDATED",
+            orderId: edit.order.id,
+            orderNumber: edit.order.orderNumber,
+            total: Number(edit.order.total),
+            currency: edit.order.currency,
+            summaryText: edit.changed.length
+              ? `تم تعديل الطلب رقم ${edit.order.orderNumber} ✅`
+              : `الطلب رقم ${edit.order.orderNumber} ما فيه شي جديد يتغير.`,
+          };
+        }
+        if (edit.reason === "NOT_EDITABLE") {
+          return {
+            handled: true,
+            action: "NONE",
+            summaryText: `الطلب رقم ${edit.orderNumber} وصل مرحلة ما بتنعدل هلق (${edit.statusLabel}).`,
+          };
+        }
+        // NO_ORDER → fall through: open a fresh cart with the given fields.
+      } else {
+        // A bare confirmation on an empty new cart is chatter, not a new order.
+        if (!wantsNewProduct && !wantsEdit && parseConfirmation(params.customerText).signal !== "NONE") {
+          return { handled: false, action: "NONE" };
+        }
+        await recycleDraftForNewOrder(db, params.workspaceId, draft);
+      }
+    }
 
     const result = await updateDraftFromExtraction(db, {
       workspaceId: params.workspaceId,
@@ -178,6 +247,7 @@ export async function handleOrderIntent(
       customerId: params.customerId,
       extraction: draftInput,
       source: params.source ?? "AI",
+      allowedProductIds: params.allowedProductIds,
     });
 
     if ("ambiguousCandidates" in result && result.ambiguousCandidates) {
@@ -247,9 +317,16 @@ export async function handleOrderIntent(
 }
 
 /** Product candidates for resolver consumers (used by tests and UI pickers). */
-export async function listResolvableProducts(db: Db, workspaceId: string): Promise<ResolvableProduct[]> {
+export async function listResolvableProducts(
+  db: Db,
+  workspaceId: string,
+  allowedProductIds?: string[]
+): Promise<ResolvableProduct[]> {
   const products = await db.product.findMany({
-    where: { workspaceId, isActive: true, isArchived: false },
+    where: {
+      workspaceId, isActive: true, isArchived: false,
+      ...(allowedProductIds ? { id: { in: allowedProductIds } } : {}),
+    },
   }) as unknown as ResolvableProduct[];
   return products.map((p) => ({
     ...p,

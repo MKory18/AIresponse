@@ -564,6 +564,97 @@ export async function deleteConversation(db: Db, ctx: ActorContext, conversation
   return updated;
 }
 
+// ---- Hard purge (delete the thread AND its memory/inference atoms) ----
+
+/**
+ * FULL PURGE — the thread disappears completely: messages, drafted cart,
+ * AI memory sourced by its messages, media attached to its messages, and
+ * the ancillary automation atoms (follow-ups, handoffs, usage/citation/
+ * attribution/sales crumbs). Done means DONE — nothing is recoverable.
+ *
+ * Deliberately kept: Orders remain as financial records but lose the
+ * conversation/draft links, DiscountApprovals follow their orders,
+ * CampaignRecipients stay as sent-mail records, and the audit history
+ * (including this purge itself) stays as the regulatory trail.
+ *
+ * Order of operations matters: message ids are collected BEFORE any
+ * deletion so memory sourcing (`ai_extraction:<messageId>`) still resolves.
+ */
+export async function purgeConversation(db: Db, ctx: ActorContext, conversationId: string) {
+  // No deletedAt guard here: a soft-deleted thread is exactly the cleanup case.
+  const conversation = await db.conversation.findUnique({ where: { id: conversationId } });
+  if (!conversation || conversation.workspaceId !== ctx.workspaceId) {
+    throw new NotFoundError("Conversation");
+  }
+
+  const messages = (await db.message.findMany({
+    where: { conversationId },
+    select: { id: true },
+  })) as Array<{ id: string }>;
+  const messageIds = messages.map((m) => m.id);
+
+  if (messageIds.length > 0) {
+    // Media rows bound to the dying messages (customer-inbound included:
+    // their privacy rule is never-to-resurface, and a purge deletes them).
+    try {
+      await db.mediaAsset.deleteMany({ where: { messageId: { in: messageIds } } });
+    } catch { /* never break the purge */ }
+
+    // THE MEMORY: everything this conversation's messages seeded into the
+    // AI — FACT/PREFERENCE/NOTE rows whose source names one of these
+    // messages. Memories from the customer's other conversations stay.
+    try {
+      await db.customerMemory.deleteMany({
+        where: {
+          workspaceId: ctx.workspaceId,
+          customerId: conversation.customerId,
+          source: { in: messageIds.map((id) => `ai_extraction:${id}`) },
+        },
+      });
+    } catch { /* never break the purge */ }
+
+    try {
+      await db.knowledgeCitation.deleteMany({ where: { conversationId } });
+    } catch { /* never break the purge */ }
+
+    await db.message.deleteMany({ where: { conversationId } });
+  }
+
+  await db.orderDraft.deleteMany({ where: { conversationId } });
+
+  // Ancillary atoms of the thread — never block the purge.
+  try {
+    await db.followUp.deleteMany({ where: { workspaceId: ctx.workspaceId, conversationId } });
+    await db.humanHandoff.deleteMany({ where: { workspaceId: ctx.workspaceId, conversationId } });
+    await db.salesEvent.deleteMany({ where: { workspaceId: ctx.workspaceId, conversationId } });
+    await db.aIUsageLog.deleteMany({ where: { workspaceId: ctx.workspaceId, conversationId } });
+    await db.attributionTouch.deleteMany({ where: { workspaceId: ctx.workspaceId, conversationId } });
+  } catch { /* never break the purge */ }
+
+  // Orders survive as financial records — unlinked from the gone thread.
+  await db.order.updateMany({
+    where: { workspaceId: ctx.workspaceId, conversationId },
+    data: { conversationId: null, draftId: null },
+  });
+
+  await db.conversation.delete({ where: { id: conversationId } });
+
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "conversation.purged",
+    entityType: "Conversation",
+    entityId: conversationId,
+    ip: ctx.ip,
+    metadata: { customerId: conversation.customerId, messages: messageIds.length },
+  });
+
+  await eventBus.publish(
+    makeEvent("ConversationUpdated", ctx.workspaceId, { conversationId, type: "ConversationPurged" })
+  );
+  return { purged: true, messages: messageIds.length };
+}
+
 // ---- Assignment / takeover / release / status ----
 
 async function assertWorkspaceMember(db: Db, workspaceId: string, userId: string) {

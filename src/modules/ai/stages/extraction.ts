@@ -176,6 +176,28 @@ export async function runExtraction(
   // Injection defence: customer content never escalates or changes policy.
   const injection = looksLikeInjection(customerText);
 
+  // Catalog resolution runs FIRST: the page's catalog scopes both the REPLY
+  // candidates and — through the same allowlist — ORDER INTAKE below. One
+  // resolution, one trusted source; no second round-trip later.
+  // resolveCatalogForChannel short-circuits workspaces with no catalogs
+  // internally:
+  // no_catalogs → undefined (legacy: every product may answer/order),
+  // assigned+active → ids, otherwise → [] (nothing may answer/order).
+  const { resolveCatalogForChannel, catalogProductIds } = await import(
+    "@/modules/catalog/service"
+  );
+  const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
+  log.info(
+    { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
+    "ai_catalog_resolved"
+  );
+  const allowedProductIds =
+    resolved.status === "ok"
+      ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id)
+      : resolved.status === "no_catalogs"
+        ? undefined
+        : [];
+
   // Order Intelligence: deterministic draft/rules handling for order intents.
   let orderResult: Awaited<ReturnType<typeof handleOrderIntent>> | null = null;
   if (
@@ -191,6 +213,7 @@ export async function runExtraction(
         customerText,
         source: "AI",
         actorUserId: "ai-agent",
+        allowedProductIds,
       });
     } catch (err) {
       log.error({ err }, "order_intelligence_failed");
@@ -200,30 +223,6 @@ export async function runExtraction(
   // 6+7. Memory + product resolution are independent — run concurrently.
   // buildAIContext still waits for productId (dependency), but memory no
   // longer blocks product lookup and vice versa.
-  // The product candidates are scoped to this page's active catalog: when
-  // the workspace holds any catalogs, only the channel's catalog may
-  // answer — an unassigned page resolves nothing (safe fallback, said
-  // out loud in the UI), and a workspace with no catalogs at all keeps
-  // the legacy behaviour byte-for-byte.
-  const { resolveCatalogForChannel, catalogProductIds } = await import(
-    "@/modules/catalog/service"
-  );
-  // PERF — resolveCatalogForChannel already short-circuits workspaces with
-  // no catalogs internally; the extra workspaceHasCatalogs pre-check here
-  // was a duplicate round-trip with identical semantics:
-  // no_catalogs → undefined (legacy: every product may answer),
-  // assigned+active → ids, otherwise → [] (nothing may answer).
-  const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
-  log.info(
-    { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
-    "ai_catalog_resolved"
-  );
-  const allowedProductIds =
-    resolved.status === "ok"
-      ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id)
-      : resolved.status === "no_catalogs"
-        ? undefined
-        : [];
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
       loadMemory(db, params.workspaceId, customer.id),
