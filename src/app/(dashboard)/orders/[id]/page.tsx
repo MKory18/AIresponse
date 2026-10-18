@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowLeft, History, MapPin, Receipt, UserRound } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { ArrowLeft, History, MapPin, Receipt, Trash2, UserRound } from "lucide-react";
 import { label } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -14,6 +14,8 @@ import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type OrderDetail = {
   canWrite?: boolean;
+  /** حذف الطلبات للمالك فقط (OWNER) — الخادم هو اللي بيقرر. */
+  canDelete?: boolean;
   id: string;
   orderNumber: string;
   status: string;
@@ -45,10 +47,12 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/orders/${params.id}`);
@@ -83,6 +87,20 @@ export default function OrderDetailPage() {
     load();
   }
 
+  async function deleteThisOrder() {
+    setSaving(true);
+    const res = await fetch(`/api/orders/${params.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setSaving(false);
+      const data = await res.json().catch(() => ({}));
+      setError((data as { message?: string }).message ?? "تعذّر حذف الطلب");
+      setConfirmDelete(false);
+      return;
+    }
+    // الطلب انحذف — ما في صفحة نرجع إلها، للقائمة مباشرة.
+    router.push("/orders");
+  }
+
   if (error && !order) {
     return (
       <div className="page-wrap">
@@ -108,19 +126,28 @@ export default function OrderDetailPage() {
       <PageHeader
         title={`طلب ${order.orderNumber}`}
         description={order.createdAt ? new Date(order.createdAt).toLocaleString("ar") : undefined}
-        actions={transitions.map((next) => (
-          <Button
-            key={next}
-            size="sm"
-            variant={next === "CANCELLED" ? "danger" : "secondary"}
-            onClick={() => changeStatus(next)}
-            disabled={saving}
-            loading={saving}
-          >
-            <ArrowLeft size={13} />
-            {label(next)}
-          </Button>
-        ))}
+        actions={
+          <>
+            {transitions.map((next) => (
+              <Button
+                key={next}
+                size="sm"
+                variant={next === "CANCELLED" ? "danger" : "secondary"}
+                onClick={() => changeStatus(next)}
+                disabled={saving}
+                loading={saving}
+              >
+                <ArrowLeft size={13} />
+                {label(next)}
+              </Button>
+            ))}
+            {order.canDelete && (
+              <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)} disabled={saving} title="حذف الطلب نهائيًا (المالك فقط)">
+                <Trash2 size={13} /> حذف الطلب
+              </Button>
+            )}
+          </>
+        }
       />
       {error && (
         <GlassCard level="glass-subtle" className="border-red-500/20 px-4 py-2.5 text-sm text-red-600 dark:text-red-400">{error}</GlassCard>
@@ -239,6 +266,17 @@ export default function OrderDetailPage() {
         title={`إلغاء الطلب ${order.orderNumber}؟`}
         body="سيُلغى الطلب نهائيًا وفق انتقالات الحالة المسموحة. لا يمكن التراجع من هذه الواجهة."
         confirmLabel="إلغاء الطلب"
+        busy={saving}
+        danger
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => void deleteThisOrder()}
+        title={`حذف الطلب ${order.orderNumber} نهائيًا؟`}
+        body="ينحذف الطلب مع كل بنوده من النظام، وما بيرجع. سجل التدقيق بيحفظ العملية (الرقم · المجموع · الحالة) — الإجراء متاح للمالك فقط."
+        confirmLabel="حذف نهائي"
         busy={saving}
         danger
       />

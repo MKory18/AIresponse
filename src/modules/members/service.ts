@@ -2,6 +2,7 @@ import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { isPermission } from "@/modules/rbac/permissions";
 import { hashPassword, verifyPassword } from "@/modules/auth/password";
+import { getActorRole as sharedGetActorRole } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import type { MemberStatus, Prisma, UserRole } from "@prisma/client";
 
@@ -47,10 +48,7 @@ function assertOwnerRank(actorRole: string | null | undefined): void {
 }
 
 async function getActorRole(db: Db, ctx: ActorContext): Promise<string | null> {
-  const row = (await db.workspaceMember.findUnique({
-    where: { workspaceId_userId: { workspaceId: ctx.workspaceId, userId: ctx.userId } },
-  })) as { role: string } | null;
-  return row?.role ?? null;
+  return sharedGetActorRole(db, ctx);
 }
 
 function assertAssignableRole(role: string): asserts role is AssignableRole {

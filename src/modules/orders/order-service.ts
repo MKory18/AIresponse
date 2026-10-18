@@ -2,6 +2,7 @@ import { randomId } from "@/core/crypto";
 import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
+import { requireWorkspaceOwner } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
@@ -397,6 +398,52 @@ export function withoutClickSecrets<T extends object>(order: T): Omit<T, "ctwaCl
   void _c;
   void _p;
   return rest as Omit<T, "ctwaClidEnc" | "psidEnc">;
+}
+
+/**
+ * حذف طلب — صلاحية المالك (OWNER) فقط، حذف نهائي بكل بنوده.
+ *
+ * الحماية ثلاثية: بوابة `orders.write` بالمسار، ثم هذا الحارس الذي يقرأ رتبة
+ * الفاعل طازجة من القاعدة (ADMIN بيملك orders.write ومع هيك محجوب)، ثم حصر
+ * الصف بمساحة الفاعل قبل أي حذف (طلب مساحة تانية = «غير موجود» بلا تسريب
+ * وجوده). سجل التدقيق يحفظ لقطة الطلب (الرقم · الحالة · المجموع · عدد
+ * البنود) فيبقى الأثر بعد زوال الصف.
+ */
+export async function deleteOrder(db: Db, ctx: ActorContext, orderId: string) {
+  const order = (await db.order.findUnique({
+    where: { id: orderId },
+    include: { items: { select: { id: true } } },
+  })) as
+    | { id: string; workspaceId: string; orderNumber: string; status: string; total: unknown; currency: string; items: { id: string }[] }
+    | null;
+  if (!order || order.workspaceId !== ctx.workspaceId) throw new NotFoundError("Order");
+
+  await requireWorkspaceOwner(db, ctx, {
+    code: "OWNER_ONLY_ORDERS",
+    message: "حذف الطلبات متاح للمالك فقط",
+  });
+
+  // الترتيب صريح (بنود ثم الطلب): مضمون على القاعدة الحقيقية بالقيد Cascade
+  // وعلى البديل بالذاكرة بالحذف المباشر — نفس النتيجة بالحالتين.
+  await db.orderItem.deleteMany({ where: { orderId: order.id } });
+  await db.order.delete({ where: { id: order.id } });
+
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "order.deleted",
+    entityType: "Order",
+    entityId: order.id,
+    metadata: {
+      orderNumber: order.orderNumber,
+      status: order.status,
+      total: String(order.total ?? ""),
+      currency: order.currency ?? null,
+      itemCount: order.items.length,
+    },
+  });
+
+  return { deleted: true, id: order.id, orderNumber: order.orderNumber };
 }
 
 // â”€â”€ Customer data merging (confidence-gated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

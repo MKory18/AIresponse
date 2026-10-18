@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
-import { getOwnedOrder, transitionOrder, withoutClickSecrets } from "@/modules/orders/order-service";
+import { deleteOrder, getOwnedOrder, transitionOrder, withoutClickSecrets } from "@/modules/orders/order-service";
 
 type Params = { id: string };
 
@@ -17,7 +17,21 @@ export const GET = createHandler(
     });
     // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع للمتصفح أبدًا.
     const safe = withoutClickSecrets(order);
-    return ok({ ...safe, timeline, canWrite: auth!.can("orders.write") });
+    return ok({ ...safe, timeline, canWrite: auth!.can("orders.write"), canDelete: auth!.role === "OWNER" });
+  }
+);
+
+/** حذف نهائي — صلاحية orders.write + المالك (OWNER) فقط (الحارس بالخدمة). */
+export const DELETE = createHandler(
+  { permission: "orders.write" },
+  async ({ auth, params, req }) => {
+    const { id } = params as Params;
+    const result = await deleteOrder(
+      prisma,
+      { ...auth!, ip: req.headers.get("x-forwarded-for") ?? undefined },
+      id
+    );
+    return ok(result);
   }
 );
 
