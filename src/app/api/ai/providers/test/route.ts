@@ -2,13 +2,13 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
-import { probeProviderEndpoint } from "@/modules/ai/provider";
+import { probeProviderEndpoint, normalizeHermesEndpoint } from "@/modules/ai/provider";
 import { resolveModel } from "@/modules/ai/router";
-import { assertEndpointResolvesPublic } from "@/modules/ai/endpoint-guard";
+import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
-  provider: z.enum(["openai", "openrouter", "internal", "mock"]).optional(),
+  provider: z.enum(["openai", "openrouter", "internal", "hermes", "mock"]).optional(),
 });
 
 /**
@@ -39,6 +39,33 @@ export const POST = createHandler(
     const key = choice === "openai" ? env.OPENAI_API_KEY : choice === "openrouter" ? env.OPENROUTER_API_KEY : undefined;
     let endpoint: string;
     let model: string;
+    if (choice === "hermes") {
+      const override = (settings?.customBaseUrl as string | null | undefined)?.trim();
+      const base = override || (env.HERMES_BASE_URL as string | undefined)?.trim();
+      const hermesKey = (env.HERMES_API_KEY as string | undefined)?.trim();
+      if (!base || !hermesKey) {
+        return ok({ provider: "hermes", status: "needs_key", latencyMs: 0, detail: "HERMES_BASE_URL_OR_API_KEY_MISSING" });
+      }
+      // Hermes guard: strict baseline + optional deployer-opt-in private
+      // networks (HERMES_ALLOW_PRIVATE_NETWORK) for loopback/LAN gateways.
+      const guard = await assertHermesEndpointResolves(base, {
+        allowPrivateNetwork: isHermesPrivateNetworkAllowed(),
+      });
+      if (!guard.ok) {
+        return ok({ provider: "hermes", status: "failed", latencyMs: 0, detail: `SSRF_REJECTED_${guard.reason}` });
+      }
+      endpoint = normalizeHermesEndpoint(base);
+      model = (env.HERMES_MODEL as string | undefined)?.trim() || resolveModel(settings as never, "RESPONSE").model || "hermes-agent";
+      const probe = await probeProviderEndpoint(endpoint, hermesKey, model, { followRedirects: false });
+      return ok({
+        provider: "hermes",
+        status: probe.ok ? "working" : "failed",
+        latencyMs: probe.latencyMs,
+        detail: probe.detail,
+        endpoint,
+        model,
+      });
+    }
     if (choice === "internal") {
       const base = (settings?.customBaseUrl as string | null | undefined)?.trim();
       if (!base) {

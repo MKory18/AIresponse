@@ -1,12 +1,13 @@
 ﻿import Link from "next/link";
-import { ArrowLeft, Bot, Settings as SettingsIcon, Users } from "lucide-react";
+import { ArrowLeft, Bot, Settings as SettingsIcon, UserRound, Users } from "lucide-react";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { t } from "@/lib/i18n";
 
 export default function SettingsPage() {
   const sections = [
+    { href: "/settings/account", title: "حسابي", desc: "اسمك، بريدك، وكلمة مرورك — كلها من هنا بدون أي إشراف.", icon: UserRound },
     { href: "/settings/ai", title: "إعدادات AI", desc: "المزود، النماذج، حرارة التوليد، حدود الثقة، والتشغيل/الإيقاف.", icon: Bot },
-    { href: "/settings/team", title: "الفريق والصلاحيات", desc: "الأعضاء، الدعوات، الأدوار، التعليق، وإعدادات مساحة العمل.", icon: Users },
+    { href: "/settings/team", title: "الفريق والصلاحيات", desc: "الأعضاء، الدعوات والإنشاء المباشر، الأدوار، التعليق، وإعدادات مساحة العمل.", icon: Users },
   ];
   return (
     <div className="page-wrap">

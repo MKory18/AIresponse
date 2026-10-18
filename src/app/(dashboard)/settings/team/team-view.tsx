@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2, UserRound } from "lucide-react";
+import { KeyRound, Plus, Trash2, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -60,6 +60,10 @@ export default function TeamView() {
   // تأكيدات العمليات الحساسة — بلا window.confirm الخام
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
   const [suspendTarget, setSuspendTarget] = useState<Member | null>(null);
+  // وضع فتح الحساب: دعوة حساب مسجل، أو إنشاء حساب جديد مباشرة (اسم + بريد + كلمة مرور)
+  const [inviteMode, setInviteMode] = useState<"invite" | "create">("invite");
+  // إعادة تعيين كلمة مرور عضو من الإدارة
+  const [pwTarget, setPwTarget] = useState<Member | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -78,16 +82,32 @@ export default function TeamView() {
   async function invite(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const create = inviteMode === "create";
     setBusy(true);
     try {
       await api("/api/workspaces/members", "POST", {
         email: form.get("email"),
         role: form.get("role"),
+        ...(create ? { name: form.get("name"), password: form.get("password") } : {}),
       });
       setShowInvite(false);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "فشلت الدعوة");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetPassword(id: string, newPassword: string) {
+    setBusy(true);
+    try {
+      await api(`/api/workspaces/members/${id}`, "PATCH", { newPassword });
+      setPwTarget(null);
+      setError(null);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "فشل تغيير كلمة المرور");
     } finally {
       setBusy(false);
     }
@@ -213,9 +233,14 @@ export default function TeamView() {
                       </div>
                     </td>
                     <td>
-                      <Button size="sm" variant="danger" disabled={busy} onClick={() => setRemoveTarget(m)}>
-                        <Trash2 size={13} /> إزالة
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPwTarget(m)} title="تعيين كلمة مرور جديدة لهذا العضو">
+                          <KeyRound size={13} /> كلمة المرور
+                        </Button>
+                        <Button size="sm" variant="danger" disabled={busy} onClick={() => setRemoveTarget(m)}>
+                          <Trash2 size={13} /> إزالة
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -240,11 +265,37 @@ export default function TeamView() {
         {wsMsg && <p className="mt-2 text-xs text-ink-muted">{wsMsg}</p>}
       </GlassCard>
 
-      <Dialog open={showInvite} onClose={() => setShowInvite(false)} title="دعوة عضو">
+      <Dialog open={showInvite} onClose={() => setShowInvite(false)} title={inviteMode === "create" ? "إنشاء حساب جديد" : "دعوة عضو"}>
         <form onSubmit={invite} className="space-y-3">
-          <Field label="البريد الإلكتروني" hint="يجب أن يكون مسجلًا مسبقًا في المنصة.">
+          <div className="flex rounded-2xl border border-line bg-surface-2 p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setInviteMode("invite")}
+              className={`flex-1 rounded-xl px-3 py-2 font-semibold transition ${inviteMode === "invite" ? "bg-surface text-ink shadow-xs" : "text-ink-muted"}`}
+            >
+              دعوة حساب مسجل
+            </button>
+            <button
+              type="button"
+              onClick={() => setInviteMode("create")}
+              className={`flex-1 rounded-xl px-3 py-2 font-semibold transition ${inviteMode === "create" ? "bg-surface text-ink shadow-xs" : "text-ink-muted"}`}
+            >
+              إنشاء حساب جديد
+            </button>
+          </div>
+          {inviteMode === "create" && (
+            <Field label="الاسم">
+              <Input name="name" required minLength={2} maxLength={100} placeholder="مثال: محمد المبيعات" />
+            </Field>
+          )}
+          <Field label="البريد الإلكتروني" hint={inviteMode === "create" ? "يُفتح الحساب فورًا بهذا البريد وكلمة المرور." : "يجب أن يكون مسجلًا مسبقًا في المنصة."}>
             <Input name="email" type="email" required dir="ltr" placeholder="name@example.com" />
           </Field>
+          {inviteMode === "create" ? (
+            <Field label="كلمة المرور" hint="8 أحرف على الأقل. كوّنها من الاسم والبريد (لا ترسلها بأي قناة غير آمنة).">
+              <Input name="password" type="text" required minLength={8} maxLength={128} dir="ltr" autoComplete="off" className="num" />
+            </Field>
+          ) : null}
           <Field label="الدور">
             <Select name="role" defaultValue="SALES_AGENT">
               {ROLES.map((r) => (
@@ -255,7 +306,29 @@ export default function TeamView() {
             </Select>
           </Field>
           <Button type="submit" loading={busy} className="w-full">
-            إرسال الدعوة (صالحة 7 أيام)
+            {inviteMode === "create" ? "إنشاء الحساب وتنشيط العضوية" : "إرسال الدعوة (صالحة 7 أيام)"}
+          </Button>
+        </form>
+      </Dialog>
+
+      <Dialog open={pwTarget !== null} onClose={() => setPwTarget(null)} title="كلمة مرور جديدة">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const value = String(new FormData(e.currentTarget).get("newPassword") ?? "");
+            if (pwTarget) void resetPassword(pwTarget.id, value);
+          }}
+          className="space-y-3"
+        >
+          <p className="text-xs text-ink-muted">
+            لكلمة مرور جديدة لـ <span className="font-semibold text-ink">{pwTarget?.user.name}</span> ({pwTarget?.user.email}).
+            أعلمها بها بصوتٍ آمن مباشرة — لا ترسلها برسالة.
+          </p>
+          <Field label="كلمة المرور الجديدة">
+            <Input name="newPassword" type="text" required minLength={8} maxLength={128} dir="ltr" autoComplete="off" className="num" />
+          </Field>
+          <Button type="submit" loading={busy} className="w-full">
+            تعيين كلمة المرور
           </Button>
         </form>
       </Dialog>

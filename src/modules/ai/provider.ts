@@ -51,6 +51,18 @@ export interface AIProvider {
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+/**
+ * Normalizes a Hermes gateway base URL into a full chat-completions endpoint.
+ * Accepts any of: http://host:8642, http://host:8642/v1,
+ * http://host:8642/v1/chat/completions (trailing slashes tolerated).
+ */
+export function normalizeHermesEndpoint(baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  if (/\/chat\/completions$/.test(base)) return base;
+  if (/\/v1$/.test(base)) return `${base}/chat/completions`;
+  return `${base}/v1/chat/completions`;
+}
+
 /** Shared OpenAI-compatible implementation for OpenAI & OpenRouter. */
 export class OpenAICompatibleProvider implements AIProvider {
   readonly name: string;
@@ -338,6 +350,9 @@ export function getAIProvider(): AIProvider {
     aiProvider: env.AI_PROVIDER,
     openaiKey: env.OPENAI_API_KEY,
     openrouterKey: env.OPENROUTER_API_KEY,
+    hermesBaseUrl: env.HERMES_BASE_URL,
+    hermesKey: env.HERMES_API_KEY,
+    hermesModel: env.HERMES_MODEL,
     responseModel: env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: env.ALLOW_MOCK_AI,
@@ -359,6 +374,9 @@ export function resolveAIProvider(opts: {
   aiProvider?: string;
   openaiKey?: string;
   openrouterKey?: string;
+  hermesBaseUrl?: string;
+  hermesKey?: string;
+  hermesModel?: string;
   responseModel?: string;
   nodeEnv?: string;
   allowMockAi?: string;
@@ -385,6 +403,26 @@ export function resolveAIProvider(opts: {
     throw new AIProviderError(
       `AI_NOT_CONFIGURED: AI_PROVIDER="${opts.aiProvider}" is configured but ${expected} is missing. Refusing mock fallback — no fake replies will be sent.`
     );
+  }
+  // Hermes Agent — OpenAI-compatible gateway (delivery "external" so the
+  // privacy gate keeps masking PII: Hermes turns may invoke external tools).
+  if (opts.aiProvider === "hermes") {
+    const base = opts.hermesBaseUrl?.trim();
+    const key = opts.hermesKey?.trim();
+    if (!base || !key) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: AI_PROVIDER="hermes" is configured but HERMES_BASE_URL or HERMES_API_KEY is missing. Set both (HERMES_BASE_URL like http://127.0.0.1:8642/v1, HERMES_API_KEY = the gateway API key). Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
+    return new OpenAICompatibleProvider({
+      name: "hermes",
+      apiKey: key,
+      baseUrl: normalizeHermesEndpoint(base),
+      defaultModel: opts.hermesModel?.trim() || opts.responseModel || "hermes-agent",
+      // Hermes turns may invoke tools: never follow a gateway redirect with
+      // the key + prompts (fail fast instead).
+      followRedirects: false,
+    });
   }
   const mockAllowed =
     opts.nodeEnv === "test" ||

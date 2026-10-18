@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, ChevronDown, ChevronLeft, LogOut, Menu, Search, Users } from "lucide-react";
+import { Bell, ChevronDown, ChevronLeft, LogOut, Menu, Search, UserRound, Users } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { Sidebar, type NavEntry } from "./app-sidebar";
@@ -152,6 +152,15 @@ export function AppShell({
                 </button>
                 {accountOpen && (
                   <div role="menu" className="absolute end-0 top-[calc(100%+8px)] z-30 w-48 rounded-2xl border border-line/70 bg-surface-2 p-1.5 shadow-pop">
+                    <Link
+                      href="/settings/account"
+                      role="menuitem"
+                      onClick={() => setAccountOpen(false)}
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-ink transition hover:bg-surface-hover"
+                    >
+                      <UserRound size={15} className="text-ink-subtle" />
+                      حسابي
+                    </Link>
                     <Link
                       href="/settings/team"
                       role="menuitem"

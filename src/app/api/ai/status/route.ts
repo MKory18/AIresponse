@@ -33,10 +33,17 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
   }
   const hasOpenaiKey = Boolean(env.OPENAI_API_KEY);
   const hasOpenrouterKey = Boolean(env.OPENROUTER_API_KEY);
+  const hasHermesConfig = Boolean(env.HERMES_BASE_URL && env.HERMES_API_KEY);
   const allowMock = ["1", "true", "yes"].includes(((env.ALLOW_MOCK_AI ?? "") as string).toLowerCase());
   const isProd = process.env.NODE_ENV === "production";
 
   const providers = [
+    {
+      id: "hermes",
+      configured: hasHermesConfig,
+      status: hasHermesConfig ? "configured" : "needs_env",
+      endpoint: (settings.customBaseUrl as string | null) ?? (env.HERMES_BASE_URL as string | null) ?? null,
+    },
     {
       id: "openai",
       configured: hasOpenaiKey,
