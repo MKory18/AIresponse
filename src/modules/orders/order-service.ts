@@ -7,7 +7,7 @@ import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
 import { calculatePricing } from "./pricing";
-import type { OrderDraft, Prisma } from "@prisma/client";
+import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 export interface CreateOrderFromDraftResult {
   orderId: string;
@@ -349,6 +349,150 @@ export async function getOwnedOrder(db: Db, workspaceId: string, orderId: string
   });
   if (!order || order.workspaceId !== workspaceId) throw new NotFoundError("Order");
   return order;
+}
+
+/**
+ * EDIT A PLACED ORDER FROM CHAT — the customer asks to change the latest
+ * order of the conversation (quantity/address/notes). Prices are NEVER
+ * accepted from the AI: the locked unit price is kept and totals are
+ * recomputed deterministically through calculatePricing. A terminal order
+ * (delivered/returned/failed/cancelled/out-for-delivery) refuses edits.
+ */
+export type ChatOrderEdit =
+  | { ok: true; order: Order; changed: string[] }
+  | { ok: false; reason: "NO_ORDER" }
+  | { ok: false; reason: "NOT_EDITABLE"; orderNumber: string; statusLabel: string };
+
+export async function updateOrderFromChat(
+  db: Db,
+  ctx: ActorContext,
+  params: {
+    conversationId: string;
+    quantity?: number | null;
+    rawAddress?: string | null;
+    province?: string | null;
+    notes?: string | null;
+    phone?: string | null;
+  }
+): Promise<ChatOrderEdit> {
+  const latest = (await db.order.findMany({
+    where: { workspaceId: ctx.workspaceId, conversationId: params.conversationId },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+  })) as Order[];
+  const order = latest[0];
+  if (!order) return { ok: false, reason: "NO_ORDER" };
+
+  // Editability = the state machine can still cancel it: NEW,
+  // CONFIRMATION_PENDING, CONFIRMED, PROCESSING. Everything else is final.
+  if (!canTransitionOrder(order.status, "CANCELLED")) {
+    return { ok: false, reason: "NOT_EDITABLE", orderNumber: order.orderNumber, statusLabel: order.status };
+  }
+
+  const changed: string[] = [];
+  const data: Prisma.OrderUncheckedUpdateInput = {};
+  const newProvince = params.province ?? order.province;
+  if (params.province && params.province !== order.province) {
+    data.province = params.province;
+    changed.push("province");
+  }
+  if (params.rawAddress && params.rawAddress !== order.deliveryAddress) {
+    data.deliveryAddress = params.rawAddress;
+    changed.push("address");
+  }
+  if (params.notes && params.notes !== order.notes) {
+    data.notes = params.notes;
+    changed.push("notes");
+  }
+
+  if (params.quantity && params.quantity > 0) {
+    const items = (await db.orderItem.findMany({ where: { orderId: order.id } })) as OrderItem[];
+    const item = items[0];
+    if (item) {
+      // Price snapshot stays locked (item.unitPrice — never a live Product
+      // price); totals are recomputed through the same pricing engine as
+      // creation so offers and delivery stay consistent.
+      const breakdown = await calculatePricing(db, {
+        workspaceId: ctx.workspaceId,
+        product: { price: Number(item.unitPrice), currency: order.currency },
+        quantity: params.quantity,
+        province: newProvince,
+      });
+      if (!breakdown.deliveryAvailable) {
+        throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
+      }
+      await db.orderItem.updateMany({
+        where: { orderId: order.id },
+        data: { quantity: params.quantity, subtotal: breakdown.subtotal },
+      });
+      data.subtotal = breakdown.subtotal;
+      data.discount = breakdown.discount;
+      data.deliveryFee = breakdown.deliveryFee;
+      data.total = breakdown.total;
+      data.currency = breakdown.currency;
+      changed.push("quantity");
+    }
+  } else if (data.province) {
+    // Province moved without a quantity change — delivery fee must follow.
+    const items = (await db.orderItem.findMany({ where: { orderId: order.id } })) as OrderItem[];
+    const item = items[0];
+    if (item) {
+      const breakdown = await calculatePricing(db, {
+        workspaceId: ctx.workspaceId,
+        product: { price: Number(item.unitPrice), currency: order.currency },
+        quantity: item.quantity,
+        province: newProvince,
+      });
+      if (!breakdown.deliveryAvailable) {
+        throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
+      }
+      data.deliveryFee = breakdown.deliveryFee;
+      data.total = Number(item.subtotal) + breakdown.deliveryFee;
+    }
+  }
+
+  const updated = Object.keys(data).length
+    ? ((await db.order.update({ where: { id: order.id }, data })) as Order)
+    : order;
+
+  if (params.phone) {
+    // Contact changes go through the confidence-gated customer merge.
+    await mergeCustomerData(db, ctx, order.customerId, {
+      phone: { value: params.phone, confidence: 0.9 },
+    });
+  }
+
+  await recordAudit(db, {
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    action: "order.updated_from_chat",
+    entityType: "Order",
+    entityId: order.id,
+    ip: ctx.ip,
+    metadata: { fields: changed, orderNumber: order.orderNumber },
+  });
+  await eventBus.publish(
+    makeEvent("OrderUpdated", ctx.workspaceId, { orderId: order.id, conversationId: params.conversationId, fields: changed })
+  );
+  return { ok: true, order: updated, changed };
+}
+
+/** Cancels the latest still-cancellable order of the conversation (chat "ألغَ"). */
+export async function cancelLatestOrderFromConversation(
+  db: Db,
+  ctx: ActorContext,
+  conversationId: string
+): Promise<{ orderId: string; orderNumber: string } | null> {
+  const candidates = (await db.order.findMany({
+    where: { workspaceId: ctx.workspaceId, conversationId },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+    select: { id: true, status: true, orderNumber: true },
+  })) as Array<{ id: string; status: OrderStatus; orderNumber: string }>;
+  const target = candidates.find((o) => canTransitionOrder(o.status, "CANCELLED"));
+  if (!target) return null;
+  await transitionOrder(db, ctx, target.id, "CANCELLED");
+  return { orderId: target.id, orderNumber: target.orderNumber };
 }
 
 export async function listOrders(

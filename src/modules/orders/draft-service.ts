@@ -52,6 +52,8 @@ export async function updateDraftFromExtraction(
     customerId: string;
     extraction: DraftExtractionInput;
     source: string;
+    /** Scioping of the page catalog: undefined = legacy (everything), [] or a list = confined to these ids. */
+    allowedProductIds?: string[];
   }
 ) {
   const draft = await getOrCreateDraft(db, params.workspaceId, params.conversationId, params.customerId);
@@ -65,10 +67,20 @@ export async function updateDraftFromExtraction(
   let resolvedProductId = draft.productId;
   if (params.extraction.productName || params.extraction.productId) {
     if (params.extraction.productId) {
-      resolvedProductId = params.extraction.productId;
+      // Page-catalog gate (same allowlist the reply path uses): an id
+      // outside the catalog is treated as never sighted, not an error.
+      const allow = params.allowedProductIds;
+      if (!allow || allow.includes(params.extraction.productId)) {
+        resolvedProductId = params.extraction.productId;
+      }
     } else {
       const products = (await db.product.findMany({
-        where: { workspaceId: params.workspaceId, isActive: true, isArchived: false },
+        where: {
+          workspaceId: params.workspaceId, isActive: true, isArchived: false,
+          // The catalog allowlist scopes ORDER INTAKE the same way it
+          // scopes the reply: a page may only order what its catalog holds.
+          ...(params.allowedProductIds ? { id: { in: params.allowedProductIds } } : {}),
+        },
       })) as unknown as ResolvableProduct[];
       const withAliases = products.map((p) => ({
         ...p,
@@ -154,6 +166,59 @@ export function computeMissingFields(draft: {
   if (!draft.phone) missing.push("phone");
   if (!draft.rawAddress && !draft.province) missing.push("address");
   return missing;
+}
+
+/**
+ * MULTI-ORDER PER CONVERSATION — MANY orders per conversation.
+ *
+ * A closed draft (CONVERTED/CANCELLED) is recycled, not dead: an explicit
+ * new-order request empties the cart and starts collecting the next order
+ * in the SAME conversation. Contact info (name/phone/address/province) is
+ * intentionally kept so re-ordering stays fast; the product, quantity and
+ * notes are cleared. The idempotency key is bumped monotonically so the
+ * recycled draft can never be deduped against an older order.
+ */
+export async function recycleDraftForNewOrder(db: Db, workspaceId: string, draft: {
+  id: string;
+  state: OrderDraftState;
+  orderId: string | null;
+  idempotencyKey: string | null;
+}) {
+  if (draft.state !== "CONVERTED" && draft.state !== "CANCELLED") {
+    throw new AppError("Draft is still open", 422, "DRAFT_OPEN");
+  }
+  const idempotencyKey = nextDraftIdempotencyKey(draft.idempotencyKey, draft.id);
+  const recycled = await db.orderDraft.update({
+    where: { id: draft.id },
+    data: {
+      state: "COLLECTING",
+      productId: null,
+      productName: null,
+      variantId: null,
+      quantity: null,
+      notes: null,
+      missingFields: ["product", "quantity"],
+      entityConfidence: {},
+      idempotencyKey,
+      orderId: null,
+    },
+  });
+  await recordAudit(db, {
+    workspaceId,
+    action: "order_draft.recycled",
+    entityType: "OrderDraft",
+    entityId: draft.id,
+    metadata: { previousOrderId: draft.orderId, idempotencyKey },
+  });
+  await eventBus.publish(makeEvent("OrderDraftUpdated", workspaceId, { draftId: draft.id, recycled: true }));
+  return recycled;
+}
+
+/** draft:D → draft:D:r1 → draft:D:r2 — monotonic, never colliding. */
+function nextDraftIdempotencyKey(current: string | null, draftId: string): string {
+  const m = current ? /^(.*):r(\d+)$/.exec(current) : null;
+  if (m) return `${m[1]}:r${Number(m[2]) + 1}`;
+  return `draft:${draftId}:r1`;
 }
 
 export async function setDraftState(db: Db, workspaceId: string, draftId: string, to: OrderDraftState) {

@@ -36,6 +36,8 @@ export const DOMAIN_EVENTS = [
   "OrderCancelled",
   "OrderDuplicateDetected",
   "OrderStateChanged",
+  // تعديل حقلٍ على طلب مؤكد من المحادثة (كمية/عنوان/ملاحظات) — ليس تغيير حالة.
+  "OrderUpdated",
   // P12 — الطلب انربط بالـ OMS يدويًا (مش تحديث حالة — ما بيشغّل محفّزات الحالة).
   "OrderOmsLinked",
 ] as const;
