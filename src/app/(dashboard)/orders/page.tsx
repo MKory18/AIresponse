@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ClipboardList, PackageSearch, Printer, Search } from "lucide-react";
+import { ClipboardList, PackageSearch, Printer, Search, Trash2 } from "lucide-react";
 import { formatNumber, label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
 import { SkeletonTable } from "@/components/ui/skeleton";
@@ -33,6 +34,11 @@ export default function OrdersPage() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // حذف الطلبات للمالك فقط — الخادم يقرر، والواجهة بتخفي الإجراء عن غيره.
+  const [canDelete, setCanDelete] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
@@ -43,7 +49,9 @@ export default function OrdersPage() {
       setError("تعذّر تحميل الطلبات، حاول مجددًا.");
       return;
     }
-    setOrders((await res.json()).items);
+    const data = await res.json();
+    setOrders(data.items);
+    setCanDelete(Boolean(data.canDelete));
     setError(null);
   }, [status, confirmationStatus]);
 
@@ -51,6 +59,23 @@ export default function OrdersPage() {
     setLoading(true);
     load().finally(() => setLoading(false));
   }, [load]);
+
+  async function removeOrder(order: Order) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/orders/${order.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data as { message?: string }).message ?? "تعذّر حذف الطلب");
+        return;
+      }
+      setDeleteTarget(null);
+      setNotice(`تم حذف الطلب ${order.orderNumber}`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const stats = {
     total: orders.length,
@@ -114,6 +139,11 @@ export default function OrdersPage() {
           <EmptyState title="تعذّر تحميل الطلبات" description={error} action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>} />
         </GlassCard>
       )}
+      {notice && (
+        <GlassCard level="glass-subtle" className="px-4 py-2.5 text-sm text-emerald-600 dark:text-emerald-400">
+          {notice}
+        </GlassCard>
+      )}
       {loading && (
         <GlassCard className="p-4">
           <SkeletonTable rows={6} />
@@ -135,6 +165,7 @@ export default function OrdersPage() {
                   <th>{t.orders.total}</th>
                   <th>{t.orders.status}</th>
                   <th>{t.orders.date}</th>
+                  {canDelete && <th aria-label="إجراءات" />}
                 </tr>
               </thead>
               <tbody>
@@ -154,6 +185,13 @@ export default function OrdersPage() {
                     </td>
                     <td><StatusBadge value={o.status} dot /></td>
                     <td className="whitespace-nowrap text-xs text-ink-muted">{new Date(o.createdAt).toLocaleDateString("ar")}</td>
+                    {canDelete && (
+                      <td>
+                        <Button size="sm" variant="danger" disabled={busy} onClick={() => setDeleteTarget(o)} title="حذف الطلب (المالك فقط)">
+                          <Trash2 size={13} />
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -175,6 +213,13 @@ export default function OrdersPage() {
                   <span className="num text-end font-bold text-ink">{Number(o.total).toLocaleString()} {o.currency}</span>
                   <span className="col-span-2 truncate">{o.items[0]?.productNameSnapshot ?? "—"}</span>
                 </div>
+                {canDelete && (
+                  <div className="mt-2.5 flex justify-end">
+                    <Button size="sm" variant="danger" disabled={busy} onClick={() => setDeleteTarget(o)}>
+                      <Trash2 size={13} /> حذف
+                    </Button>
+                  </div>
+                )}
               </GlassCard>
             ))}
           </div>
@@ -190,6 +235,17 @@ export default function OrdersPage() {
           />
         </GlassCard>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && void removeOrder(deleteTarget)}
+        title={`حذف الطلب ${deleteTarget?.orderNumber ?? ""} نهائيًا؟`}
+        body="ينحذف الطلب مع كل بنوده من النظام، وما بيرجع. سجل التدقيق بيحفظ العملية (الرقم · المجموع · الحالة) — الإجراء متاح للمالك فقط."
+        confirmLabel="حذف نهائي"
+        busy={busy}
+        danger
+      />
     </div>
   );
 }
