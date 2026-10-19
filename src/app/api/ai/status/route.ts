@@ -48,7 +48,7 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
       id: "openai",
       configured: hasOpenaiKey,
       status: hasOpenaiKey ? ("configured" as const) : ("needs_key" as const),
-      endpoint: "https://api.openai.com/v1/chat/completions",
+      endpoint: (env.OPENAI_BASE_URL as string | null)?.trim() || "https://api.openai.com/v1/chat/completions",
     },
     {
       id: "openrouter",

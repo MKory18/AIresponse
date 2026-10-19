@@ -10,6 +10,9 @@ const envSchema = z.object({
     .min(32, "ENCRYPTION_KEY must be at least 32 chars (hex/base64)"),
   AI_PROVIDER: z.enum(["openai", "openrouter", "anthropic", "google", "hermes"]).optional(),
   OPENAI_API_KEY: z.string().optional(),
+  // بوابة OpenAI-compatible للمنصة (متغير بيئة الخادم فقط): بلا قيمة =
+  // OpenAI الرسمي سلوك قديم. مع القيمة: الشات والاندماجات عبر البوابة.
+  OPENAI_BASE_URL: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_API_KEY: z.string().optional(),

@@ -63,6 +63,39 @@ export function normalizeHermesEndpoint(baseUrl: string): string {
   return `${base}/v1/chat/completions`;
 }
 
+/**
+ * OPENAI_BASE_URL — بوابة OpenAI-compatible للمنصة (متغير بيئة الخادم فقط —
+ * لا مسار طلب عميل يمسها). نفس دلالات normalizeHermesEndpoint، مع فحص مخطط
+ * صارم: invalid/غير http(s)/credentials بخط الـ URL = null (المُصال يفشل-مغلق).
+ */
+export function normalizeOpenAiCompatibleEndpoint(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.username || url.password) return null;
+  return normalizeHermesEndpoint(raw);
+}
+
+/** مسار الـ embeddings لنفس البوابة — فحص مخطط + تسمية /v1/embeddings. */
+export function normalizeOpenAiEmbeddingsEndpoint(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.username || url.password) return null;
+  const base = raw.trim().replace(/\/+$/, "");
+  if (/\/chat\/completions$/.test(base)) return null;
+  if (/\/v1$/.test(base)) return `${base}/embeddings`;
+  return `${base}/v1/embeddings`;
+}
+
 /** Shared OpenAI-compatible implementation for OpenAI & OpenRouter. */
 export class OpenAICompatibleProvider implements AIProvider {
   readonly name: string;
@@ -349,6 +382,7 @@ export function getAIProvider(): AIProvider {
   return resolveAIProvider({
     aiProvider: env.AI_PROVIDER,
     openaiKey: env.OPENAI_API_KEY,
+    openaiBaseUrl: env.OPENAI_BASE_URL,
     openrouterKey: env.OPENROUTER_API_KEY,
     hermesBaseUrl: env.HERMES_BASE_URL,
     hermesKey: env.HERMES_API_KEY,
@@ -373,6 +407,7 @@ export function getAIProvider(): AIProvider {
 export function resolveAIProvider(opts: {
   aiProvider?: string;
   openaiKey?: string;
+  openaiBaseUrl?: string;
   openrouterKey?: string;
   hermesBaseUrl?: string;
   hermesKey?: string;
@@ -383,10 +418,20 @@ export function resolveAIProvider(opts: {
 }): AIProvider {
   if (globalForAI.__acreMockAI) return globalForAI.__acreMockAI;
   if (opts.aiProvider === "openai" && opts.openaiKey) {
+    // بوابة OpenAI-compatible للمنصة (OPENAI_BASE_URL، من بيئة الخادم فقط —
+    // ما في أي مسار طلب عميل بيلمّس هون). بلا القيمة = عنوان OpenAI الرسمي
+    // سلوك قديم byte-identical. القيمة تنطبّق على الـ worker بنفس البيئة.
+    const baseUrl = opts.openaiBaseUrl?.trim();
+    const chat = baseUrl ? normalizeOpenAiCompatibleEndpoint(baseUrl) : null;
+    if (baseUrl && !chat) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: OPENAI_BASE_URL="${baseUrl.slice(0, 32)}" is not a valid http(s) URL. Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
     return new OpenAICompatibleProvider({
       name: "openai",
       apiKey: opts.openaiKey,
-      baseUrl: OPENAI_URL,
+      baseUrl: chat ?? OPENAI_URL,
       defaultModel: opts.responseModel || "gpt-4o-mini",
     });
   }
@@ -482,6 +527,40 @@ export async function testProviderConnection(
   }
   // Reachability requires a live HTTP probe (server-side route below).
   return { provider: provider.name, status: "failed", latencyMs: Date.now() - started, detail: "PROBE_REQUIRED" };
+}
+
+/**
+ * Phase-3: فحص مسار الـ embeddings لحاله — الفحص الشات لا يعني أن الـ RAG
+ * شغال. المدخل synthetic بلا أي بيانات زبائن، والمفتاح لا يظهر بالنتيجة.
+ */
+export async function probeEmbeddingEndpoint(
+  endpointUrl: string,
+  apiKey: string,
+  model: string,
+  opts?: { fetchFn?: typeof fetch; timeoutMs?: number }
+): Promise<{ ok: boolean; latencyMs: number; detail: string; dimensions?: number }> {
+  const started = Date.now();
+  const fetchFn = opts?.fetchFn ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts?.timeoutMs ?? 10000);
+  try {
+    const res = await fetchFn(endpointUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, input: "ping" }),
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - started;
+    if (!res.ok) return { ok: false, latencyMs, detail: `HTTP_${res.status}` };
+    const json = (await res.json()) as { data?: { embedding?: number[] }[] };
+    const dims = json.data?.[0]?.embedding?.length;
+    if (!dims || typeof dims !== "number") return { ok: false, latencyMs, detail: "MALFORMED_EMBEDDING_RESPONSE" };
+    return { ok: true, latencyMs, detail: `HTTP_${res.status}`, dimensions: dims };
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - started, detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
