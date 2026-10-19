@@ -5,7 +5,7 @@ import { getEnv } from "@/core/env";
 import { probeProviderEndpoint, normalizeHermesEndpoint } from "@/modules/ai/provider";
 import { decryptSecret } from "@/core/crypto";
 import { resolveModel } from "@/modules/ai/router";
-import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
+import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed, assertCustomEndpointResolves, isCustomPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
@@ -100,12 +100,18 @@ export const POST = createHandler(
       if (!base || !enc) {
         return ok({ provider: "custom", status: "unconfigured", latencyMs: 0, detail: "CUSTOM_ENDPOINT_OR_KEY_MISSING" });
       }
-      const guard = await assertEndpointResolvesPublic(base);
+      const allowPrivate = isCustomPrivateNetworkAllowed();
+      const guard = await assertCustomEndpointResolves(base, { allowPrivateNetwork: allowPrivate });
       if (!guard.ok) {
-        return ok({ provider: "custom", status: "failed", latencyMs: 0, detail: `SSRF_REJECTED_${guard.reason}` });
+        return ok({
+          provider: "custom",
+          status: "failed",
+          latencyMs: 0,
+          detail: `SSRF_REJECTED_${guard.reason}` + (allowPrivate ? "" : "_SET_AI_CUSTOM_ALLOW_PRIVATE_NETWORK_1"),
+        });
       }
       const key = decryptSecret(enc);
-      endpoint = base;
+      endpoint = normalizeHermesEndpoint(base);
       model = resolveModel(settings as never, "RESPONSE").model;
       // المفتاح المخصص ما بيرجع بالنتيجة — بس الحالة والتأخير والسبب.
       const probe = await probeProviderEndpoint(endpoint, key, model, { followRedirects: false });

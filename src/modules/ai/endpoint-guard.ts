@@ -390,3 +390,31 @@ export function isHermesPrivateNetworkAllowed(
 ): boolean {
   return ["1", "true", "yes"].includes((env.HERMES_ALLOW_PRIVATE_NETWORK ?? "").toLowerCase());
 }
+
+// ── Custom-scoped private-network exception ──────────────────────────────
+// نفس منطق استثناء الوكيل الذكي حرفياً — لكن الباب لمزوّد "custom" (أي
+// واجهة OpenAI خارجية على سيرفر المالك الداخلي/LAN). متغير بيئة مستقل
+// (AI_CUSTOM_ALLOW_PRIVATE_NETWORK) لحد يد التفعيل يبقى من الخادم فقط،
+// والميتا (169.254/16 وmetadata hostnames) محجوبة دوماً. إعادة استخدام
+// نفس الدوال المجرّبة — لا نسخ ولا إعادة بناء.
+export function isCustomPrivateNetworkAllowed(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  return ["1", "true", "yes"].includes((env.AI_CUSTOM_ALLOW_PRIVATE_NETWORK ?? "").toLowerCase());
+}
+
+export function validateCustomEndpoint(
+  raw: string,
+  opts: HermesEndpointOpts = {}
+): { ok: true } | { ok: false; reason: EndpointRejection } {
+  return validateHermesEndpoint(raw, opts);
+}
+
+export async function assertCustomEndpointResolves(
+  raw: string,
+  opts: HermesEndpointOpts & {
+    lookupFn?: (host: string) => Promise<Array<{ address: string; family: number }>>;
+  } = {}
+): Promise<{ ok: true } | { ok: false; reason: EndpointRejection }> {
+  return assertHermesEndpointResolves(raw, opts);
+}
