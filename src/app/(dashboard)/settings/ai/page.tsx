@@ -19,6 +19,7 @@ type Settings = {
   summaryModel: string | null;
   embeddingModel: string | null;
   customBaseUrl: string | null;
+  hasCustomApiKey?: boolean;
   fallbackProvider: string | null;
   fallbackModel: string | null;
   temperature: number;
@@ -35,9 +36,61 @@ const PROVIDER_AR: Record<string, string> = {
   openrouter: "OpenRouter",
   internal: "داخلي",
   hermes: "الوكيل الذكي (سيرفرك)",
+  custom: "مزوّد مخصص (أي API)",
 };
 const providerLabel = (p: string) => PROVIDER_AR[p] ?? p;
-const PROVIDER_OPTIONS = ["hermes", "openai", "openrouter", "internal", "mock"];
+const PROVIDER_OPTIONS = ["hermes", "custom", "openai", "openrouter", "internal", "mock"];
+
+const PROBE_DI: Record<string, string> = {
+  local: "يعمل محلياً",
+  working: "متصل وشغّال ✅",
+  failed: "فشل الاتصال — راجع مفتاح/عنوان",
+  needs_key: "ناقص مفتاح",
+  unconfigured: "غير مضبوط (بلا عنوان/مفتاح)",
+};
+
+/** فحص اتصال حي لمزوّد الإعدادات الحالي — ping خفيف بلا أي بيانات زبون. */
+function LiveProbe({ provider }: { provider: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "ok" | "fail">("idle");
+  const [detail, setDetail] = useState<string | null>(null);
+  async function run() {
+    setState("loading");
+    try {
+      const res = await fetch("/api/ai/providers/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const data = (await res.json()) as { status?: string; detail?: string };
+      if (!res.ok) throw new Error();
+      setDetail(data.detail ?? data.status ?? null);
+      setState(data.status === "working" || data.status === "local" ? "ok" : "fail");
+    } catch {
+      setState("fail");
+      setDetail(null);
+    }
+  }
+  const tone = state === "ok" ? "text-emerald-700 dark:text-emerald-300" : state === "fail" ? "text-red-700 dark:text-red-300" : "";
+  return (
+    <div className="mt-3 flex items-center gap-3">
+      <Button type="button" variant="secondary" onClick={run} loading={state === "loading"} disabled={state === "loading"}>
+        فحص الاتصال
+      </Button>
+      {state === "ok" && (
+        <Badge tone="DELIVERED" dot>متصل</Badge>
+      )}
+      {state === "fail" && (
+        <span className="text-xs font-medium">فشل الاتصال</span>
+      )}
+      {detail && (state === "ok" || state === "fail") && (
+        <span className={`text-xs ${tone}`} dir="ltr">{detail}</span>
+      )}
+      {state === "ok" && detail && (
+        <span className="sr-only">{PROBE_DI[detail] ?? detail}</span>
+      )}
+    </div>
+  );
+}
 
 export default function AISettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -84,6 +137,10 @@ export default function AISettingsPage() {
     for (const k of ["temperature", "maxTokens", "confidenceExecute", "confidenceRespond", "fallbackProvider", "fallbackModel"]) {
       const v = form.get(k);
       if (v !== null && v !== "") payload[k] = k === "fallbackProvider" || k === "fallbackModel" ? v : Number(v);}
+    // مفتاح المزوّد المخصص: يُرسل فقط عند مجيء قيمة جديدة — فارغة = بلا تغيير
+    // (القيمة القديمة تبقى متخزنة مشفّرة، والفراغ ما يمسحها).
+    const wsKey = String(form.get("customApiKey") ?? "").trim();
+    if (wsKey) payload.customApiKey = wsKey;
     try {
       const res = await fetch("/api/ai/settings", {
         method: "PATCH",
@@ -148,9 +205,10 @@ export default function AISettingsPage() {
           </span>
           المزود والنماذج
         </h2>
+        <LiveProbe provider={settings.provider} />
         <p className="mt-2.5 flex items-start gap-1.5 rounded-xl bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 ring-1 ring-inset ring-amber-500/25 dark:text-amber-300">
           <KeyRound size={14} className="mt-0.5 shrink-0" />
-          المفاتيح وعناوين الاتصال تُضبط على بيئة الخادم فقط ولا تُعدل من هنا (أسماء المتغيرات موثّقة في التوثيق التقني).
+          مفاتيح OpenAI وOpenRouter وعنوان «الوكيل الذكي» تُضبط على بيئة الخادم فقط. مزوّد <b>«مزوّد مخصص»</b> عنوانه ومفتاحه ينضبطو من هنا — والمفتاح ينخزن مشفّراً ولا يظهر مرة ثانية.
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="المزود" hint="الوكيل الذكي على سيرفرك هو المسؤول عن الذكاء؛ OpenAI وOpenRouter بوابات بديلة.">
@@ -172,8 +230,11 @@ export default function AISettingsPage() {
               <Input name={key} defaultValue={(settings as never as Record<string, string | null>)[key] ?? ""} dir="ltr" className="num" />
             </Field>
           ))}
-          <Field label="عنوان الوكيل الذكي أو النموذج الداخلي (OpenAI-compatible، اختياري)" hint="العناوين العامة تُفحص تلقائيًا هنا؛ العناوين المحلية (سيرفرك) تُضبط من بيئة الخادم.">
-            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://…" />
+          <Field label="عنوان المزوّد المخصص أو الداخلي (OpenAI-compatible، اختياري)" hint="لعائلة العناوين العامة: تُفحص تلقائياً هنا؛ عناوين سيرفرك المحلية عبر «الوكيل الذكي». أدخل رابط كامل ينتهي بـ /v1/chat/completions أو أضفه عاماً (https://…/v1).">
+            <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://api.example.com/v1" />
+          </Field>
+          <Field label="مفتاح المزوّد المخصص (يُخزَّن مشفَّراً)" hint={settings.hasCustomApiKey ? "المفتاح المخصّص متخزن ✅ — اكتب مفتاح جديد للاستبدال، وسيب فارغة للحفاظ على الموجود." : "اكتب مفتاح مزوّدك المخصّص (يُخزَّن مشفَّراً ولا يُعرض بعدها أبداً)."}>
+            <Input name="customApiKey" type="password" dir="ltr" className="num" placeholder={settings.hasCustomApiKey ? "•••• متخزن — فارغة = بلا تغيير" : "sk-…"} autoComplete="off" />
           </Field>
           <Field label="مزود البديل (عند الفشل فقط)">
             <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>

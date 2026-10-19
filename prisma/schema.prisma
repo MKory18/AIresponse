@@ -899,6 +899,9 @@ model AISettings {
   // P6: optional self-hosted OpenAI-compatible endpoint (internal delivery)
   // and an explicit opt-in fallback model used only after primary failure.
   customBaseUrl         String?
+  // مزوّد مخصص (provider "custom"): مفتاح مساحة العمل المشفّر AES-256-GCM
+  // — لا يُرجع من أي API، والمقدار الشفاف لا يُسجّل.
+  customApiKeyEnc       String?
   fallbackProvider      String?
   fallbackModel         String?
   temperature           Float    @default(0.4)

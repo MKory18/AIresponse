@@ -3,12 +3,13 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
 import { probeProviderEndpoint, normalizeHermesEndpoint } from "@/modules/ai/provider";
+import { decryptSecret } from "@/core/crypto";
 import { resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
-  provider: z.enum(["openai", "openrouter", "internal", "hermes", "mock"]).optional(),
+  provider: z.enum(["openai", "openrouter", "internal", "hermes", "custom", "mock"]).optional(),
 });
 
 /**
@@ -93,6 +94,30 @@ export const POST = createHandler(
       });
     }
 
+    if (choice === "custom") {
+      const base = (settings?.customBaseUrl as string | null | undefined)?.trim();
+      const enc = (settings?.customApiKeyEnc as string | null | undefined)?.trim();
+      if (!base || !enc) {
+        return ok({ provider: "custom", status: "unconfigured", latencyMs: 0, detail: "CUSTOM_ENDPOINT_OR_KEY_MISSING" });
+      }
+      const guard = await assertEndpointResolvesPublic(base);
+      if (!guard.ok) {
+        return ok({ provider: "custom", status: "failed", latencyMs: 0, detail: `SSRF_REJECTED_${guard.reason}` });
+      }
+      const key = decryptSecret(enc);
+      endpoint = base;
+      model = resolveModel(settings as never, "RESPONSE").model;
+      // المفتاح المخصص ما بيرجع بالنتيجة — بس الحالة والتأخير والسبب.
+      const probe = await probeProviderEndpoint(endpoint, key, model, { followRedirects: false });
+      return ok({
+        provider: "custom",
+        status: probe.ok ? "working" : "failed",
+        latencyMs: probe.latencyMs,
+        detail: probe.detail,
+        endpoint,
+        model,
+      });
+    }
     if (!key) {
       return ok({ provider: choice, status: "needs_key", latencyMs: 0, detail: "API_KEY_MISSING" });
     }

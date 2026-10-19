@@ -451,7 +451,7 @@ export function createFakeDb() {
     knowledgeChunk: makeModel("knowledgeChunk", knowledgeChunk, { tokenCount: 0, isActive: true, isArchived: false, isApproved: false, deletedAt: null, tags: [] }),
     faq: makeModel("faq", faq, { isActive: true, isArchived: false, isApproved: false, deletedAt: null, tags: [] }),
     backgroundJob: makeModel("backgroundJob", backgroundJob, { status: "PENDING", attempts: 0, maxAttempts: 3, runAfter: new Date(), tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    aISettings: makeModel("aISettings", aISettings, { provider: "mock", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true, customBaseUrl: null, fallbackProvider: null, fallbackModel: null }),
+    aISettings: makeModel("aISettings", aISettings, { provider: "mock", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true, customBaseUrl: null, customApiKeyEnc: null, fallbackProvider: null, fallbackModel: null }),
     persona: makeModel("persona", persona, { isActive: true, emojiLevel: 1, prohibitedPhrases: [], customRules: [], version: 1, tags: [], isArchived: false, isApproved: false, deletedAt: null }),
     personaVersion: makeModel("personaVersion", personaVersion, { status: "DRAFT", prohibitedPhrases: [], customRules: [], tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     customerMemory: makeModel("customerMemory", customerMemory, { confidence: 1, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),

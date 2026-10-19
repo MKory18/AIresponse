@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { childLogger } from "@/core/logger";
+import { decryptSecret } from "@/core/crypto";
 import {
   AIProviderError,
   MockAIProvider,
@@ -290,6 +291,7 @@ export function getWorkspaceProvider(
   settings: {
     provider?: string | null;
     customBaseUrl?: string | null;
+    customApiKeyEnc?: string | null;
     responseModel?: string | null;
   } | null,
   env?: {
@@ -327,10 +329,32 @@ export function getWorkspaceProvider(
   // deployments), while a workspace can still opt into a real provider whose
   // key exists even when ENV names no provider.
   const wsChoice = settings?.provider ?? null;
-  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "hermes";
+  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "hermes" || wsChoice === "custom";
   const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? null;
   const keyFor = (p: string | null | undefined) =>
     p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : p === "hermes" ? e.hermesKey : undefined;
+  // Custom provider — أي واجهة OpenAI-compatible خارجية بعنوان + مفتاح من
+  // إعداد مساحة العمل نفسه (المفتاح مخزّن مشفّراً AES-256-GCM، لا من بيئة
+  // الخادم — لا يجوز تسريب مفتاح المنصة هنا إطلاقاً). التسليم "external":
+  // بوابة الخصوصية تحجب PII قبل الإرسال (ثقة بالتصنيف لا بالاسم).
+  if (choice === "custom") {
+    const base = settings?.customBaseUrl?.trim();
+    const enc = settings?.customApiKeyEnc?.trim();
+    if (!base || !enc) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: provider "custom" needs a workspace customBaseUrl + a stored API key. Refusing mock fallback — no fake replies will be sent. (CUSTOM_ENDPOINT_OR_KEY_MISSING)`
+      );
+    }
+    return new OpenAICompatibleProvider({
+      name: "custom",
+      apiKey: decryptSecret(enc),
+      baseUrl: base,
+      defaultModel: settings?.responseModel ?? e.responseModel ?? "gpt-4o-mini",
+      delivery: "external",
+      // لا تتبّع إعادة توجيه مع المفتاح والأسئلة (فشل سريع).
+      followRedirects: false,
+    });
+  }
   // Hermes Agent (OpenAI-compatible gateway). Endpoint comes from server ENV
   // (HERMES_BASE_URL — localhost/LAN allowed, it is deployer-trusted, not a
   // workspace-user URL, so the SSRF guard for customBaseUrl does not apply).
