@@ -218,9 +218,9 @@ export async function listChannels(db: Db, workspaceId: string) {
   const channels = (await db.channel.findMany({
     where: { workspaceId },
     orderBy: { createdAt: "asc" },
-    select: { id: true, type: true, status: true, displayName: true, externalId: true, aiPersonaId: true, updatedAt: true },
+    select: { id: true, type: true, status: true, displayName: true, externalId: true, aiPersonaId: true, sendMode: true, updatedAt: true },
   })) as Array<{
-    id: string; type: string; status: string; displayName: string | null; externalId: string | null; aiPersonaId: string | null; updatedAt: Date | string;
+    id: string; type: string; status: string; displayName: string | null; externalId: string | null; aiPersonaId: string | null; sendMode: string; updatedAt: Date | string;
   }>;
   const accounts = (await (db as any).channelAccount?.findMany?.({
     where: { channelId: { in: channels.map((c) => c.id) } },

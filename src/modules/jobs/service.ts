@@ -29,6 +29,8 @@ export const JOB_TYPES = [
   "refresh_product_compliance",
   // وسائط واتساب الواردة: ميتا تبعت معرّف مش رابط — التحميل بتوكن القناة.
   "download_whatsapp_media",
+  // مختبر التجميع: استخراج معلومات العميل من رسالة واردة (وضع COLLECTION_ONLY).
+  "extract_customer_intel",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

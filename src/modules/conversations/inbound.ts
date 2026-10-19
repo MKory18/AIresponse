@@ -107,14 +107,13 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
   if (conversation && input.channelId && conversation.channelId !== input.channelId) {
     const target = await db.channel.findFirst({
       where: { id: input.channelId, workspaceId: input.workspaceId },
-      select: { id: true },
+      select: { id: true, sendMode: true },
     });
     if (target) {
       conversation = await db.conversation.update({
         where: { id: conversation.id },
         data: { channelId: target.id },
-      });
-      await recordAudit(db, {
+      });      await recordAudit(db, {
         workspaceId: input.workspaceId,
         userId: null,
         action: "conversation.channel_healed",
@@ -163,6 +162,22 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
         })
       );
     }
+  }
+
+  // حارس نوع/سلامة: المحادثة موجودة أو أُنشئت أعلاه (لا مسار بلا محادثة).
+  if (!conversation) throw new Error("conversation_unavailable");
+
+  // ── وضع الصفحة: قراءة لحظية واحدة على القناة (بلا تخزين بالذاكرة) ──
+  // صف مفقود = UNKNOWN → لا رد آلي (فشل آمن) · حقل غائب = AUTO_REPLY (افتراضي العمود).
+  let pageSendMode: string | undefined;
+  try {
+    const page = await db.channel.findFirst({
+      where: { id: conversation.channelId, workspaceId: input.workspaceId },
+      select: { sendMode: true },
+    });
+    pageSendMode = page ? ((page as { sendMode?: string }).sendMode ?? "AUTO_REPLY") : "UNKNOWN";
+  } catch (err) {
+    childLogger("pipeline").error({ err, conversationId: conversation.id }, "send_mode_lookup_failed");
   }
 
   // Idempotency: externalEventId (delivery retries) then externalMessageId.
@@ -304,10 +319,32 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
   await eventBus.publish(makeEvent("MessageReceived", input.workspaceId, payload));
   await eventBus.publish(makeEvent("MessageCreated", input.workspaceId, { ...payload, direction: "INBOUND" }));
 
-  // Enqueue AI processing (Phase 4) — the webhook never waits for the AI.
-  // Gating: conversation must be AI_ACTIVE; a failed enqueue never loses the
-  // message (persisted above and retryable via /api/jobs/run scanning).
-  if (conversation.aiState === "AI_ACTIVE" && conversation.aiEnabled) {
+  // ── وضع الصفحة (مقروء مع المحادثة أعلاه — بلا استعلام إضافي) ──
+  // AUTO_REPLY  → كل السلوك الحالي كما هو.
+  // COLLECTION_ONLY → لا رد آلي إطلاقًا: تُحفظ الرسالة وتُصفّ مهمة استخراج
+  //                   معلومات داخلية فقط، وتظهر في «مختبر التجميع».
+  // تعذّر القراءة = لا رد آلي (فشل آمن) — الحارس النهائي أيضًا بمسار الإرسال.
+  const sendMode: "AUTO_REPLY" | "COLLECTION_ONLY" | "UNKNOWN" =
+    pageSendMode === "COLLECTION_ONLY" || pageSendMode === "AUTO_REPLY" ? pageSendMode : "UNKNOWN";
+
+  if (sendMode === "COLLECTION_ONLY") {
+    try {
+      const { enqueueJob } = await import("@/modules/jobs/service");
+      await enqueueJob(db, {
+        workspaceId: input.workspaceId,
+        type: "extract_customer_intel",
+        payload: { conversationId: conversation.id, messageId: message.id },
+        // معرّف واحد لكل رسالة: تكرار الـ Webhook ما بيحلّل مرتين.
+        idempotencyKey: `intel:${message.id}`,
+      });
+    } catch (err) {
+      // الرسالة محفوظة دائمًا — إعادة التحليل متاحة لاحقًا من المختبر.
+      childLogger("pipeline").error({ err, messageId: message.id }, "intel_job_enqueue_failed");
+    }
+  } else if (sendMode === "AUTO_REPLY" && conversation.aiState === "AI_ACTIVE" && conversation.aiEnabled) {
+    // Enqueue AI processing (Phase 4) — the webhook never waits for the AI.
+    // Gating: conversation must be AI_ACTIVE; a failed enqueue never loses the
+    // message (persisted above and retryable via /api/jobs/run scanning).
     try {
       const { enqueueJob } = await import("@/modules/jobs/service");
       await enqueueJob(db, {

@@ -127,6 +127,12 @@ model WorkspaceMember {
 
 // ─────────────────────────── Channels ───────────────────────────
 
+/// جمع المعلومات فقط مقابل الرد الآلي — قرار لكل صفحة (قناة).
+enum ChannelSendMode {
+  AUTO_REPLY
+  COLLECTION_ONLY
+}
+
 enum ChannelType {
   FACEBOOK
   INSTAGRAM
@@ -157,6 +163,10 @@ model Channel {
   aiPersonaId String?
   // P12: سوق القناة (SY · JO) — فلتر «market» بباب الوكلاء. null = غير محدد.
   market      String?
+  // وضع الإرسال لكل صفحة/قناة:
+  // AUTO_REPLY = الرد الآلي يعمل وفق السياسات الحالية.
+  // COLLECTION_ONLY = جمع وتحليل فقط — يُمنع أي إرسال آلي نهائيًا (حارس بمسار الإرسال).
+  sendMode    ChannelSendMode @default(AUTO_REPLY)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -354,6 +364,7 @@ model Conversation {
   assignedAgent User?     @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
   messages      Message[]
   orders        Order[]
+  customerIntel CustomerIntel?
 
   @@unique([workspaceId, channelConversationId])
   @@index([workspaceId, status])
@@ -769,6 +780,59 @@ model BackgroundJob {
   @@index([lockedAt])
   @@index([workspaceId, type])
   @@index([idempotencyKey])
+}
+
+/// أحدث لقطة مستخرجة من محادثة في وضع التجميع.
+/// `data` = القيم، `fieldMeta` = حالة كل حقل + مصادره + التعارضات.
+enum IntelStatus {
+  PENDING
+  READY
+  NEEDS_REVIEW
+  FAILED
+}
+
+model CustomerIntel {
+  id             String      @id @default(cuid())
+  workspaceId    String
+  conversationId String      @unique
+  channelId      String
+  status         IntelStatus @default(PENDING)
+  data           Json        @default("{}")
+  fieldMeta      Json        @default("{}")
+  confidence     Float       @default(0)
+  lastMessageId  String?
+  attempts       Int         @default(0)
+  lastError      String?
+  extractedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([channelId])
+}
+
+/// سجل تحليل لكل رسالة — مفتاح عدم التكرار `messageId` يمنع تكرار الاستخراج.
+model CustomerIntelRun {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  conversationId String
+  channelId      String
+  messageId      String    @unique
+  status         String    @default("QUEUED")
+  provider       String?
+  model          String?
+  latencyMs      Int?
+  errorCode      String?
+  queuedAt       DateTime  @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  @@index([workspaceId, queuedAt])
+  @@index([conversationId, queuedAt])
 }
 
 model Faq {
