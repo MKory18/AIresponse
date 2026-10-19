@@ -4,6 +4,7 @@ import type { Permission } from "@/modules/rbac/permissions";
 export const NAV_ITEMS: { href: string; label: string; icon: string; permission: Permission; badge?: string }[] = [
   { href: "/dashboard", label: t.nav.dashboard, icon: "LayoutDashboard", permission: "analytics.read" },
   { href: "/conversations", label: t.nav.inbox, icon: "MessageSquare", permission: "conversations.read" },
+  { href: "/intelligence", label: "مختبر التجميع", icon: "FlaskConical", permission: "conversations.read" },
   { href: "/customers", label: t.nav.customers, icon: "Users", permission: "customers.read" },
   { href: "/orders", label: t.nav.orders, icon: "ShoppingBag", permission: "orders.read" },
   { href: "/products", label: t.nav.products, icon: "Package", permission: "products.read" },

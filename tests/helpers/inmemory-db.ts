@@ -407,6 +407,9 @@ export function createFakeDb() {
   const catalogRows: Row[] = [];
   const catalogProductRows: Row[] = [];
   const catalogPageAssignmentRows: Row[] = [];
+  // مختبر التجميع — اللقطة المستخرجة وسجل التحليل.
+  const customerIntelRows: Row[] = [];
+  const customerIntelRunRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -433,6 +436,8 @@ export function createFakeDb() {
       catalog: catalogRows,
       catalogProduct: catalogProductRows,
       catalogPageAssignment: catalogPageAssignmentRows,
+      customerIntel: customerIntelRows,
+      customerIntelRun: customerIntelRunRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -493,6 +498,8 @@ export function createFakeDb() {
     catalog: makeModel("catalog", catalogRows, { description: null, isActive: true }),
     catalogProduct: makeModel("catalogProduct", catalogProductRows, { sortOrder: 0 }),
     catalogPageAssignment: makeModel("catalogPageAssignment", catalogPageAssignmentRows, { assignedBy: null }),
+    customerIntel: makeModel("customerIntel", customerIntelRows, { status: "PENDING", data: {}, fieldMeta: {}, confidence: 0, attempts: 0, lastError: null, extractedAt: null, reviewedAt: null, reviewedBy: null, lastMessageId: null }),
+    customerIntelRun: makeModel("customerIntelRun", customerIntelRunRows, { status: "QUEUED", provider: null, model: null, latencyMs: null, errorCode: null, startedAt: null, finishedAt: null }),
   };
 
   const conversationModel = db.conversation as any;

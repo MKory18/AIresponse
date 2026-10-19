@@ -527,6 +527,21 @@ async function handleRefreshProductCompliance(db: HandlerDb, payload: Record<str
   return refreshComplianceJob(db as never, workspaceId, payload);
 }
 
+/** extract_customer_intel: مختبر التجميع — تحليل رسالة واردة بلا أي إرسال. */
+async function handleExtractCustomerIntel(
+  db: HandlerDb,
+  payload: Record<string, unknown>,
+  workspaceId: string
+): Promise<{ success: boolean; error?: string }> {
+  const { runCustomerIntelExtraction } = await import("@/modules/intelligence/service");
+  const result = await runCustomerIntelExtraction(db as never, {
+    workspaceId: workspaceId || String(payload.workspaceId ?? ""),
+    messageId: String(payload.messageId ?? ""),
+  });
+  if (result.status === "FAILED") return { success: false, error: result.errorCode };
+  return { success: true };
+}
+
 export function getJobHandlers(): Record<string, JobHandler> {
   return {
     process_knowledge_document: (payload) => handleProcessDocument(getDb(), payload),
@@ -548,6 +563,8 @@ export function getJobHandlers(): Record<string, JobHandler> {
     validate_attribution_code: (payload) => handleValidateAttributionCode(getDb(), payload),
     refresh_product_compliance: (payload, jobId, workspaceId) =>
       handleRefreshProductCompliance(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),
+    extract_customer_intel: (payload, jobId, workspaceId) =>
+      handleExtractCustomerIntel(getDb(), payload, workspaceId || currentWorkspaceId(jobId)),
   };
 }
 

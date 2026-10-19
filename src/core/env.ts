@@ -11,6 +11,9 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(["openai", "openrouter", "anthropic", "google", "hermes"]).optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.string().optional(),
+  // نموذج استخراج معلومات العميل (مختبر التجميع) — منفصل عن نموذج الردود.
+  INTEL_MODEL: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_API_KEY: z.string().optional(),
   // الوكيل الذكي على سيرفرك (بوابة OpenAI-compatible مثل http://127.0.0.1:8642/v1).

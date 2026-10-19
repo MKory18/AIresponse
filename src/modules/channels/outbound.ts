@@ -9,6 +9,7 @@ import { TelegramChannelAdapter } from "./telegram/adapter";
 import { WhatsAppChannelAdapter } from "./whatsapp/adapter";
 import { TikTokChannelAdapter } from "./tiktok/adapter";
 import { getChannelAdapter } from "./registry";
+import { assertAutomatedSendAllowed } from "./send-policy";
 import { ChannelNotSupportedError } from "./types";
 import { canSendToCustomer } from "./facebook/policy";
 import { canSendInstagram } from "./instagram/policy";
@@ -168,6 +169,27 @@ export async function dispatchOutbound(
   if (!params.text?.trim()) {
     return { messageId: "", deliveryStatus: "FAILED", error: "تعذر إرسال الرد — نص فارغ" };
   }
+
+  // ── حارس «التجميع فقط» (COLLECTION_ONLY) — نقطة الإرسال النهائية ──
+  // التحقق يجري الآن من قاعدة البيانات (لا ذاكرة ولا واجهة). كل المسارات
+  // الآلية تمرّ من dispatchOutbound: الرد الذكي · الحملات · الأتمتة ·
+  // المتابعة · إعادة المحاولة · كنس الرسائل العالقة. تعذّر التحقق = رفض.
+  const sendPolicy = await assertAutomatedSendAllowed(db as never, {
+    workspaceId: params.workspaceId,
+    conversationId: params.conversationId,
+    senderType: params.senderType ?? "AI",
+  });
+  if (!sendPolicy.allowed) {
+    return {
+      messageId: "",
+      deliveryStatus: "FAILED",
+      error:
+        sendPolicy.reason === "COLLECTION_ONLY"
+          ? "COLLECTION_ONLY: الرد الآلي معطّل — الصفحة في وضع التجميع (جمع وتحليل فقط)"
+          : "SEND_MODE_UNKNOWN: تعذّر التحقق من وضع الصفحة — أُوقف الإرسال الآلي احتياطًا",
+    };
+  }
+
   const outboundKey = `${params.conversationId}:${params.sourceMessageId}`;
 
   // 1. Idempotency: SENT rows are terminal (skip); FAILED/QUEUED/PENDING rows
