@@ -1,5 +1,6 @@
 import { getEnv } from "@/core/env";
 import { AIError } from "@/core/errors";
+import { normalizeOpenAiEmbeddingsEndpoint } from "@/modules/ai/provider";
 
 /**
  * Embedding provider abstraction. Each provider must declare its exact
@@ -61,10 +62,23 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly provider = "openai";
   readonly model: string;
   readonly dimensions: number;
+  /** بوابة مخصصة للاندماجات (OPENAI_BASE_URL)؛ بلاها = OpenAI الرسمي. */
+  private readonly baseUrl: string;
 
-  constructor(model = "text-embedding-3-small", dimensions = 1536) {
+  constructor(model = "text-embedding-3-small", dimensions = 1536, customBaseUrl?: string) {
     this.model = model;
     this.dimensions = dimensions;
+    if (customBaseUrl) {
+      const endpoint = normalizeOpenAiEmbeddingsEndpoint(customBaseUrl);
+      if (!endpoint) {
+        throw new AIError(
+          `OPENAI_BASE_URL "${customBaseUrl.slice(0, 32)}" is not a valid http(s) endpoint for embeddings`
+        );
+      }
+      this.baseUrl = endpoint;
+    } else {
+      this.baseUrl = "https://api.openai.com/v1/embeddings";
+    }
   }
 
   async embed(text: string): Promise<number[]> {
@@ -90,7 +104,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     // vectors stay consistent with each other.
     const { scrubForEmbedding } = await import("@/modules/ai/privacy-gate");
     const safeInput = scrubForEmbedding(text);
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
+    const res = await fetch(this.baseUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -117,7 +131,11 @@ export function getEmbeddingProvider(): EmbeddingProvider {
   const env = getEnv();
   const dims = env.EMBEDDING_DIMENSIONS ? parseInt(env.EMBEDDING_DIMENSIONS, 10) : SCHEMA_DIMENSIONS;
   if (env.AI_PROVIDER === "openai" && env.OPENAI_API_KEY) {
-    return new OpenAIEmbeddingProvider(env.EMBEDDING_MODEL ?? "text-embedding-3-small", dims);
+    return new OpenAIEmbeddingProvider(
+      env.EMBEDDING_MODEL ?? "text-embedding-3-small",
+      dims,
+      env.OPENAI_BASE_URL
+    );
   }
   return new HashEmbeddingProvider(dims);
 }

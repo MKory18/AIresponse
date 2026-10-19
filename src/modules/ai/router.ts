@@ -7,6 +7,7 @@ import {
   OpenAICompatibleProvider,
   getInjectedMockProvider,
   normalizeHermesEndpoint,
+  normalizeOpenAiCompatibleEndpoint,
   resolveAIProvider,
   type AIProvider,
 } from "./provider";
@@ -298,6 +299,8 @@ export function getWorkspaceProvider(
     aiProvider?: string;
     openaiKey?: string;
     openrouterKey?: string;
+    /** بوابة OpenAI-compatible للمنصة (بيئة الخادم) — الشات + الـ embeddings. */
+    openaiBaseUrl?: string;
     hermesBaseUrl?: string;
     hermesKey?: string;
     hermesModel?: string;
@@ -313,6 +316,7 @@ export function getWorkspaceProvider(
   const e = env ?? {
     aiProvider: process.env.AI_PROVIDER,
     openaiKey: process.env.OPENAI_API_KEY,
+    openaiBaseUrl: process.env.OPENAI_BASE_URL,
     openrouterKey: process.env.OPENROUTER_API_KEY,
     hermesBaseUrl: process.env.HERMES_BASE_URL,
     hermesKey: process.env.HERMES_API_KEY,
@@ -407,10 +411,20 @@ export function getWorkspaceProvider(
   }
   if ((choice === "openai" || choice === "openrouter") && keyFor(choice)) {
     const isOpenai = choice === "openai";
+    const official = isOpenai ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions";
+    // customBaseUrl للمساحة يقدح البوابة فقط مع موافقة صريحة (بلاها = الرسمي).
+    // بلا customBaseUrl: OPENAI_BASE_URL من بيئة الخادم يوجّه الشات للبوابة.
+    const base = (isOpenai && !settings?.customBaseUrl ? e.openaiBaseUrl : null) ?? null;
+    const chat = base ? normalizeOpenAiCompatibleEndpoint(base) : null;
+    if (base && !chat) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: OPENAI_BASE_URL is invalid (must be http(s)). Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
     return new OpenAICompatibleProvider({
       name: choice,
       apiKey: keyFor(choice)!,
-      baseUrl: isOpenai ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions",
+      baseUrl: chat ?? official,
       defaultModel: settings?.responseModel ?? e.responseModel ?? (isOpenai ? "gpt-4o-mini" : "openai/gpt-4o-mini"),
     });
   }
@@ -426,6 +440,7 @@ export function getWorkspaceProvider(
   return resolveAIProvider({
     aiProvider: e.aiProvider,
     openaiKey: e.openaiKey,
+    openaiBaseUrl: e.openaiBaseUrl,
     openrouterKey: e.openrouterKey,
     responseModel: e.responseModel,
     nodeEnv: e.nodeEnv,

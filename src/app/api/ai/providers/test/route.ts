@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
-import { probeProviderEndpoint, normalizeHermesEndpoint } from "@/modules/ai/provider";
+import { probeProviderEndpoint, normalizeHermesEndpoint, normalizeOpenAiCompatibleEndpoint, normalizeOpenAiEmbeddingsEndpoint, probeEmbeddingEndpoint } from "@/modules/ai/provider";
 import { decryptSecret } from "@/core/crypto";
 import { resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed, assertCustomEndpointResolves, isCustomPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
@@ -127,12 +127,34 @@ export const POST = createHandler(
     if (!key) {
       return ok({ provider: choice, status: "needs_key", latencyMs: 0, detail: "API_KEY_MISSING" });
     }
+    const openaiBase = (env.OPENAI_BASE_URL as string | undefined)?.trim();
     endpoint =
       choice === "openai"
-        ? "https://api.openai.com/v1/chat/completions"
+        ? (openaiBase ? (normalizeOpenAiCompatibleEndpoint(openaiBase) ?? "https://api.openai.com/v1/chat/completions") : "https://api.openai.com/v1/chat/completions")
         : "https://openrouter.ai/api/v1/chat/completions";
     model = resolveModel(settings as never, "RESPONSE").model;
     const probe = await probeProviderEndpoint(endpoint, key, model);
+    // الشات والـ embeddings بتفحص لحالهم — نجاح واحد ما بيثبت التاني.
+    // الفحص بيوصل للـ embeddings بس مع بوابة مخصصة (Custom OCR... هنا: من بيئة الخادم).
+    let embedding: Record<string, unknown> | null = null;
+    if (choice === "openai" && openaiBase) {
+      // فحص الـ embeddings لحاله (بيئة الخادم هي مصدر المفتاح/العنوان —
+      // ما في مدخل مساحة هنا، فالفحص مخطط فقط حسب سياسة المصدر الموثوق).
+      const embedEndpoint = normalizeOpenAiEmbeddingsEndpoint(openaiBase);
+      const embedModel = (env.EMBEDDING_MODEL as string | undefined)?.trim() || "text-embedding-3-small";
+      if (!embedEndpoint) {
+        embedding = { status: "failed", detail: "MALFORMED_OPENAI_BASE_URL" };
+      } else {
+        const embedProbe = await probeEmbeddingEndpoint(embedEndpoint, key, embedModel);
+        embedding = {
+          status: embedProbe.ok ? "working" : "failed",
+          detail: embedProbe.detail,
+          dimensions: embedProbe.dimensions,
+          endpoint: embedEndpoint,
+          model: embedModel,
+        };
+      }
+    }
     return ok({
       provider: choice,
       status: probe.ok ? "working" : "failed",
@@ -140,6 +162,7 @@ export const POST = createHandler(
       detail: probe.detail,
       endpoint,
       model,
+      ...(embedding ? { embedding } : {}),
     });
   }
 );
