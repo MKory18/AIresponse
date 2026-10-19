@@ -25,7 +25,9 @@ function* walk(dir) {
     const st = statSync(full);
     if (st.isDirectory()) yield* walk(full);
     else {
-      if (SKIP_FILES.has(entry) || entry.endsWith(".ico") || entry.endsWith(".png")) continue;
+      // مخرجات مكتوبة للمالك (PDF/DOCX) — ثنائية مضغوطة، ما بتطلع أسرار
+      // حقيقية، وفحصها كutf8 بيطلع إيجابيات كاذبة.
+      if (SKIP_FILES.has(entry) || entry.endsWith(".ico") || entry.endsWith(".png") || entry.endsWith(".pdf") || entry.endsWith(".docx")) continue;
       yield full;
     }
   }

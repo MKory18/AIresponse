@@ -10,18 +10,22 @@ import {
   isHermesPrivateNetworkAllowed,
 } from "@/modules/ai/endpoint-guard";
 import { AppError } from "@/core/errors";
+import { encryptSecret } from "@/core/crypto";
 
 const settingsSchema = z.object({
-  provider: z.enum(["mock", "openai", "openrouter", "internal", "hermes"]).optional(),
+  provider: z.enum(["mock", "openai", "openrouter", "internal", "hermes", "custom"]).optional(),
   classificationModel: z.string().trim().max(120).nullable().optional(),
   extractionModel: z.string().trim().max(120).nullable().optional(),
   responseModel: z.string().trim().max(120).nullable().optional(),
   visionModel: z.string().trim().max(120).nullable().optional(),
   summaryModel: z.string().trim().max(120).nullable().optional(),
   embeddingModel: z.string().trim().max(120).nullable().optional(),
+  // مفتاح مزوّد مخصص (custom) — كتابة-فقط: لا يُرجع أبداً من أي قراءة،
+  // وتنخزن القيمة المعمّاة فقط. إرسال null = إلغاء المفتاح.
+  customApiKey: z.string().trim().min(8).max(300).nullable().optional(),
   // P6: self-hosted OpenAI-compatible endpoint + explicit fallback.
   customBaseUrl: z.string().trim().max(500).url("عنوان الاتصال يجب أن يكون رابطًا صالحًا").nullable().optional(),
-  fallbackProvider: z.enum(["mock", "openai", "openrouter", "internal", "hermes"]).nullable().optional(),
+  fallbackProvider: z.enum(["mock", "openai", "openrouter", "internal", "hermes", "custom"]).nullable().optional(),
   fallbackModel: z.string().trim().max(120).nullable().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(50).max(4000).optional(),
@@ -35,13 +39,15 @@ const settingsSchema = z.object({
 export const GET = createHandler(
   { permission: "ai.configure" },
   async ({ auth }) => {
-    // API keys are never exposed — provider keys live in ENV only.
+    // API keys are never exposed — the workspace custom key returns as a
+    // boolean only; platform keys live in ENV.
     const settings = await prisma.aISettings.upsert({
       where: { workspaceId: auth!.workspaceId },
       create: { workspaceId: auth!.workspaceId },
       update: {},
     });
-    return ok(settings);
+    const { customApiKeyEnc: _enc, ...rest } = settings as Record<string, unknown>;
+    return ok({ ...rest, hasCustomApiKey: Boolean(_enc) });
   }
 );
 
@@ -84,10 +90,16 @@ export const PATCH = createHandler(
         }
       }
     }
+    // customApiKey أيضاً write-only: تنخزن معمّاة — القيمة المفتوحة لا
+    // تسجل ولا ترجع. null = إلغاء المفتاح المخزن.
+    const { customApiKey: _apiKey, ...data } = body;
+    if (_apiKey !== undefined) {
+      (data as Record<string, unknown>).customApiKeyEnc = _apiKey === null ? null : encryptSecret(_apiKey);
+    }
     const settings = await prisma.aISettings.upsert({
       where: { workspaceId: auth!.workspaceId },
-      create: { workspaceId: auth!.workspaceId, ...body },
-      update: body,
+      create: { workspaceId: auth!.workspaceId, ...data },
+      update: data,
     });
     await recordAudit(prisma, {
       workspaceId: auth!.workspaceId,
@@ -95,8 +107,9 @@ export const PATCH = createHandler(
       action: "ai_settings.updated",
       entityType: "AISettings",
       entityId: settings.id,
-      metadata: { fields: Object.keys(body) },
+      metadata: { fields: Object.keys(data) },
     });
-    return ok(settings);
+    const { customApiKeyEnc: _enc, ...rest } = settings as Record<string, unknown>;
+    return ok({ ...rest, hasCustomApiKey: Boolean(_enc) });
   }
 );
