@@ -50,7 +50,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <main className="min-h-screen bg-surface-1 lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* ── Showcase panel (desktop) ─────────────────────────── */}
-      <div className="relative hidden overflow-hidden bg-[#232A4D] lg:flex lg:flex-col lg:justify-between lg:p-10">
+      <div className="relative hidden overflow-hidden bg-[#0f548c] lg:flex lg:flex-col lg:justify-between lg:p-10">
         {/* soft dot pattern */}
         <div aria-hidden className="pointer-events-none absolute inset-0">
           <div

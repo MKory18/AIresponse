@@ -186,7 +186,7 @@ export default function ChannelsPage() {
             <button
               key={p.id}
               onClick={() => selectPage(p.id)}
-              className="glass-subtle block w-full rounded-xl p-3 text-start text-sm font-medium text-ink transition hover:border-brand-400 hover:shadow-glass"
+              className="glass-subtle block w-full rounded-xl p-3 text-start text-sm font-medium text-ink transition hover:border-brand-400 hover:border-brand-300/80"
             >
               {p.name} <span className="num text-xs text-ink-subtle" dir="ltr">({p.id})</span>
             </button>

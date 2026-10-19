@@ -76,7 +76,7 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen p-0 lg:p-4">
+    <div className="min-h-screen"> 
       <Sidebar
         items={navItems}
         workspaceName={workspaceName}
@@ -85,14 +85,14 @@ export function AppShell({
         onClose={() => setOpen(false)}
       />
 
-      {/* Main column offset for the floating sidebar on desktop (RTL sidebar on the right) */}
-      <div className={cn("flex min-h-screen flex-col transition-all duration-200 lg:min-h-[calc(100vh-2rem)]", narrow ? "lg:ps-[120px]" : "lg:ps-[352px]")}>
-        <header className="sticky top-0 z-20 border border-line/70 bg-surface-2 shadow-card lg:top-4 lg:rounded-[20px]">
-          <div className="flex h-16 items-center gap-3 px-4 lg:h-20 lg:px-6">
+      {/* Main column offset for the fixed sidebar on desktop (RTL: sidebar on the right) */}
+      <div className={cn("flex min-h-screen flex-col transition-[padding] duration-200", narrow ? "lg:ps-[68px]" : "lg:ps-[280px]")}>
+        <header className="sticky top-0 z-20 border-b border-line bg-surface-2">
+          <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
             <button
               onClick={() => setOpen(true)}
               aria-label={t.a11y.openMenu}
-              className="rounded-xl p-2 text-ink-muted transition hover:bg-surface-hover hover:text-ink lg:hidden"
+              className="rounded-lg p-2 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink lg:hidden"
             >
               <Menu size={19} />
             </button>
@@ -116,20 +116,20 @@ export function AppShell({
             </nav>
             <div className="ms-auto flex items-center gap-2">
               <form onSubmit={onSearch} role="search" className="relative hidden md:block">
-                <Search size={16} className="pointer-events-none absolute start-4 top-1/2 -translate-y-1/2 text-ink-subtle" />
+                <Search size={16} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={`${t.common.search}…`}
                   aria-label={t.common.search}
-                  className="h-12 w-56 rounded-2xl border border-transparent bg-surface-3/80 ps-11 pe-4 text-sm text-ink outline-none transition-all placeholder:text-ink-subtle focus:w-72 focus:border-primary focus:bg-surface-2 focus:ring-4 focus:ring-primary/10"
+                  className="h-9 w-56 rounded-lg border border-transparent bg-surface-3 ps-9 pe-3 text-sm text-ink outline-none transition-all placeholder:text-ink-subtle focus:w-72 focus:border-primary focus:bg-surface-2 focus:ring-1 focus:ring-primary"
                 />
               </form>
               <Link
                 href="/handoffs"
                 aria-label={t.nav.handoffs}
                 title={t.nav.handoffs}
-                className="relative rounded-2xl p-2.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink"
+                className="relative rounded-lg p-2 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
               >
                 <Bell size={19} strokeWidth={1.75} />
                 {/* لا نقطة زائفة: العدد الفعلي يظهر داخل صفحة التحويلات نفسها */}
@@ -142,8 +142,8 @@ export function AppShell({
                   aria-expanded={accountOpen}
                   aria-haspopup="menu"
                   className={cn(
-                    "hidden items-center gap-2 rounded-2xl border border-line/70 bg-surface-2 py-1.5 pe-3 ps-1.5 transition hover:bg-surface-hover sm:inline-flex",
-                    accountOpen && "border-primary/40 ring-4 ring-primary/10"
+                    "hidden items-center gap-2 rounded-lg border border-line bg-surface-2 py-1 pe-2.5 ps-1 transition-colors hover:bg-surface-hover sm:inline-flex",
+                    accountOpen && "border-primary/50 ring-1 ring-primary"
                   )}
                 >
                   <Avatar name={userName} size="xs" />
@@ -151,12 +151,12 @@ export function AppShell({
                   <ChevronDown size={14} className="text-ink-subtle" />
                 </button>
                 {accountOpen && (
-                  <div role="menu" className="absolute end-0 top-[calc(100%+8px)] z-30 w-48 rounded-2xl border border-line/70 bg-surface-2 p-1.5 shadow-pop">
+                  <div role="menu" className="absolute end-0 top-[calc(100%+6px)] z-30 w-48 rounded-xl border border-line bg-surface-2 p-1 shadow-pop">
                     <Link
                       href="/settings/account"
                       role="menuitem"
                       onClick={() => setAccountOpen(false)}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-ink transition hover:bg-surface-hover"
+                      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover"
                     >
                       <UserRound size={15} className="text-ink-subtle" />
                       حسابي
@@ -165,7 +165,7 @@ export function AppShell({
                       href="/settings/team"
                       role="menuitem"
                       onClick={() => setAccountOpen(false)}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-ink transition hover:bg-surface-hover"
+                      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover"
                     >
                       <Users size={15} className="text-ink-subtle" />
                       {t.nav.team}
@@ -175,7 +175,7 @@ export function AppShell({
                         type="submit"
                         role="menuitem"
                         disabled={loggingOut}
-                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-red-600 transition hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40"
                       >
                         <LogOut size={15} />
                         {loggingOut ? "…" : t.common.logout}

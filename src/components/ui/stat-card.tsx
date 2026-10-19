@@ -19,23 +19,23 @@ export function StatCard({
   className?: string;
 }) {
   const tones: Record<string, string> = {
-    brand: "from-brand-500/15 to-brand-500/5 text-brand-600 dark:text-brand-300",
-    emerald: "from-emerald-500/15 to-emerald-500/5 text-emerald-600 dark:text-emerald-300",
-    amber: "from-amber-500/15 to-amber-500/5 text-amber-600 dark:text-amber-300",
-    sky: "from-sky-500/15 to-sky-500/5 text-sky-600 dark:text-sky-300",
-    red: "from-red-500/15 to-red-500/5 text-red-600 dark:text-red-300",
+    brand: "bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300",
+    emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+    amber: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+    sky: "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+    red: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
   };
   const TrendIcon = trend?.dir === "up" ? TrendingUp : trend?.dir === "down" ? TrendingDown : Minus;
   return (
     <div
       className={cn(
-        "glass group rounded-2xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass",
+        "glass group rounded-2xl p-4 transition-colors duration-150 hover:border-brand-300/70 dark:hover:border-brand-700",
         className
       )}
     >
       <div className="flex items-start justify-between gap-3">
         {icon && (
-          <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ring-1 ring-inset ring-white/20", tones[tone])}>
+          <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ring-black/[0.04] dark:ring-white/[0.06]", tones[tone])}>
             {icon}
           </div>
         )}
