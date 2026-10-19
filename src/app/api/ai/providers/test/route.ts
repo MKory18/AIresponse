@@ -111,7 +111,7 @@ export const POST = createHandler(
         });
       }
       const key = decryptSecret(enc);
-      endpoint = base;
+      endpoint = normalizeHermesEndpoint(base);
       model = resolveModel(settings as never, "RESPONSE").model;
       // المفتاح المخصص ما بيرجع بالنتيجة — بس الحالة والتأخير والسبب.
       const probe = await probeProviderEndpoint(endpoint, key, model, { followRedirects: false });

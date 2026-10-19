@@ -348,7 +348,9 @@ export function getWorkspaceProvider(
     return new OpenAICompatibleProvider({
       name: "custom",
       apiKey: decryptSecret(enc),
-      baseUrl: base,
+      // /v1 أو رابط كامل — التطبيع بيبني مسار chat/completions الوحيد
+      // الذي يفهمه مزوّد OpenAI-compatible (زائد شرطة صلبة).
+      baseUrl: normalizeHermesEndpoint(base),
       defaultModel: settings?.responseModel ?? e.responseModel ?? "gpt-4o-mini",
       delivery: "external",
       // لا تتبّع إعادة توجيه مع المفتاح والأسئلة (فشل سريع).
