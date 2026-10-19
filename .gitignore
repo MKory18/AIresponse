@@ -12,3 +12,7 @@ coverage
 .tmp-prod-safety-*
 .tmp-*
 .playwright-mcp/
+
+# أدوات تشغيل محلية (بلا أسرار) — لا تدخل المستودع
+scripts/list-owners.ts
+scripts/reset-owner-password.ts
