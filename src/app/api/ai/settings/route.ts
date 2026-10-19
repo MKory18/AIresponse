@@ -8,6 +8,7 @@ import {
   validateHermesEndpoint,
   assertHermesEndpointResolves,
   isHermesPrivateNetworkAllowed,
+  isCustomPrivateNetworkAllowed,
 } from "@/modules/ai/endpoint-guard";
 import { AppError } from "@/core/errors";
 import { encryptSecret } from "@/core/crypto";
@@ -65,12 +66,19 @@ export const PATCH = createHandler(
     if (body.customBaseUrl !== undefined && body.customBaseUrl !== null) {
       const current = await prisma.aISettings.findUnique({ where: { workspaceId: auth!.workspaceId } });
       const effectiveProvider = body.provider ?? current?.provider ?? "mock";
-      if (effectiveProvider === "hermes") {
-        const allowPrivateNetwork = isHermesPrivateNetworkAllowed();
+      const isHermesProvider = effectiveProvider === "hermes";
+      const isCustomProvider = effectiveProvider === "custom";
+      if (isHermesProvider || isCustomProvider) {
+        const allowPrivateNetwork = isHermesProvider
+          ? isHermesPrivateNetworkAllowed()
+          : isCustomPrivateNetworkAllowed();
         const sync = validateHermesEndpoint(body.customBaseUrl, { allowPrivateNetwork });
         if (!sync.ok) {
+          const hint = isHermesProvider
+            ? "فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة"
+            : "فعّل AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 في بيئة الخادم إذا الـ API على نفس السيرفر أو شبكتك المحلية";
           throw new AppError(
-            `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة`,
+            `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) ${hint}`,
             422,
             "ENDPOINT_REJECTED"
           );
