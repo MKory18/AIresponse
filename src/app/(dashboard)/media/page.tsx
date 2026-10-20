@@ -379,7 +379,7 @@ export default function MediaPage() {
       {!loading && items.length > 0 && view === "grid" && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
           {items.map((m) => (
-            <GlassCard key={m.id} className="group overflow-hidden p-0 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass">
+            <GlassCard key={m.id} className="group overflow-hidden p-0 transition-all duration-200 hover:border-brand-300/80 dark:hover:border-brand-700">
               <button onClick={() => setPreview(m)} className="block w-full" aria-label={t.media.preview}>
                 {renderThumb(m, "h-28 w-full object-cover")}
               </button>

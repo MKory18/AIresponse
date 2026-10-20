@@ -2,60 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ═══════════ Zaki response Design Tokens — calm NeoCommerce canvas ═══════════ */
+/* ═══════════ Zaki response — Fluent design tokens (Microsoft style) ═══════════ */
 :root {
   color-scheme: light;
-  --background: 238 240 245;
+  --background: 243 243 243;
   --surface: 255 255 255;
-  --surface-glass: 255 255 255 / 0.9;
+  --surface-glass: 255 255 255;
   --surface-elevated: 255 255 255;
-  --surface-muted: 245 245 246;
-  --border: 236 236 241;
-  --border-glass: 255 255 255 / 0.7;
-  --text: 21 21 21;
-  --text-muted: 102 102 109;
-  --text-subtle: 146 146 154;
-  --brand: 37 99 235;
-  --brand-strong: 29 78 216;
-  --primary: 64 88 243;
-  --primary-hover: 52 74 224;
-  --primary-soft: 238 237 255;
-  --success: 36 150 109;
-  --warning: 217 154 36;
-  --danger: 217 75 75;
-  --info: 2 132 199;
-  --line: 236 236 241;
-  --surface-1: 238 240 245;
+  --surface-muted: 250 250 250;
+  --border: 224 224 224;
+  --border-glass: 224 224 224;
+  --text: 36 36 36;
+  --text-muted: 97 97 97;
+  --text-subtle: 112 112 112;
+  --brand: 15 108 189;
+  --brand-strong: 17 94 163;
+  --primary: 15 108 189;
+  --primary-hover: 17 94 163;
+  --primary-soft: 235 243 252;
+  --success: 16 124 16;
+  --warning: 157 93 0;
+  --danger: 196 43 43;
+  --info: 0 95 184;
+  --line: 224 224 224;
+  --surface-1: 243 243 243;
   --surface-2: 255 255 255;
-  --surface-3: 245 245 246;
-  --surface-hover: 247 247 251;
-  --app-glow-1: 37 99 235 / 0.05;
-  --app-glow-2: 56 189 248 / 0.05;
-  --glass-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px -8px rgb(16 24 40 / 0.08);
+  --surface-3: 247 247 247;
+  --surface-hover: 245 245 245;
+  --app-glow-1: 15 108 189 / 0;
+  --app-glow-2: 15 108 189 / 0;
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 0 2px rgb(0 0 0 / 0.06);
 }
 
 .dark {
   color-scheme: dark;
-  --background: 5 11 26;
-  --surface: 10 20 42;
-  --surface-glass: 12 24 48 / 0.78;
-  --surface-elevated: 17 31 60;
-  --surface-muted: 17 31 60;
-  --border: 32 56 100;
-  --border-glass: 147 197 253 / 0.12;
-  --text: 225 238 255;
-  --text-muted: 148 175 215;
-  --text-subtle: 105 135 180;
-  --brand: 96 165 250;
-  --brand-strong: 147 197 253;
-  --line: 32 56 100;
-  --surface-1: 5 11 26;
-  --surface-2: 10 20 42;
-  --surface-3: 17 31 60;
-  --surface-hover: 23 40 75;
-  --app-glow-1: 37 99 235 / 0.22;
-  --app-glow-2: 56 189 248 / 0.14;
-  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 14px 36px -12px rgb(2 8 30 / 0.7);
+  --background: 31 31 31;
+  --surface: 39 39 39;
+  --surface-glass: 39 39 39;
+  --surface-elevated: 45 45 45;
+  --surface-muted: 41 41 41;
+  --border: 61 61 61;
+  --border-glass: 61 61 61;
+  --text: 255 255 255;
+  --text-muted: 209 209 209;
+  --text-subtle: 173 173 173;
+  --brand: 71 158 245;
+  --brand-strong: 98 171 245;
+  --primary: 71 158 245;
+  --primary-hover: 98 171 245;
+  --primary-soft: 15 44 71;
+  --success: 84 173 84;
+  --warning: 240 180 60;
+  --danger: 242 128 128;
+  --info: 98 171 245;
+  --line: 61 61 61;
+  --surface-1: 31 31 31;
+  --surface-2: 39 39 39;
+  --surface-3: 45 45 45;
+  --surface-hover: 50 50 50;
+  --app-glow-1: 71 158 245 / 0;
+  --app-glow-2: 71 158 245 / 0;
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 0 2px rgb(0 0 0 / 0.4);
 }
 
 html {
@@ -68,6 +75,11 @@ body {
   background-image: none;
 }
 
+::selection {
+  background: rgb(var(--brand) / 0.22);
+}
+
+
 /* Numeric/LTR data (phones, prices, IDs) inside RTL layouts */
 .num {
   direction: ltr;
@@ -76,22 +88,24 @@ body {
   display: inline-block;
 }
 
-/* ═══════════ Glass System ═════════== */
+/* ═══════════ Fluent surfaces (names kept for compatibility) ═══════════ */
 @layer components {
   .glass-subtle {
     background: rgb(var(--surface-2));
     border: 1px solid rgb(var(--line));
-    box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+    border-radius: 8px;
   }
   .glass {
     background: rgb(var(--surface-2));
     border: 1px solid rgb(var(--line));
-    box-shadow: 0 1px 3px rgb(16 24 40 / 0.06);
+    border-radius: 8px;
+    box-shadow: var(--glass-shadow);
   }
   .glass-strong {
     background: rgb(var(--surface-2));
     border: 1px solid rgb(var(--line));
-    box-shadow: 0 2px 6px rgb(16 24 40 / 0.08);
+    border-radius: 12px;
+    box-shadow: 0 8px 16px rgb(0 0 0 / 0.14);
   }
 
   /* Page + section scaffolding */
@@ -99,27 +113,24 @@ body {
     @apply mx-auto w-full max-w-7xl space-y-5;
   }
   .section-title {
-    @apply text-sm font-bold text-ink;
+    @apply text-sm font-semibold text-ink;
   }
   .section-sub {
     @apply mt-0.5 text-xs leading-relaxed text-ink-muted;
   }
 
-  /* Premium data table */
+  /* Fluent data table */
   .data-table {
     @apply w-full text-sm;
   }
   .data-table thead th {
-    @apply whitespace-nowrap px-4 py-2.5 text-start text-[11px] font-semibold uppercase tracking-wide text-ink-subtle;
+    @apply whitespace-nowrap px-4 py-2.5 text-start text-[12px] font-semibold text-ink-muted;
   }
   .data-table thead tr {
-    @apply border-b border-line;
+    @apply border-b border-line bg-surface-3/70;
   }
   .data-table tbody tr {
-    @apply border-b border-line/60 transition-colors last:border-0 hover:bg-surface-3/60;
-  }
-  .dark .data-table tbody tr:hover {
-    @apply bg-white/[0.03];
+    @apply border-b border-line/70 transition-colors last:border-0 hover:bg-surface-hover;
   }
   .data-table tbody td {
     @apply px-4 py-3 align-middle text-ink;
@@ -127,13 +138,13 @@ body {
 
   /* Chat bubbles */
   .bubble-in {
-    @apply rounded-2xl rounded-ss-md border border-line bg-surface-2 px-3.5 py-2 text-[13px] leading-6 text-ink shadow-xs;
+    @apply rounded-2xl rounded-ss-sm border border-line bg-surface-2 px-3.5 py-2 text-[13px] leading-6 text-ink;
   }
   .bubble-out {
-    @apply rounded-2xl rounded-se-md bg-gradient-to-b from-brand-400 to-brand-600 px-3.5 py-2 text-[13px] leading-6 text-white shadow-xs;
+    @apply rounded-2xl rounded-se-sm bg-primary px-3.5 py-2 text-[13px] leading-6 text-white;
   }
   .bubble-sys {
-    @apply mx-auto rounded-full border border-line bg-surface-3/80 px-3 py-1 text-[11px] text-ink-muted;
+    @apply mx-auto rounded-full border border-line bg-surface-3 px-3 py-1 text-[11px] text-ink-muted;
   }
 
   /* Skeleton shimmer */
@@ -146,32 +157,39 @@ body {
     position: absolute;
     inset: 0;
     transform: translateX(100%);
-    background: linear-gradient(90deg, transparent, rgb(148 163 184 / 0.18), transparent);
+    background: linear-gradient(90deg, transparent, rgb(0 0 0 / 0.05), transparent);
     animation: shimmer-slide 1.6s infinite;
   }
 }
 
-/* Slim scrollbars */
+/* Slim scrollbars (Fluent subtle) */
 * {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--line)) transparent;
 }
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
   background: rgb(var(--line));
+  border: 2px solid transparent;
+  background-clip: content-box;
   border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--text-subtle) / 0.55);
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Focus visibility for accessibility */
+/* Fluent focus ring */
 :focus-visible {
-  outline: 2px solid rgb(47 111 235 / 0.6);
+  outline: 2px solid rgb(var(--brand));
   outline-offset: 1px;
+  border-radius: 4px;
 }
 
 @keyframes shimmer {

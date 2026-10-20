@@ -275,7 +275,7 @@ export default function CampaignsPage() {
         </div>
       )}
       {!loading && !error && items.map((c) => (
-        <GlassCard key={c.id} className="space-y-2 p-4 transition-all hover:shadow-glass">
+        <GlassCard key={c.id} className="space-y-2 p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button onClick={() => openCampaign(c.id)} className="truncate text-sm font-bold text-ink hover:text-brand-600">
               {c.name} · {label(c.channelType)}

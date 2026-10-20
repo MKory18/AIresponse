@@ -62,7 +62,7 @@ export function Dialog({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
       <div ref={panelRef} className={cn("glass-strong animate-scale-in relative z-10 max-h-[85vh] w-full max-w-lg overflow-hidden rounded-2xl", className)}>
         <div className="flex items-center justify-between border-b border-line/70 px-5 py-3.5">
           <h2 className="text-sm font-bold text-ink">{title}</h2>
@@ -105,7 +105,7 @@ export function Drawer({
   if (!open) return null;
   return (
     <div className={cn("fixed inset-0 z-50", until === "xl" ? "xl:hidden" : "lg:hidden")}>
-      <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"

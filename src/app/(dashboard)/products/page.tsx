@@ -212,7 +212,7 @@ export default function ProductsPage() {
           {products.map((p) => {
             const primary = p.mediaLinks[0]?.mediaAsset;
             return (
-              <GlassCard key={p.id} className="group flex flex-col overflow-hidden p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass">
+              <GlassCard key={p.id} className="group flex flex-col overflow-hidden p-3 transition-all duration-200 hover:border-brand-300/80 dark:hover:border-brand-700">
                 {primary?.type === "IMAGE" ? (
                   <div className="overflow-hidden rounded-2xl bg-surface-3/70">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
