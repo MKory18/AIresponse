@@ -10,10 +10,11 @@ const config: Config = {
       },
       colors: {
         // Fluent 2 brand blue (Microsoft design language).
+        // تتبع متغيّرات الثيم — نفس الأزرق بالوضع الفاتح، وتفتيح تلقائي بالداكن.
         primary: {
-          DEFAULT: "#0f6cbd",
-          hover: "#115ea3",
-          soft: "#ebf3fc",
+          DEFAULT: "rgb(var(--primary) / <alpha-value>)",
+          hover: "rgb(var(--primary-hover) / <alpha-value>)",
+          soft: "rgb(var(--primary-soft) / <alpha-value>)",
         },
         brand: {
           50: "#ebf3fc",
