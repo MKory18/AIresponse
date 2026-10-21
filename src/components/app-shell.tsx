@@ -6,17 +6,19 @@ import { usePathname, useRouter } from "next/navigation";
 import { Bell, ChevronDown, ChevronLeft, LogOut, Menu, Search, UserRound, Users } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { Sidebar, type NavEntry } from "./app-sidebar";
+import { groupLanding, pageForPath, type NavGroupView } from "@/lib/nav-model";
+import { Sidebar } from "./app-sidebar";
+import { GroupTabs, TABS_HEIGHT } from "./group-tabs";
 import { Avatar } from "./ui/avatar";
 import { ThemeToggle } from "./ui/theme-toggle";
 
 export function AppShell({
-  navItems,
+  groups,
   workspaceName,
   userName,
   children,
 }: {
-  navItems: NavEntry[];
+  groups: NavGroupView[];
   workspaceName: string;
   userName: string;
   children: React.ReactNode;
@@ -59,14 +61,18 @@ export function AppShell({
   // The inbox is a full-bleed 3-pane surface; every other page gets page padding.
   const fullBleed = pathname === "/conversations";
 
+  // الصفحة الحالية ومجموعتها (أطول رابط مطابق) — منها الفتات وشريط التبويبات.
+  const hit = useMemo(() => pageForPath(pathname, groups), [groups, pathname]);
+  const tabGroup = hit && hit.group.pages.length > 1 ? hit.group : null;
+
   const crumbs = useMemo(() => {
-    const found = navItems
-      .filter((n) => pathname === n.href || pathname.startsWith(n.href + "/"))
-      .sort((a, b) => b.href.length - a.href.length)[0];
     const list = [{ href: "/dashboard", label: t.nav.dashboard }];
-    if (found && found.href !== "/dashboard") list.push({ href: found.href, label: found.label });
+    if (hit && hit.page.href !== "/dashboard") {
+      list.push({ href: groupLanding(hit.group), label: hit.group.label });
+      list.push({ href: hit.page.href, label: hit.page.label });
+    }
     return list;
-  }, [navItems, pathname]);
+  }, [hit]);
 
   function onSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -76,9 +82,11 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen"> 
+    // `--shell-extra`: ارتفاع شريط التبويبات — صندوق الوارد (شاشة كاملة) بيطرحه
+    // من ارتفاعه حتى ما يطلع تمرير زيادة بالصفحة.
+    <div className="min-h-screen" style={{ "--shell-extra": tabGroup ? TABS_HEIGHT : "0px" } as React.CSSProperties}>
       <Sidebar
-        items={navItems}
+        groups={groups}
         workspaceName={workspaceName}
         userName={userName}
         open={open}
@@ -98,7 +106,7 @@ export function AppShell({
             </button>
             <nav aria-label="breadcrumb" className="hidden min-w-0 items-center gap-1 text-[13px] xl:flex">
               {crumbs.map((c, i) => (
-                <span key={c.href} className="flex min-w-0 items-center gap-1">
+                <span key={`${i}-${c.label}`} className="flex min-w-0 items-center gap-1">
                   {i > 0 && <ChevronLeft size={14} className="shrink-0 text-ink-subtle" aria-hidden />}
                   <Link
                     href={c.href}
@@ -187,6 +195,7 @@ export function AppShell({
             </div>
           </div>
         </header>
+        {tabGroup && hit && <GroupTabs group={tabGroup} activeHref={hit.page.href} />}
         <main className={cn("min-w-0 flex-1", !fullBleed && "p-4 lg:p-6")}>{children}</main>
       </div>
     </div>

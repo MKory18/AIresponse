@@ -445,7 +445,7 @@ export default function Inbox() {
   }, []);
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] gap-3">
+    <div className="flex h-[calc(100dvh-4rem-var(--shell-extra,0px))] gap-3">
       {/* Conversation list — glass panel */}
       <aside
         className={cn(

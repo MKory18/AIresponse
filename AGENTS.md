@@ -86,6 +86,7 @@ npm run build
 | العقود | `contracts/` (الأصل) · `tests/contracts-*.test.ts` |
 | المسارات | `/api/v1/*` (القدرة · حملات الكليبر · أحداث الأنظمة) · `/api/agent/tools` · `/api/agent/call` · `/api/webhooks/oms/[key]` · `/api/integrations/*` |
 | الواجهة | `settings/integrations` · `settings/agents` · `settings/ai` · بطاقة الـ OMS بصفحة الطلب · تبويب الامتثال بالمنتج · بطاقة الموافقة بالمحادثة |
+| التنقل | `src/lib/nav-model.ts` (مصدر الحقيقة: ٧ مجموعات + تبويباتها) · `components/app-sidebar.tsx` (المجموعات) · `components/group-tabs.tsx` (شريط التبويبات) · `components/nav-icons.ts` |
 
 ## ثوابت ما بتنكسر
 
@@ -94,6 +95,7 @@ npm run build
 - عقد agent-door/v1 حرفي: `additionalProperties:false` بكل كائن · nullable بـ `anyOf` · بلا `format` · tuple بحدود zod — `tests/p12-agent-door.test.ts` بيحرسه.
 - أي مفتاح عدم تكرار جديد (صادر · مهام · مراجع لأنظمة تانية) **لازم فيه المساحة** (أو وسم `opaqueTag`).
 - `ctwaClidEnc` و`psidEnc` ما بيطلعوا بأي رد API (`withoutClickSecrets`).
+- **صفحة جديدة بلوحة التحكم لازم تنضاف لـ `NAV_GROUPS`** (`src/lib/nav-model.ts`) بمجموعتها ويصلاحيتها — وإلا `tests/nav-structure.test.ts` بيفشل («صفحة بلا مجموعة»). **ولا مسار بيتغيّر** عند إعادة التجميع: الروابط بالإشعارات والمفضلة وباب الوكلاء بتضل شغّالة.
 - وسيط الزبون الوارد (`CUSTOMER_INBOUND`) مربوط برسالته بس: ممنوع يطلع بالمكتبة أو منتقي أو سياق ذكاء أو رابط عام، والاسم معتم — أي استعلام وسائط جديد لازم يمرّ من `excludeCustomerInbound()` (`tests/wa-media-privacy.test.ts` بيحرسه).
 - عدم تكرار الإرسال: SENT · DELIVERED · READ نهائية لنفس المفتاح.
 - قواعد سيستم 1 (المسموح · الممنوع) بتوصل لكل مسار بيكتب رد: كل المزوّدين · التجربة اليدوية (`tests/p12-merge-main.test.ts`).

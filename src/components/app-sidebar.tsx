@@ -3,67 +3,34 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard, MessageSquare, Users, Package, ShoppingBag, Images,
-  MessageCircle, BookOpen, UserRound, FlaskConical, Radio, Workflow, Clock,
-  Hand, ChartNoAxesCombined, Settings, LogOut, X,
-  ChevronsRight, ChevronsLeft, Bell, SlidersHorizontal, GitBranch, Megaphone,
-  Cable, Bot, LibraryBig,
-} from "lucide-react";
-import type { LucideProps } from "lucide-react";
+import { LogOut, X, ChevronsRight, ChevronsLeft, Bell, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { groupLanding, pageForPath, type NavGroupView } from "@/lib/nav-model";
 import { Avatar } from "./ui/avatar";
 import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./ui/theme-toggle";
-
-export interface NavEntry {
-  href: string;
-  label: string;
-  icon: string;
-  badge?: string;
-}
-
-const ICONS: Record<string, React.ComponentType<LucideProps>> = {
-  LayoutDashboard,
-  MessageSquare,
-  MessagesSquare: MessageSquare,
-  Users,
-  Package,
-  ShoppingBag,
-  Image: Images,
-  Images,
-  Star: MessageCircle,
-  MessageCircle,
-  BookOpen,
-  Bot: UserRound,
-  UserRound,
-  FlaskConical,
-  Radio,
-  Workflow,
-  GitBranch,
-  Megaphone,
-  Clock,
-  Hand,
-  BarChart3: ChartNoAxesCombined,
-  ChartNoAxesCombined,
-  Settings,
-  SlidersHorizontal,
-  Cable,
-  AgentBot: Bot,
-  LibraryBig,
-};
+import { NAV_ICONS } from "./nav-icons";
 
 function NavLink({
   href,
   label,
   icon,
-  badge,
+  hint,
   active,
   collapsed,
   onNavigate,
-}: NavEntry & { active: boolean; collapsed?: boolean; onNavigate?: () => void }) {
-  const Icon = ICONS[icon] ?? MessageSquare;
+}: {
+  href: string;
+  label: string;
+  icon: string;
+  /** سطر صغير تحت العنوان: شو جوّا المجموعة (أسماء صفحاتها). */
+  hint?: string;
+  active: boolean;
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
+  const Icon = NAV_ICONS[icon] ?? MessageSquare;
   return (
     <Link
       key={href}
@@ -87,13 +54,10 @@ function NavLink({
         strokeWidth={active ? 2 : 1.75}
         className={cn("shrink-0 transition-colors", active ? "text-primary" : "text-ink-subtle group-hover:text-ink-muted")}
       />
-      {!collapsed && <span className="min-w-0 flex-1 truncate">{label}</span>}
-      {!collapsed && badge && (
-        <span className={cn(
-          "num flex h-5 min-w-5 items-center justify-center rounded-[4px] px-1 text-[10px] font-bold",
-          active ? "bg-primary text-white" : "bg-surface-3 text-ink-muted"
-        )}>
-          {badge}
+      {!collapsed && (
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{label}</span>
+          {hint && <span className="mt-0.5 block truncate text-[11px] font-normal text-ink-subtle">{hint}</span>}
         </span>
       )}
     </Link>
@@ -101,13 +65,13 @@ function NavLink({
 }
 
 export function Sidebar({
-  items,
+  groups,
   workspaceName,
   userName,
   open,
   onClose,
 }: {
-  items: NavEntry[];
+  groups: NavGroupView[];
   workspaceName: string;
   userName: string;
   open?: boolean;
@@ -136,30 +100,28 @@ export function Sidebar({
     });
   }
 
-  // الرابط الأطول المطابق بس هو النشط (/orders/[id] مش /orders كمان).
-  const activeHref = items
-    .map((i) => i.href)
-    .filter((href) => pathname === href || pathname.startsWith(href + "/"))
-    .sort((a, b) => b.length - a.length)[0];
+  // المجموعة النشطة = مجموعة أطول رابط مطابق (/orders/[id] بتتبع «المبيعات»).
+  const activeKey = pageForPath(pathname, groups)?.group.key;
 
   function navList(coll: boolean, onNavigate?: () => void) {
+    const link = (g: NavGroupView) => (
+      <NavLink
+        key={g.key}
+        href={groupLanding(g)}
+        label={g.label}
+        icon={g.icon}
+        hint={g.pages.length > 1 ? g.pages.map((p) => p.label).join(" · ") : undefined}
+        active={g.key === activeKey}
+        collapsed={coll}
+        onNavigate={onNavigate}
+      />
+    );
+    const main = groups.filter((g) => g.placement === "main");
+    const bottom = groups.filter((g) => g.placement === "bottom");
     return (
-      <nav aria-label={t.a11y.mainNav} className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
-        {items.map(({ href, label, icon, badge }) => {
-          const active = href === activeHref;
-          return (
-            <NavLink
-              key={href}
-              href={href}
-              label={label}
-              icon={icon}
-              badge={badge}
-              active={active}
-              collapsed={coll}
-              onNavigate={onNavigate}
-            />
-          );
-        })}
+      <nav aria-label={t.a11y.mainNav} className="flex flex-1 flex-col overflow-y-auto px-2 py-2">
+        <div className="space-y-0.5">{main.map(link)}</div>
+        {bottom.length > 0 && <div className="mt-auto space-y-0.5 border-t border-line pt-2">{bottom.map(link)}</div>}
       </nav>
     );
   }
@@ -217,6 +179,7 @@ export function Sidebar({
     <>
       {/* Desktop sidebar — flush Fluent navigation pane, RTL: start side = right */}
       <aside
+        data-pane="nav"
         className={cn(
           "fixed inset-y-0 start-0 z-30 hidden flex-col border-e border-line bg-surface-2 transition-[width] duration-200 lg:flex",
           collapsed ? "w-[68px]" : "w-[280px]"
@@ -231,7 +194,7 @@ export function Sidebar({
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-          <div role="dialog" aria-modal="true" aria-label={t.a11y.mainNav} className="animate-slide-in absolute inset-y-0 start-0 flex w-72 max-w-[86vw] flex-col border-e border-line bg-surface-2">
+          <div role="dialog" aria-modal="true" aria-label={t.a11y.mainNav} data-pane="nav" className="animate-slide-in absolute inset-y-0 start-0 flex w-72 max-w-[86vw] flex-col border-e border-line bg-surface-2">
             <div className="flex items-center justify-between pe-2">
               <div className="flex-1">{brand(false)}</div>
               <button onClick={onClose} aria-label={t.a11y.closeMenu} className="rounded-lg p-2 text-ink-subtle transition hover:bg-surface-3">
