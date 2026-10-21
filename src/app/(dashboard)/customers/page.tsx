@@ -8,7 +8,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GlassCard, PageHeader } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
 import { SkeletonTable } from "@/components/ui/skeleton";
 
@@ -165,6 +165,7 @@ export default function CustomersPage() {
             icon={<Users size={28} strokeWidth={1.5} />}
             title="لا يوجد عملاء بعد"
             description="سيظهر العملاء هنا بمجرد وصول أول رسالة من قنواتك."
+            action={<EmptyNext href="/channels">اربط قناة</EmptyNext>}
           />
         </GlassCard>
       )}

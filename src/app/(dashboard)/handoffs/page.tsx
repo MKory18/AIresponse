@@ -6,7 +6,7 @@ import { Hand } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/confirm";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -140,6 +140,7 @@ export default function HandoffsPage() {
             icon={<Hand size={28} strokeWidth={1.5} />}
             title="لا توجد تحويلات"
             description="ستظهر هنا المحادثات التي تحتاج تدخلًا بشريًا."
+            action={<EmptyNext href="/conversations">افتح الوارد</EmptyNext>}
           />
         </GlassCard>
       )}

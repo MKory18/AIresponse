@@ -211,7 +211,12 @@ export default function FeedbackPage() {
       )}
       {!loading && items.length === 0 && !error && (
         <GlassCard>
-          <EmptyState icon={<MessageCircle size={28} strokeWidth={1.5} />} title="لا توجد آراء" description="أضف أول رأي لعميل لعرضه هنا." />
+          <EmptyState
+            icon={<MessageCircle size={28} strokeWidth={1.5} />}
+            title="لا توجد آراء"
+            description="أضف أول رأي لعميل لعرضه هنا."
+            action={<Button size="sm" onClick={() => setShowCreate(true)}>إضافة رأي</Button>}
+          />
         </GlassCard>
       )}
 

@@ -6,7 +6,7 @@ import { label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
@@ -120,6 +120,7 @@ export default function FollowUpsPage() {
             icon={<Clock size={28} strokeWidth={1.5} />}
             title="لا توجد متابعات"
             description="ستظهر هنا الرسائل المجدولة لعملائك."
+            action={<EmptyNext href="/automation">اضبط قاعدة أتمتة</EmptyNext>}
           />
         </GlassCard>
       )}

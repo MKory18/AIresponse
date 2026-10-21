@@ -177,7 +177,12 @@ export default function TeamView() {
             <Skeleton className="h-10" />
           </div>
         ) : members.length === 0 ? (
-          <EmptyState icon={<UserRound size={26} strokeWidth={1.75} />} title="لا أعضاء" description="ادعُ أول عضو في فريقك." />
+          <EmptyState
+            icon={<UserRound size={26} strokeWidth={1.75} />}
+            title="لا أعضاء"
+            description="ادعُ أول عضو في فريقك."
+            action={<Button size="sm" onClick={() => setShowInvite(true)}>ادعُ عضو</Button>}
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="data-table">

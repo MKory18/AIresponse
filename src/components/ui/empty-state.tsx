@@ -1,4 +1,5 @@
-import { Inbox } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Inbox } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
@@ -48,6 +49,29 @@ export function EmptyState({
       {description && <p className="max-w-sm text-[13px] leading-relaxed text-ink-muted">{description}</p>}
       {action && <div className="mt-3">{action}</div>}
     </div>
+  );
+}
+
+/**
+ * «الخطوة الجاية» داخل الحالة الفاضية: رابط داخلي بشكل زر — بدل حالة فاضية مسدودة
+ * (الدليل بالقائمة بيحكي «شو بعد» والحالة الفاضية لازم تحكي نفس القصة).
+ * نفس ألوان `Button`: أساسي أو ثانوي.
+ */
+export function EmptyNext({ href, children, secondary }: { href: string; children: React.ReactNode; secondary?: boolean }) {
+  return (
+    <Link
+      href={href}
+      data-empty-next
+      className={cn(
+        "inline-flex h-8 select-none items-center justify-center gap-1 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary",
+        secondary
+          ? "border border-line bg-surface-2 text-ink hover:bg-surface-hover"
+          : "bg-primary text-white hover:bg-primary-hover"
+      )}
+    >
+      {children}
+      <ArrowLeft size={13} aria-hidden />
+    </Link>
   );
 }
 
