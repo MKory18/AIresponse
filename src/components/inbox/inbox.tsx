@@ -677,7 +677,7 @@ export default function Inbox() {
                 </div>
               ) : !messagesLoading && messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
-                  <EmptyState title="لا رسائل بعد" description="ستظهر رسائل هذه المحادثة هنا بمجرد وصولها." />
+                  <EmptyState illustration="/brand/empty-conversations.webp" title="لا رسائل بعد" description="ستظهر رسائل هذه المحادثة هنا بمجرد وصولها." />
                 </div>
               ) : (
                 messages.map((m, i) => {
