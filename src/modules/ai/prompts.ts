@@ -185,7 +185,7 @@ export function trustedDataPrompt(data: {
   if (data.media?.length) {
     blocks.push(
       [
-        "صور المنتج المرتبطة (مرجع بصري — صفها للعميل عند السؤال عن الشكل، ولا تخترع روابط جديدة):",
+        "صور المنتج المرتبطة (مرجع بصري — الصور متاحة للنظام؛ لا تخترع روابط جديدة ولا تعتذر عن إرسال الصور إذا كانت متاحة):",
         ...data.media.map((m) => `- ${m.title ?? "صورة منتج"}: ${m.url}`),
       ].join("\n")
     );
@@ -269,12 +269,22 @@ export function planInstruction(): string {
   ].join("\n");
 }
 
-export function responseInstruction(persona: PersonaConfig): string {
+export function responseInstruction(
+  persona: PersonaConfig,
+  opts: { mediaRequested?: boolean } = {}
+): string {
   return [
     "اكتب الرد النهائي للعميل الآن، بعد أن عرفت النية والخطة والبيانات الموثوقة.",
     `اكتب بلهجة ${persona.dialect ?? persona.language} وبنبرة ${persona.tone}.`,
     "الرد 1-4 أسطر. لا تعدد أرقاماً أو أسعاراً غير موجودة في البيانات الموثوقة.",
     "إذا كانت الخطة تحتاج توضيحاً، اسأل سؤالاً واحداً قصيراً عن الحقل الناقص فقط.",
+    // The pipeline attaches the product photo before the text when
+    // plan.sendMedia is true. The model must not deny a capability it has.
+    ...(opts.mediaRequested
+      ? [
+          "العميل طلب صورة المنتج: اكتب جملة قصيرة ترافق الصورة (مثل «تفضل الصورة») ولا تعتذر ولا تقل إنك لا تستطيع إرسال الصور — النظام يرفقها تلقائياً إذا كانت متاحة.",
+        ]
+      : []),
     "أعد النص فقط بدون أي شرح.",
   ].join("\n");
 }

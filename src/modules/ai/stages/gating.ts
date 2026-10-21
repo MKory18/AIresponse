@@ -191,7 +191,7 @@ export async function runGating(
       where: { conversationId: conversation.id, deletedAt: null, isNote: false },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 8,
-      select: { senderType: true, direction: true, text: true },
+      select: { id: true, senderType: true, direction: true, text: true },
     }),
   ]));
   // PERF — the channel row is read once inside resolveChannelPersona (scope
@@ -290,7 +290,7 @@ export async function runGating(
   };
   const trustedContacts = customerPII.phone ? [customerPII.phone] : [];
   const customerText = message.text ?? "[رسالة وسائط]";
-  const recentMessages = recentMessagesRaw as { senderType: string; direction: string; text: string | null }[];
+  const recentMessages = recentMessagesRaw as { id: string; senderType: string; direction: string; text: string | null }[];
   // Bound per-message chars so one huge turn can't blow up every prompt.
   for (const m of recentMessages) {
     if (m.text && m.text.length > 500) m.text = m.text.slice(0, 500);

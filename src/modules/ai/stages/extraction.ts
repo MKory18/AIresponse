@@ -40,6 +40,13 @@ import type {
 
 const log = childLogger("orchestrator");
 
+// Pure visual asks are safe to classify without the model — they carry no
+// order fields. Any order/price/contact signal keeps the normal path so a
+// message like «ورجيني الصورة وكم سعرها» still gets full extraction.
+const MEDIA_FAST_PATH_BLOCKERS =
+  /طلب|طلبي|طلبية|أطلب|اطلب|سعر|بكم|كم\s|توصيل|شحن|عنوان|هاتف|رقم|دفع|تحويل|موظف|شكوى|إلغاء|الغاء|تعديل|إرجاع|ارجاع|اسمي/i;
+
+
 export async function runExtraction(
   db: Db,
   params: PipelineParams,
@@ -63,9 +70,11 @@ export async function runExtraction(
 
   // 5. Intent + entity extraction (structured, repaired, retried, fallback).
   const modelCfg = resolveModel(settings, "EXTRACTION");
+  // Newest-last copy; the original array is shared with later stages.
+  const historyAsc = [...recentMessages].reverse();
   const extractionUser = wrapUntrustedCustomerContent(
     customerText,
-    recentMessages.reverse().map((m) => ({
+    historyAsc.map((m) => ({
       sender: m.senderType,
       text: m.text ?? "[وسائط]",
     }))
@@ -91,10 +100,19 @@ export async function runExtraction(
     heuristicPre.intent === "GREETING" &&
     customerText.trim().length <= 40 &&
     !looksLikeInjection(customerText);
+  // Speed: a short, pure «ورجيني الصورة» / "send me a photo" carries no order
+  // data, so it skips a whole blocking extraction round-trip. The product is
+  // still resolved from the current text or the recent history (below).
+  const mediaFastPath =
+    wantsMedia(customerText) !== null &&
+    customerText.trim().length <= 80 &&
+    !/\d/.test(customerText) &&
+    !MEDIA_FAST_PATH_BLOCKERS.test(customerText) &&
+    !looksLikeInjection(customerText);
   try {
-    if (fastPathGreeting) {
+    if (fastPathGreeting || mediaFastPath) {
       extraction = {
-        intent: heuristicPre.intent,
+        intent: mediaFastPath ? "PRODUCT_QUESTION" : heuristicPre.intent,
         confidence: heuristicPre.confidence,
         entities: {},
         missingFields: [],
@@ -223,10 +241,25 @@ export async function runExtraction(
   // 6+7. Memory + product resolution are independent — run concurrently.
   // buildAIContext still waits for productId (dependency), but memory no
   // longer blocks product lookup and vice versa.
+  // Newest-first history without the current message: lets «ورجيني الصورة»
+  // resolve the product discussed moments ago. The customer's own words are
+  // tried before the AI's (an AI reply may name alternatives).
+  const historyNewestFirst = [...historyAsc].reverse().filter((m) => m.id !== message.id);
+  const historyForProduct = [
+    ...historyNewestFirst.filter((m) => m.senderType === "CUSTOMER"),
+    ...historyNewestFirst.filter((m) => m.senderType !== "CUSTOMER"),
+  ];
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
       loadMemory(db, params.workspaceId, customer.id),
-      resolveProductId(db, params.workspaceId, extraction, customerText, allowedProductIds),
+      resolveProductId(
+        db,
+        params.workspaceId,
+        extraction,
+        customerText,
+        allowedProductIds,
+        historyForProduct
+      ),
     ])
   );
   const vectorStore = deps.vectorStore ?? getVectorStore();
@@ -329,19 +362,52 @@ async function resolveProductId(
   // The page's catalog, when catalogs exist: undefined = no catalogs in
   // this workspace (legacy: every product may answer); [] = catalogs
   // exist but this page resolves none (nothing may answer).
-  allowedIds?: string[] | null
+  allowedIds?: string[] | null,
+  // Newest-first history. Only consulted when the customer asks for a
+  // picture and the current message names no product: «ورجيني الصورة»
+  // must still find the product discussed moments ago.
+  history: { senderType: string; text: string | null }[] = []
 ): Promise<string | null> {
   const candidates: string[] = [];
   if (extraction.entities.product) candidates.push(extraction.entities.product);
   // Context-based fallback: match product names against words in the message
   // ("بدي 3" after a product mention resolves via this path).
-  for (const word of customerText.split(/[\s،,.!؟?]+/)) {
-    if (word.length >= 3) candidates.push(word);
-    if (candidates.length >= 12) break;
+  candidates.push(...productCandidatesFromText(customerText));
+  const direct = await findProductId(db, workspaceId, candidates, allowedIds);
+  if (direct) return direct;
+  if (wantsMedia(customerText) === null) return null;
+  for (const past of history) {
+    if (!past.text || past.text === customerText) continue;
+    const found = await findProductId(
+      db,
+      workspaceId,
+      productCandidatesFromText(past.text),
+      allowedIds
+    );
+    if (found) return found;
   }
+  return null;
+}
+
+/** Words long enough to be a product-name fragment (bounded to 12). */
+function productCandidatesFromText(text: string): string[] {
+  const out: string[] = [];
+  for (const word of text.split(/[\s،,.!؟?]+/)) {
+    if (word.length >= 3) out.push(word);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+/** Single query for all candidates (latency fix: never N sequential reads). */
+async function findProductId(
+  db: Db,
+  workspaceId: string,
+  candidates: string[],
+  allowedIds?: string[] | null
+): Promise<string | null> {
   if (!candidates.length) return null;
   if (allowedIds && allowedIds.length === 0) return null;
-  // Single query instead of N sequential findFirst calls (latency fix).
   const ors: { name: { contains: string } }[] = [];
   for (const name of candidates.slice(0, 12)) {
     ors.push({ name: { contains: name } });

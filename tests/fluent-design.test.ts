@@ -41,6 +41,13 @@ describe("Fluent design tokens", () => {
     expect(css()).not.toContain("backdrop-filter");
     expect(css()).toContain(".glass-strong {");
   });
+
+  it("primary tint follows the theme instead of a hardcoded light blue", () => {
+    // بدون هالربط، bg-primary-soft بيضل أزرق فاتح بالوضع الداكن = نص باهت على خلفية فاتحة.
+    const cfg = read("tailwind.config.ts");
+    expect(cfg).toContain('soft: "rgb(var(--primary-soft) / <alpha-value>)"');
+    expect(cfg).toContain('DEFAULT: "rgb(var(--primary) / <alpha-value>)"');
+  });
 });
 
 describe("Fluent app shell", () => {

@@ -70,7 +70,7 @@ export interface GatingState {
   customer: Customer;
   channelRow: { displayName: string | null; externalId: string | null } | null;
   customerText: string;
-  recentMessages: { senderType: string; direction: string; text: string | null }[];
+  recentMessages: { id: string; senderType: string; direction: string; text: string | null }[];
   customerPII: CustomerPII;
   trustedContacts: string[];
   provider: AIProvider;
