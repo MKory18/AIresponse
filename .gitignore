@@ -12,3 +12,6 @@ coverage
 .tmp-prod-safety-*
 .tmp-*
 .playwright-mcp/
+
+# ملف تجاوز Compose محلي (منافذ الجهاز) — ما بينرفع
+docker-compose.override.yml
