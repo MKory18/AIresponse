@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input, Select } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { providerLabel, publicDetail } from "@/lib/provider-labels";
@@ -226,7 +227,7 @@ export default function AISettingsPage() {
             <Input name="customBaseUrl" defaultValue={settings.customBaseUrl ?? ""} dir="ltr" className="num" placeholder="https://api.example.com/v1" />
           </Field>
           <Field label="مفتاح المزوّد المخصص (يُخزَّن مشفَّراً)" hint={settings.hasCustomApiKey ? "المفتاح المخصّص متخزن ✅ — اكتب مفتاح جديد للاستبدال، وسيب فارغة للحفاظ على الموجود." : "اكتب مفتاح مزوّدك المخصّص (يُخزَّن مشفَّراً ولا يُعرض بعدها أبداً)."}>
-            <Input name="customApiKey" type="password" dir="ltr" className="num" placeholder={settings.hasCustomApiKey ? "•••• متخزن — فارغة = بلا تغيير" : "sk-…"} autoComplete="off" />
+            <PasswordInput kind="secret" name="customApiKey" dir="ltr" className="num" placeholder={settings.hasCustomApiKey ? "•••• متخزن — فارغة = بلا تغيير" : "sk-…"} autoComplete="off" />
           </Field>
           <Field label="مزود البديل (عند الفشل فقط)">
             <Select name="fallbackProvider" defaultValue={settings.fallbackProvider ?? ""}>
