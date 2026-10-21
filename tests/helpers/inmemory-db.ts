@@ -410,6 +410,8 @@ export function createFakeDb() {
   // مختبر التجميع — اللقطة المستخرجة وسجل التحليل.
   const customerIntelRows: Row[] = [];
   const customerIntelRunRows: Row[] = [];
+  // البيانات المطلوب تجميعها (إعداد لكل مساحة).
+  const collectionFieldSettingRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -438,6 +440,7 @@ export function createFakeDb() {
       catalogPageAssignment: catalogPageAssignmentRows,
       customerIntel: customerIntelRows,
       customerIntelRun: customerIntelRunRows,
+      collectionFieldSetting: collectionFieldSettingRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -500,6 +503,7 @@ export function createFakeDb() {
     catalogPageAssignment: makeModel("catalogPageAssignment", catalogPageAssignmentRows, { assignedBy: null }),
     customerIntel: makeModel("customerIntel", customerIntelRows, { status: "PENDING", data: {}, fieldMeta: {}, confidence: 0, attempts: 0, lastError: null, extractedAt: null, reviewedAt: null, reviewedBy: null, lastMessageId: null }),
     customerIntelRun: makeModel("customerIntelRun", customerIntelRunRows, { status: "QUEUED", provider: null, model: null, latencyMs: null, errorCode: null, startedAt: null, finishedAt: null }),
+    collectionFieldSetting: makeModel("collectionFieldSetting", collectionFieldSettingRows, { kind: "TEXT", required: false, enabled: true, sortOrder: 0, isCustom: false }),
   };
 
   const conversationModel = db.conversation as any;

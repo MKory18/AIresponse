@@ -1,4 +1,12 @@
-import { EMPTY_INTEL_FIELDS, emptyMeta, type IntelFields, type IntelFieldMetaMap } from "./fields";
+import {
+  EMPTY_INTEL_FIELDS,
+  emptyMeta,
+  requiredProgress,
+  type IntelFields,
+  type IntelFieldMetaMap,
+  type RequiredProgress,
+} from "./fields";
+import { enabledFieldDefs, getCollectionFields, type CollectionFieldSetting } from "./settings";
 
 type AnyDb = Record<string, any>;
 
@@ -146,6 +154,8 @@ export interface LabConversationSummary {
   customer: { id: string; name: string | null };
   page: { id: string; displayName: string };
   lastInbound: { text: string | null; at: string | null };
+  /** تقدّم البيانات المطلوب تجميعها (المفعّلة فقط). */
+  progress: RequiredProgress;
   intel: {
     status: string;
     confidence: number;
@@ -156,16 +166,33 @@ export interface LabConversationSummary {
   } | null;
 }
 
-function highlightsOf(data: Partial<IntelFields> | null | undefined): string[] {
+function textOf(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function listOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+function highlightsOf(data: Record<string, unknown> | null | undefined): string[] {
   if (!data) return [];
   const out: string[] = [];
-  if (data.customerName) out.push(data.customerName);
-  if (data.phone) out.push(data.phone);
-  if (data.city) out.push(data.city);
-  if (data.products?.length) out.push(data.products.slice(0, 2).join(" · "));
+  const name = textOf(data.customerName);
+  if (name) out.push(name);
+  const phone = textOf(data.phone);
+  if (phone) out.push(phone);
+  const city = textOf(data.city);
+  if (city) out.push(city);
+  const address = textOf(data.address);
+  if (address) out.push(address);
+  const products = listOf(data.products);
+  if (products.length) out.push(products.slice(0, 2).join(" · "));
+  const order = textOf(data.order);
+  if (order) out.push(order);
   if (typeof data.quantity === "number") out.push(`الكمية: ${data.quantity}`);
-  if (data.budget) out.push(data.budget);
-  return out.slice(0, 4);
+  const budget = textOf(data.budget);
+  if (budget) out.push(budget);
+  return out.slice(0, 5);
 }
 
 export async function listLabConversations(
@@ -174,6 +201,7 @@ export async function listLabConversations(
 ): Promise<LabConversationSummary[]> {
   const channelFilter: Record<string, unknown> = { sendMode: "COLLECTION_ONLY" };
   if (params.channelId) channelFilter.id = params.channelId;
+  const fieldDefs = enabledFieldDefs(await getCollectionFields(db, params.workspaceId));
   const rows = await db.conversation.findMany({
     where: { workspaceId: params.workspaceId, deletedAt: null, channel: channelFilter },
     orderBy: [{ lastCustomerMessageAt: "desc" }, { updatedAt: "desc" }],
@@ -200,6 +228,7 @@ export async function listLabConversations(
       text: c.messages?.[0]?.text ? String(c.messages[0].text).slice(0, 160) : null,
       at: c.messages?.[0]?.createdAt ? new Date(c.messages[0].createdAt).toISOString() : null,
     },
+    progress: requiredProgress(c.customerIntel?.data as IntelFields | null, fieldDefs),
     intel: c.customerIntel
       ? {
           status: c.customerIntel.status,
@@ -242,6 +271,9 @@ export async function getLabConversation(
   if (!c || c.workspaceId !== params.workspaceId) return null;
   if (c.channel?.sendMode !== "COLLECTION_ONLY") return null;
 
+  const fieldSettings: CollectionFieldSetting[] = await getCollectionFields(db, params.workspaceId);
+  const activeDefs = enabledFieldDefs(fieldSettings);
+
   const intel = c.customerIntel
     ? {
         status: c.customerIntel.status,
@@ -249,8 +281,8 @@ export async function getLabConversation(
         lastError: c.customerIntel.lastError,
         extractedAt: c.customerIntel.extractedAt,
         reviewedAt: c.customerIntel.reviewedAt,
-        data: { ...EMPTY_INTEL_FIELDS, ...(c.customerIntel.data as Partial<IntelFields>) },
-        fields: { ...emptyMeta(), ...(c.customerIntel.fieldMeta as IntelFieldMetaMap) },
+        data: { ...EMPTY_INTEL_FIELDS, ...(c.customerIntel.data as IntelFields) },
+        fields: { ...emptyMeta(activeDefs), ...(c.customerIntel.fieldMeta as IntelFieldMetaMap) },
       }
     : null;
 
@@ -258,6 +290,8 @@ export async function getLabConversation(
     id: c.id,
     page: { id: c.channel.id, displayName: c.channel.displayName },
     customer: { id: c.customer?.id ?? c.customerId, name: c.customer?.name ?? null },
+    fieldDefs: fieldSettings,
+    progress: requiredProgress((intel?.data ?? null) as IntelFields | null, activeDefs),
     messages: (c.messages as Array<Record<string, any>>).map((m) => ({
       id: m.id,
       senderType: m.senderType,

@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle, ArrowLeft, Check, Clock, Database, Inbox, MessagesSquare,
-  RefreshCw, Settings2, ShieldOff, Sparkles, UserRound,
+  AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, Clock, Database, Inbox,
+  MessagesSquare, Plus, RefreshCw, Save, Settings2, ShieldOff, Sparkles, Trash2, UserRound,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
 import { cn } from "@/lib/cn";
@@ -37,11 +37,26 @@ type Snapshot = {
   };
 };
 
+type FieldKind = "TEXT" | "PHONE" | "NUMBER" | "LIST";
+
+type FieldSetting = {
+  key: string;
+  label: string;
+  kind: FieldKind;
+  required: boolean;
+  enabled: boolean;
+  sortOrder: number;
+  isCustom: boolean;
+};
+
+type Progress = { filled: number; required: number; missing: string[] };
+
 type ConversationRow = {
   id: string;
   customer: { id: string; name: string | null };
   page: { id: string; displayName: string };
   lastInbound: { text: string | null; at: string | null };
+  progress: Progress;
   intel: {
     status: string;
     confidence: number;
@@ -52,14 +67,12 @@ type ConversationRow = {
   } | null;
 };
 
-type FieldKey =
-  | "customerName" | "phone" | "city" | "address" | "products" | "quantity"
-  | "budget" | "purchaseIntent" | "needs" | "notes";
-
 type Detail = {
   id: string;
   page: { id: string; displayName: string };
   customer: { id: string; name: string | null };
+  fieldDefs: FieldSetting[];
+  progress: Progress;
   messages: {
     id: string; senderType: string; direction: string; type: string; text: string | null;
     mediaUrl: string | null; deliveryStatus: string | null; createdAt: string;
@@ -71,22 +84,16 @@ type Detail = {
     extractedAt: string | null;
     reviewedAt: string | null;
     data: Record<string, unknown>;
-    fields: Record<FieldKey, { status: string; sources: string[]; conflicts?: string[] }>;
+    fields: Record<string, { status: string; sources: string[]; conflicts?: string[] }>;
   } | null;
 };
 
-const FIELD_DEFS: { key: FieldKey; label: string }[] = [
-  { key: "customerName", label: "الاسم" },
-  { key: "phone", label: "رقم الهاتف" },
-  { key: "city", label: "المدينة" },
-  { key: "address", label: "العنوان" },
-  { key: "products", label: "المنتجات" },
-  { key: "quantity", label: "الكمية" },
-  { key: "budget", label: "الميزانية / السعر المذكور" },
-  { key: "purchaseIntent", label: "نية الشراء" },
-  { key: "needs", label: "الأسئلة والاحتياجات" },
-  { key: "notes", label: "ملاحظات مستخرجة" },
-];
+const KIND_LABEL: Record<FieldKind, string> = {
+  TEXT: "نص",
+  PHONE: "رقم هاتف",
+  NUMBER: "رقم",
+  LIST: "قائمة",
+};
 
 const FIELD_STATUS: Record<string, { label: string; tone: string }> = {
   MISSING: { label: "غير متوفر", tone: "CLOSED" },
@@ -116,13 +123,18 @@ function fmtDate(value: string | null | undefined): string {
   return d.toLocaleString("ar-JO", { dateStyle: "short", timeStyle: "short", hourCycle: "h23" });
 }
 
-function fieldText(data: Record<string, unknown> | undefined, key: FieldKey): string | null {
+function fieldText(data: Record<string, unknown> | undefined, key: string): string | null {
   const v = data?.[key];
   if (v === null || v === undefined) return null;
   if (Array.isArray(v)) return v.length ? v.join(" · ") : null;
   if (typeof v === "string" && v.trim() === "") return null;
+  if (typeof v === "string" && v === "unknown") return null;
   if (key === "purchaseIntent") return INTENT[String(v)] ?? String(v);
   return String(v);
+}
+
+function newCustomKey(): string {
+  return `custom_${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 }
 
 export default function IntelligenceLabPage() {
@@ -138,6 +150,15 @@ export default function IntelligenceLabPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [channels, setChannels] = useState<{ id: string; displayName: string | null; type: string; sendMode: string }[]>([]);
+
+  // البيانات المطلوب تجميعها
+  const [fieldsOpen, setFieldsOpen] = useState(false);
+  const [fieldDefs, setFieldDefs] = useState<FieldSetting[] | null>(null);
+  const [draft, setDraft] = useState<FieldSetting[]>([]);
+  const [fieldsDirty, setFieldsDirty] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newKind, setNewKind] = useState<FieldKind>("TEXT");
+  const [fieldsNotice, setFieldsNotice] = useState<string | null>(null);
 
   const loadSnapshot = useCallback(async () => {
     try {
@@ -160,6 +181,20 @@ export default function IntelligenceLabPage() {
       setChannels((json.channels ?? []).filter((c: { type: string }) => c.type === "FACEBOOK"));
     } catch {
       /* القائمة اختيارية — لا تعطّل المختبر */
+    }
+  }, []);
+
+  const loadFields = useCallback(async () => {
+    try {
+      const res = await fetch("/api/intelligence/fields", { cache: "no-store" });
+      if (!res.ok) return;
+      const json = await res.json();
+      const fields = (json.fields ?? []) as FieldSetting[];
+      setFieldDefs(fields);
+      setDraft(fields);
+      setFieldsDirty(false);
+    } catch {
+      /* الافتراضي يكفي للعرض */
     }
   }, []);
 
@@ -196,7 +231,8 @@ export default function IntelligenceLabPage() {
   useEffect(() => {
     void loadSnapshot();
     void loadChannels();
-  }, [loadSnapshot, loadChannels]);
+    void loadFields();
+  }, [loadSnapshot, loadChannels, loadFields]);
 
   useEffect(() => {
     void loadRows(pageId);
@@ -210,6 +246,9 @@ export default function IntelligenceLabPage() {
     () => channels.find((c) => c.id === pageId) ?? null,
     [channels, pageId]
   );
+
+  const enabledFields = useMemo(() => (fieldDefs ?? []).filter((f) => f.enabled), [fieldDefs]);
+  const requiredFields = useMemo(() => enabledFields.filter((f) => f.required), [enabledFields]);
 
   async function setMode(id: string, mode: "AUTO_REPLY" | "COLLECTION_ONLY") {
     setBusy(true);
@@ -266,10 +305,11 @@ export default function IntelligenceLabPage() {
     }
   }
 
-  async function confirmField(key: FieldKey) {
+  async function confirmField(key: string) {
     if (!selectedId || !detail) return;
+    const label = fieldDefs?.find((f) => f.key === key)?.label ?? key;
     const current = fieldText(detail.intel?.data, key) ?? "";
-    const value = window.prompt(`القيمة المؤكدة لـ «${FIELD_DEFS.find((f) => f.key === key)?.label ?? key}»`, current);
+    const value = window.prompt(`القيمة المؤكدة لـ «${label}»`, current);
     if (value === null) return;
     setBusy(true);
     setNotice(null);
@@ -285,8 +325,80 @@ export default function IntelligenceLabPage() {
       }
       setNotice("تم تأكيد الحقل — لن يستبدله تحليل لاحق.");
       await loadDetail(selectedId);
+      await loadRows(pageId);
     } catch {
       setNotice("تعذّر حفظ التأكيد.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function updateDraft(key: string, patch: Partial<FieldSetting>) {
+    setDraft((prev) => prev.map((f) => (f.key === key ? { ...f, ...patch } : f)));
+    setFieldsDirty(true);
+  }
+
+  function addCustomField() {
+    const label = newLabel.trim();
+    if (!label) {
+      setFieldsNotice("اكتب اسم الحقل أولًا.");
+      return;
+    }
+    if (draft.length >= 30) {
+      setFieldsNotice("الحد الأقصى 30 حقلًا.");
+      return;
+    }
+    setDraft((prev) => [
+      ...prev,
+      { key: newCustomKey(), label: label.slice(0, 40), kind: newKind, required: true, enabled: true, sortOrder: prev.length, isCustom: true },
+    ]);
+    setNewLabel("");
+    setNewKind("TEXT");
+    setFieldsDirty(true);
+    setFieldsNotice(null);
+  }
+
+  function removeCustomField(key: string) {
+    setDraft((prev) => prev.filter((f) => f.key !== key));
+    setFieldsDirty(true);
+  }
+
+  async function saveFields() {
+    setBusy(true);
+    setFieldsNotice(null);
+    try {
+      const res = await fetch("/api/intelligence/fields", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: draft.map((f) => ({
+            key: f.key,
+            label: f.label,
+            kind: f.kind,
+            required: f.required,
+            enabled: f.enabled,
+          })),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFieldsNotice(
+          json.error === "NO_ENABLED_FIELDS"
+            ? "لازم يضل حقل واحد مفعّل على الأقل."
+            : json.error === "DUPLICATE_KEY" || json.error === "INVALID_KEY"
+              ? "المفتاح غير صالح أو مكرر."
+              : "تعذّر حفظ الإعدادات."
+        );
+        return;
+      }
+      const fields = (json.fields ?? []) as FieldSetting[];
+      setFieldDefs(fields);
+      setDraft(fields);
+      setFieldsDirty(false);
+      setFieldsNotice("تم الحفظ — التحليل القادم بيجمع هالحقول بس.");
+      await Promise.all([loadRows(pageId), selectedId ? loadDetail(selectedId) : Promise.resolve()]);
+    } catch {
+      setFieldsNotice("تعذّر حفظ الإعدادات.");
     } finally {
       setBusy(false);
     }
@@ -388,6 +500,112 @@ export default function IntelligenceLabPage() {
         {notice && <p className="mt-2 text-[11px] font-medium text-brand-700 dark:text-brand-300">{notice}</p>}
       </GlassCard>
 
+      {/* البيانات المطلوب تجميعها */}
+      <GlassCard className="overflow-hidden">
+        <button
+          onClick={() => setFieldsOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-start"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Settings2 size={15} className="text-brand-600 dark:text-brand-400" />
+            <h2 className="text-sm font-bold text-ink">البيانات المطلوب تجميعها</h2>
+            {fieldDefs && (
+              <Badge tone="DONE">
+                {requiredFields.length} مطلوبة من {enabledFields.length} مفعّلة
+              </Badge>
+            )}
+            {fieldsDirty && <Badge tone="PENDING">تغييرات غير محفوظة</Badge>}
+          </div>
+          {fieldsOpen ? <ChevronUp size={16} className="text-ink-muted" /> : <ChevronDown size={16} className="text-ink-muted" />}
+        </button>
+        {fieldsOpen && (
+          <div className="border-t border-line px-4 py-3">
+            <p className="mb-3 text-[11px] leading-5 text-ink-muted">
+              فعّل الحقول اللي بدك تجمعها من المحادثة، وحدّد «مطلوب» للحقول اللي بتوقف عليها نسبة الاكتمال.
+              التحليل القادم بيطلب هالحقول بس، وأي معلومة بتتجمّع بتنحفظ تلقائيًا.
+            </p>
+            <div className="space-y-1.5">
+              {draft.map((f) => (
+                <div key={f.key} className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-3 px-3 py-2">
+                  <label className="flex min-w-0 flex-1 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={f.enabled}
+                      onChange={(e) => updateDraft(f.key, { enabled: e.target.checked, required: e.target.checked ? f.required : false })}
+                      className="h-3.5 w-3.5 accent-brand-600"
+                      aria-label={`تفعيل ${f.label}`}
+                    />
+                    <span className={cn("truncate text-xs font-semibold", f.enabled ? "text-ink" : "text-ink-subtle line-through")}>
+                      {f.label}
+                    </span>
+                    <span className="rounded bg-surface-1 px-1.5 py-0.5 text-[10px] text-ink-subtle">{KIND_LABEL[f.kind]}</span>
+                    {f.isCustom && <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">خاص</span>}
+                  </label>
+                  <button
+                    onClick={() => updateDraft(f.key, { required: !f.required })}
+                    disabled={!f.enabled}
+                    className={cn(
+                      "rounded-md px-2 py-1 text-[10px] font-bold transition-colors disabled:opacity-40",
+                      f.required
+                        ? "bg-brand-600 text-white"
+                        : "bg-surface-1 text-ink-muted hover:text-ink"
+                    )}
+                    aria-pressed={f.required}
+                  >
+                    {f.required ? "مطلوب" : "اختياري"}
+                  </button>
+                  {f.isCustom && (
+                    <button
+                      onClick={() => removeCustomField(f.key)}
+                      className="rounded-md p-1 text-ink-subtle transition-colors hover:text-red-600"
+                      aria-label={`حذف ${f.label}`}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-line px-3 py-2.5">
+              <div className="flex-1">
+                <label className="mb-1 block text-[10px] font-semibold text-ink-muted">حقل خاص جديد</label>
+                <Input
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="مثال: المقاس · اللون · الشركة"
+                  maxLength={40}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <Select
+                aria-label="نوع الحقل الخاص"
+                value={newKind}
+                onChange={(e) => setNewKind(e.target.value as FieldKind)}
+                className="h-8 w-28 text-xs"
+              >
+                <option value="TEXT">نص</option>
+                <option value="PHONE">رقم هاتف</option>
+                <option value="NUMBER">رقم</option>
+                <option value="LIST">قائمة</option>
+              </Select>
+              <Button variant="secondary" size="sm" onClick={addCustomField} disabled={busy}>
+                <Plus size={14} /> إضافة
+              </Button>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] text-ink-subtle">
+                {fieldsNotice ?? (fieldsDirty ? "احفظ التغييرات ليشتغل التحليل القادم عليها." : "الإعدادات محفوظة.")}
+              </p>
+              <Button size="sm" onClick={() => void saveFields()} disabled={busy || !fieldsDirty}>
+                <Save size={14} /> حفظ البيانات المطلوبة
+              </Button>
+            </div>
+          </div>
+        )}
+      </GlassCard>
+
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         {/* قائمة المحادثات */}
         <GlassCard className="overflow-hidden">
@@ -424,6 +642,11 @@ export default function IntelligenceLabPage() {
                     <Badge tone={INTEL_STATUS[r.intel.status]?.tone}>{INTEL_STATUS[r.intel.status]?.label ?? r.intel.status}</Badge>
                   ) : (
                     <Badge tone="CLOSED">ما تحلّلت بعد</Badge>
+                  )}
+                  {r.progress.required > 0 && (
+                    <Badge tone={r.progress.missing.length === 0 ? "CONFIRMED" : "PENDING"}>
+                      {r.progress.filled} / {r.progress.required}
+                    </Badge>
                   )}
                   {r.intel?.highlights.slice(0, 2).map((h) => (
                     <span key={h} className="truncate rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-ink-muted">{h}</span>
@@ -506,6 +729,33 @@ export default function IntelligenceLabPage() {
                   </div>
                   <Badge tone="AI_ACTIVE"><Database size={11} /> OpenRouter</Badge>
                 </div>
+
+                <div className="border-b border-line px-4 py-3">
+                  <div className="mb-1.5 flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-ink">
+                      البيانات المطلوبة: {detail.progress.filled} من {detail.progress.required}
+                    </span>
+                    <span className="text-ink-subtle">
+                      {detail.progress.required === 0
+                        ? "ما في حقول مطلوبة"
+                        : detail.progress.missing.length === 0
+                          ? "مكتمل ✅"
+                          : `${detail.progress.missing.length} ناقص`}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        detail.progress.missing.length === 0 ? "bg-emerald-500" : "bg-brand-600"
+                      )}
+                      style={{
+                        width: `${detail.progress.required > 0 ? Math.round((detail.progress.filled / detail.progress.required) * 100) : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
                 {!detail.intel && (
                   <div className="p-4">
                     <EmptyState title="ما في معلومات مستخرجة بعد" description="الرسالة محفوظة، والتحليل يصير بالخلفية. إذا فشل، اضغط «إعادة تحليل»." />
@@ -513,7 +763,7 @@ export default function IntelligenceLabPage() {
                 )}
                 {detail.intel && (
                   <div className="divide-y divide-line">
-                    {FIELD_DEFS.map((f) => {
+                    {(detail.fieldDefs ?? []).filter((f) => f.enabled).map((f) => {
                       const meta = detail.intel?.fields?.[f.key];
                       const status = meta?.status ?? "MISSING";
                       const text = fieldText(detail.intel?.data, f.key);
@@ -523,6 +773,7 @@ export default function IntelligenceLabPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-[11px] font-semibold text-ink-muted">{f.label}</span>
+                              {f.required && <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400">مطلوب</span>}
                               <Badge tone={st.tone}>{st.label}</Badge>
                             </div>
                             <p className={cn("mt-1 text-xs", text ? "font-medium text-ink" : "text-ink-subtle")}>
@@ -549,6 +800,9 @@ export default function IntelligenceLabPage() {
                         </div>
                       );
                     })}
+                    {(detail.fieldDefs ?? []).filter((f) => f.enabled).length === 0 && (
+                      <p className="px-4 py-3 text-xs text-ink-muted">ما في حقول مفعّلة — فعّل الحقول من لوحة «البيانات المطلوب تجميعها».</p>
+                    )}
                   </div>
                 )}
               </GlassCard>

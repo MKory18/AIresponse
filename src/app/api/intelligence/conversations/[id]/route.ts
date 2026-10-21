@@ -3,13 +3,13 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { confirmIntelField, reanalyzeConversation } from "@/modules/intelligence/service";
 import { getLabConversation } from "@/modules/intelligence/queries";
-import { INTEL_FIELD_KEYS, type IntelFieldKey } from "@/modules/intelligence/fields";
 
 const bodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reanalyze") }),
   z.object({
     action: z.literal("confirm"),
-    key: z.string().refine((k) => (INTEL_FIELD_KEYS as readonly string[]).includes(k), "unknown field"),
+    // المفاتيح تُتحقق في الخدمة مقابل «البيانات المطلوب تجميعها» لهذه المساحة.
+    key: z.string().trim().min(1).max(40),
     value: z.string().max(300).nullable(),
   }),
 ]);
@@ -55,7 +55,7 @@ export const POST = createHandler(
     const result = await confirmIntelField(prisma as never, {
       workspaceId: auth!.workspaceId,
       conversationId: id,
-      key: body.key as IntelFieldKey,
+      key: body.key,
       value: body.value,
       userId: auth!.userId,
     });
