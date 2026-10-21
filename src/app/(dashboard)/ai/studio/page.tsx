@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { providerLabel, publicDetail, publicText } from "@/lib/provider-labels";
 
 type ProviderInfo = { id: string; configured: boolean; status: string; endpoint: string | null };
 type TaskInfo = { task: string; model: string; temperature: number; maxTokens: number; defaultModel: string; compatible: boolean; compatibilityReason: string };
@@ -54,14 +55,7 @@ const TASK_AR: Record<string, string> = {
   RETRIEVAL: "الاسترجاع",
 };
 
-// Display names for provider ids — internal values never show on the page.
-const PROVIDER_AR: Record<string, string> = {
-  mock: "وهمي (تجريبي)",
-  openai: "OpenAI",
-  openrouter: "OpenRouter",
-  internal: "داخلي",
-};
-const providerLabel = (id: string | null | undefined) => (id ? PROVIDER_AR[id] ?? id : "—");
+// أسماء العرض من `lib/provider-labels.ts` — القيم الداخلية (hermes…) ما بتظهر بالصفحة.
 
 export default function AIStudioPage() {
   const [data, setData] = useState<StatusData | null>(null);
@@ -155,7 +149,7 @@ export default function AIStudioPage() {
                   </Badge>
                 </div>
                 <p className="mt-1 truncate text-[11px] text-ink-muted" dir="ltr">{p.endpoint ?? "—"}</p>
-                {r && <p className="mt-1 text-[11px] text-ink-muted" dir="ltr">{r.detail} · {r.latencyMs}ms{r.model ? ` · ${r.model}` : ""}</p>}
+                {r && <p className="mt-1 text-[11px] text-ink-muted" dir="ltr">{publicDetail(r.detail)} · {r.latencyMs}ms{r.model ? ` · ${r.model}` : ""}</p>}
                 <div className="mt-2">
                   <Button size="sm" variant="ghost" loading={testing === p.id} disabled={testing === p.id} onClick={() => testProvider(p.id)}>
                     اختبار الاتصال
@@ -193,7 +187,7 @@ export default function AIStudioPage() {
         <h2 className="text-sm font-bold text-ink">الشخصيات والتعليمات والمعرفة</h2>
         <p className="mt-2 text-xs text-ink-muted">
           شخصيات: {data.knowledge.personas} · مستندات جاهزة: {data.knowledge.ready} · قيد الفهرسة: {data.knowledge.processing} · فاشلة: {data.knowledge.failed} · أسئلة شائعة: {data.knowledge.faqs}
-          {" "}· التضمينات: <span dir="ltr">{data.embedding.provider}/{data.embedding.model}/{data.embedding.dimensions}</span>
+          {" "}· التضمينات: <span dir="ltr">{publicText(data.embedding.provider)}/{data.embedding.model}/{data.embedding.dimensions}</span>
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Link href="/personas"><Button size="sm" variant="ghost">الشخصيات والإصدارات</Button></Link>

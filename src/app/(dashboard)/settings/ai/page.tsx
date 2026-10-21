@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { providerLabel, publicDetail } from "@/lib/provider-labels";
 
 type Settings = {
   provider: string;
@@ -30,15 +31,6 @@ type Settings = {
   autoRespond: boolean;
 };
 
-const PROVIDER_AR: Record<string, string> = {
-  mock: "وهمي (تجريبي)",
-  openai: "OpenAI",
-  openrouter: "OpenRouter",
-  internal: "داخلي",
-  hermes: "الوكيل الذكي (سيرفرك)",
-  custom: "مزوّد مخصص (أي API)",
-};
-const providerLabel = (p: string) => PROVIDER_AR[p] ?? p;
 const PROVIDER_OPTIONS = ["hermes", "custom", "openai", "openrouter", "internal", "mock"];
 
 const PROBE_DI: Record<string, string> = {
@@ -83,10 +75,10 @@ function LiveProbe({ provider }: { provider: string }) {
         <span className="text-xs font-medium">فشل الاتصال</span>
       )}
       {detail && (state === "ok" || state === "fail") && (
-        <span className={`text-xs ${tone}`} dir="ltr">{detail}</span>
+        <span className={`text-xs ${tone}`} dir="ltr">{publicDetail(detail)}</span>
       )}
       {state === "ok" && detail && (
-        <span className="sr-only">{PROBE_DI[detail] ?? detail}</span>
+        <span className="sr-only">{PROBE_DI[detail] ?? publicDetail(detail)}</span>
       )}
     </div>
   );
