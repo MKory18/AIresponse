@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SetupChecklist } from "@/components/setup-checklist";
 
 type Overview = {
   conversations: { total: number; active: number; resolved: number };
@@ -125,6 +126,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* خطوات البداية: محسوبة من بيانات المساحة الفعلية، وبتختفي بصمت لمن ما إله صلاحية. */}
+      <SetupChecklist />
 
       {error && (
         <GlassCard className="p-2">
