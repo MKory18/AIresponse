@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans_Arabic } from "next/font/google";
+import { IBM_Plex_Sans_Arabic, Lalezar, Reem_Kufi } from "next/font/google";
 import { ToastProvider } from "@/components/ui/toast";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 const arabic = IBM_Plex_Sans_Arabic({
@@ -8,6 +9,26 @@ const arabic = IBM_Plex_Sans_Arabic({
   weight: ["400", "500", "600", "700"],
   variable: "--font-arabic",
   display: "swap",
+});
+
+/**
+ * خطوط عناوين الثيمات: كوفي للإسلامي (Reem Kufi) وعريض للمدينة الليلية (Lalezar).
+ * `preload: false`: ما بتنزل إلا لما صفحة بتستعملها فعلًا — الثيم الافتراضي ما بيعرّف
+ * `--font-display` فما بيطلبها ولا بحمّل بايت زيادة.
+ */
+const reem = Reem_Kufi({
+  subsets: ["arabic"],
+  variable: "--font-reem",
+  display: "swap",
+  preload: false,
+});
+
+const lalezar = Lalezar({
+  subsets: ["arabic"],
+  weight: "400",
+  variable: "--font-lalezar",
+  display: "swap",
+  preload: false,
 });
 
 /**
@@ -56,13 +77,14 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-// Applies the saved theme before first paint to avoid a flash.
-const themeScript = `(function(){try{var t=localStorage.getItem("theme");var d=t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d)document.documentElement.classList.add("dark");}catch(e){}})();`;
+// Applies the saved theme (data-theme) and scheme (.dark) before first paint to
+// avoid a flash — built from the same THEMES table as `resolveTheme`.
+const themeScript = THEME_INIT_SCRIPT;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <body className={arabic.variable}>
+      <body className={`${arabic.variable} ${reem.variable} ${lalezar.variable}`}>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         {children}
       </body>

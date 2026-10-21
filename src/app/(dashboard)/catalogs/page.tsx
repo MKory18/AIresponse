@@ -170,7 +170,11 @@ export default function CatalogsPage() {
       )}
 
       {!loading && !failed && rows !== null && rows.length === 0 && (
-        <EmptyState title="لا كتالوجات بعد" description="أنشئ أول كتالوج واربطه بصفحة ليجيب الذكاء منه." />
+        <EmptyState
+          title="لا كتالوجات بعد"
+          description="أنشئ أول كتالوج واربطه بصفحة ليجيب الذكاء منه."
+          action={<Button size="sm" onClick={() => setCreateOpen(true)}>كتالوج جديد</Button>}
+        />
       )}
 
       {!loading && !failed && rows !== null && rows.length > 0 && (

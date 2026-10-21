@@ -9,7 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GlassCard, PageHeader } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
@@ -620,7 +620,11 @@ export default function IntelligenceLabPage() {
               </div>
             )}
             {!listLoading && rows?.length === 0 && (
-              <EmptyState title="لا محادثات بعد" description="أول ما توصل رسالة على صفحة بوضع التجميع، بتظهر هون." />
+              <EmptyState
+                title="لا محادثات بعد"
+                description="أول ما توصل رسالة على صفحة بوضع التجميع، بتظهر هون."
+                action={<EmptyNext href="/channels">اربط صفحة</EmptyNext>}
+              />
             )}
             {rows?.map((r) => (
               <button

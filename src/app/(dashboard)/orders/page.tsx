@@ -7,7 +7,7 @@ import { formatNumber, label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
@@ -232,6 +232,7 @@ export default function OrdersPage() {
             illustration="/brand/empty-orders.webp"
             title={t.orders.emptyTitle}
             description={t.orders.emptyDesc}
+            action={<EmptyNext href="/conversations">افتح الوارد</EmptyNext>}
           />
         </GlassCard>
       )}
