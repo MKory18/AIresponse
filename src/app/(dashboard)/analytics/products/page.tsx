@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Package, Trophy } from "lucide-react";
 import { formatNumber } from "@/lib/i18n";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/input";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
@@ -92,7 +92,12 @@ export default function ProductAnalyticsPage() {
       )}
       {!loading && sorted.length === 0 && (
         <GlassCard>
-          <EmptyState icon={<Package size={28} strokeWidth={1.5} />} title="لا توجد بيانات" description="ستظهر تحليلات المنتجات بعد تسجيل أول الطلبات." />
+          <EmptyState
+            icon={<Package size={28} strokeWidth={1.5} />}
+            title="لا توجد بيانات"
+            description="ستظهر تحليلات المنتجات بعد تسجيل أول الطلبات."
+            action={<EmptyNext href="/orders">شوف الطلبات</EmptyNext>}
+          />
         </GlassCard>
       )}
     </div>

@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 
 // `next/font/google` بيحمّل خطوط وقت البناء وما بيشتغل تحت vitest —
 // والاختبار بدّه وسوم الصفحة بس، مش الخط.
+// ⚠️ كل خط بيستعمله `layout.tsx` لازم ينضاف هون (ثيم جديد بخطه = سطر جديد).
 vi.mock("next/font/google", () => ({
   IBM_Plex_Sans_Arabic: () => ({ variable: "--font-arabic", className: "" }),
+  Reem_Kufi: () => ({ variable: "--font-reem", className: "" }),
+  Lalezar: () => ({ variable: "--font-lalezar", className: "" }),
 }));
 
 import manifest from "@/app/manifest";

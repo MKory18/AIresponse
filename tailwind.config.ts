@@ -9,24 +9,45 @@ const config: Config = {
         sans: ["var(--font-arabic)", "Segoe UI", "Segoe UI Variable", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
-        // Fluent 2 brand blue (Microsoft design language).
+        // Fluent 2 brand blue (Microsoft design language) — **بمتغيّرات CSS**.
+        //
+        // ⚠️ قبل: `primary` و`brand-*` كانت ألوان hex ثابتة — فأي ثيم ما كان
+        // قادر يبدّلها، وبالوضع الداكن `bg-primary-soft` ضل فاتح (أبيض مزرق):
+        // بند القائمة النشط طلع مستطيل أبيض بنص باهت.
+        // 🔧 هلأ بتقرا `--primary*` و`--brand-N` من globals.css. قيم الثيم
+        // الافتراضي بتطابق الـhex القديم بالحرف، فما بيتغيّر بكسل بالفاتح.
         primary: {
-          DEFAULT: "#0f6cbd",
-          hover: "#115ea3",
-          soft: "#ebf3fc",
+          DEFAULT: "rgb(var(--primary) / <alpha-value>)",
+          hover: "rgb(var(--primary-hover) / <alpha-value>)",
+          soft: "rgb(var(--primary-soft) / <alpha-value>)",
+        },
+        // لون التمييز الزخرفي (ذهبي/سماوي حسب الثيم) — للخطوط والزخارف، مش للنص.
+        accent: {
+          DEFAULT: "rgb(var(--accent) / <alpha-value>)",
+          // نسخة بتنقرا كنص (تباين ≥ 4.5:1 على السطح).
+          fg: "rgb(var(--accent-fg) / <alpha-value>)",
+        },
+        // لوحة الدخول الجانبية (كانت لون ثابت `bg-[…]` مش قابل للثيم).
+        showcase: "rgb(var(--showcase) / <alpha-value>)",
+        // علامة Zaki: تدرّج + شرارة (كانت sky-400/blue-800/sky-200 ثابتة).
+        logo: {
+          from: "rgb(var(--logo-from) / <alpha-value>)",
+          via: "rgb(var(--logo-via) / <alpha-value>)",
+          to: "rgb(var(--logo-to) / <alpha-value>)",
+          spark: "rgb(var(--logo-spark) / <alpha-value>)",
         },
         brand: {
-          50: "#ebf3fc",
-          100: "#cfe4fa",
-          200: "#b4d6f7",
-          300: "#77b7f2",
-          400: "#3d95e8",
-          500: "#0f6cbd",
-          600: "#115ea3",
-          700: "#0f548c",
-          800: "#0c3b5e",
-          900: "#082e4a",
-          950: "#051e2f",
+          50: "rgb(var(--brand-50) / <alpha-value>)",
+          100: "rgb(var(--brand-100) / <alpha-value>)",
+          200: "rgb(var(--brand-200) / <alpha-value>)",
+          300: "rgb(var(--brand-300) / <alpha-value>)",
+          400: "rgb(var(--brand-400) / <alpha-value>)",
+          500: "rgb(var(--brand-500) / <alpha-value>)",
+          600: "rgb(var(--brand-600) / <alpha-value>)",
+          700: "rgb(var(--brand-700) / <alpha-value>)",
+          800: "rgb(var(--brand-800) / <alpha-value>)",
+          900: "rgb(var(--brand-900) / <alpha-value>)",
+          950: "rgb(var(--brand-950) / <alpha-value>)",
         },
         surface: {
           1: "rgb(var(--surface-1) / <alpha-value>)",
@@ -41,11 +62,21 @@ const config: Config = {
         },
         line: "rgb(var(--line) / <alpha-value>)",
       },
+      // `text-primary` = لون النص/الأيقونة على السطح (فاتح بالداكن)، مش لون
+      // تعبئة الزر. `bg-primary` و`border-primary` بيضلّوا على `--primary`.
+      textColor: {
+        primary: {
+          DEFAULT: "rgb(var(--primary-fg) / <alpha-value>)",
+          hover: "rgb(var(--primary-hover) / <alpha-value>)",
+          soft: "rgb(var(--primary-soft) / <alpha-value>)",
+        },
+      },
       boxShadow: {
         xs: "0 1px 2px rgb(0 0 0 / 0.05)",
-        card: "0 1px 2px rgb(0 0 0 / 0.05), 0 0 2px rgb(0 0 0 / 0.06)",
-        pop: "0 8px 16px rgb(0 0 0 / 0.14)",
-        glass: "0 1px 2px rgb(0 0 0 / 0.05), 0 0 2px rgb(0 0 0 / 0.06)",
+        // الثيمات بتبدّل الظل (توهّج نيون بالمدينة الليلية) — الافتراضي نفس القديم.
+        card: "var(--shadow-card)",
+        pop: "var(--shadow-pop)",
+        glass: "var(--shadow-card)",
         glow: "0 0 0 1px rgb(15 108 189 / 0.25)",
       },
       // Fluent radii: controls 4px · surfaces 8px · dialogs 12px.
