@@ -67,13 +67,12 @@ describe("النبذ صحيحة فعلًا", () => {
     expect(can("SALES_AGENT", "products.wholesale")).toBe(false);
   });
 
-  it("موظف دعم: يرد ويعدّل العملاء ويشوف الطلبات بدون كتابة", () => {
-    expect(can("SUPPORT_AGENT", "conversations.reply")).toBe(true);
-    expect(can("SUPPORT_AGENT", "customers.write")).toBe(true);
-    expect(can("SUPPORT_AGENT", "orders.read")).toBe(true);
+  it("موظف دعم: يرد ويعدّل العملاء ويستلم التحويلات ويشوف الطلبات بدون كتابة", () => {
+    for (const p of ["channels.send_human", "customers.write", "handoffs.claim", "handoffs.resolve", "orders.read"]) {
+      expect(can("SUPPORT_AGENT", p), p).toBe(true);
+    }
     expect(can("SUPPORT_AGENT", "orders.write")).toBe(false);
-    // ⚠️ قرار مفتوح مع المالك: موظف الدعم ما بيستلم التحويلات اليوم. لو تغيّر، عدّل هالسطر والجدول بيلحق لحاله.
-    expect(can("SUPPORT_AGENT", "handoffs.claim")).toBe(false);
+    expect(can("SUPPORT_AGENT", "orders.discount")).toBe(false);
   });
 
   it("مشاهد: قراءة بس", () => {
