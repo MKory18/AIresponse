@@ -153,7 +153,10 @@ export async function runResponse(
     extractionUser,
     `النية: ${extraction.intent} (ثقة ${extraction.confidence})`,
     `الخطة: ${JSON.stringify(plan)}`,
-    responseInstruction(persona),
+    responseInstruction(persona, {
+      // The attachment is only possible when a product with media resolved.
+      mediaRequested: Boolean(plan.sendMedia && context.product?.id),
+    }),
   ].join("\n\n");
 
   let responseText = "";

@@ -25,6 +25,15 @@ describe("wantsMedia — dialect phrases", () => {
     "ممكن تبعتلي صورة المنتج؟",
     "وَرّيني شكله", // tashkeel is stripped before matching
     "الصوره", // ال prefix does not hide the word
+    "موجود منظره؟",
+    "بدي اشوفه",
+    "ورني الصورة",
+    // English and mixed requests are common on Facebook pages.
+    "send me a photo",
+    "can I see a picture?",
+    "send pics please",
+    "what does it look like",
+    "show me the image",
   ];
   it.each(imageCases)("image: %s", (text) => {
     expect(wantsMedia(text)).toBe("image");
@@ -42,6 +51,8 @@ describe("wantsMedia — dialect phrases", () => {
     "صورني", // suffix glued to the word is not a request
     "التوصيل خلال يومين",
     "شكرا",
+    "send me the price",
+    "كم سعر الصندوق؟",
   ];
   it.each(negatives)("nothing: %s", (text) => {
     expect(wantsMedia(text)).toBeNull();
