@@ -699,7 +699,7 @@ export default function Inbox() {
               <div ref={bottomRef} />
             </div>
 
-            <footer className="border-t border-line/60 bg-surface-2/60 p-3 backdrop-blur-xl dark:bg-white/[0.02]">
+            <footer className="border-t border-line bg-surface-2 p-3">
               <div className="mb-1.5 flex gap-1" role="tablist" aria-label="نوع الرسالة">
                 <button
                   role="tab"

@@ -431,6 +431,21 @@ describe("AI SPEED — minimum blocking work for normal messages", () => {
     expect(["RESPONDED", "CLARIFIED"]).toContain(res.status);
   });
 
+  it("19. a pure media request skips the extraction LLM call", async () => {
+    const ch = await seedPage();
+    fbSuccess();
+    const structuredCalls = { count: 0 };
+    mockAI({ structuredCalls });
+    const r = await seedInbound("psid-fast-3", "ورجيني الصورة", ch.id, "fast3");
+    const res = await processAIMessage(
+      db as Db,
+      { conversationId: r.conversationId, messageId: r.messageId, workspaceId: WS_A },
+      { vectorStore: stubVector }
+    );
+    expect(structuredCalls.count).toBe(0);
+    expect(res.status).toBe("RESPONDED");
+  });
+
   it("18. provider requests are time-bounded (no hung worker)", async () => {
     vi.stubEnv("AI_REQUEST_TIMEOUT_MS", "50");
     const hanging = new OpenAICompatibleProvider({

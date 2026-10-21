@@ -93,6 +93,7 @@ model Workspace {
   productCompliances      ProductCompliance[]
   catalogs                Catalog[]
   catalogPageAssignments  CatalogPageAssignment[]
+  collectionFields        CollectionFieldSetting[]
 
   @@index([slug])
 }
@@ -833,6 +834,34 @@ model CustomerIntelRun {
 
   @@index([workspaceId, queuedAt])
   @@index([conversationId, queuedAt])
+}
+
+/// البيانات المطلوب تجميعها لكل مساحة — المالك يحدّد الحقول المفعّلة والمطلوبة.
+/// غياب أي صف = الإعداد الافتراضي (كل حقول الكتالوج).
+enum IntelFieldKind {
+  TEXT
+  PHONE
+  NUMBER
+  LIST
+}
+
+model CollectionFieldSetting {
+  id          String          @id @default(cuid())
+  workspaceId String
+  key         String
+  label       String
+  kind        IntelFieldKind  @default(TEXT)
+  required    Boolean         @default(false)
+  enabled     Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  isCustom    Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
 }
 
 model Faq {
