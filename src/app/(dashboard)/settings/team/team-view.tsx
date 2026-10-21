@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Plus, Trash2, UserRound } from "lucide-react";
+import { ChevronDown, KeyRound, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -10,6 +10,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { ROLE_BLURB, ROLE_OPTIONS as ROLES, RoleBlurbs, RoleMatrix } from "@/components/role-matrix";
 
 type Member = {
   id: string;
@@ -19,15 +20,6 @@ type Member = {
   expiresAt: string | null;
   user: { id: string; email: string | null; name: string | null };
 };
-
-const ROLES: Array<{ value: string; label: string }> = [
-  { value: "OWNER", label: "مالك" },
-  { value: "ADMIN", label: "مدير عام" },
-  { value: "MANAGER", label: "مشرف" },
-  { value: "SALES_AGENT", label: "موظف مبيعات" },
-  { value: "SUPPORT_AGENT", label: "موظف دعم" },
-  { value: "VIEWER", label: "مشاهد" },
-];
 
 const STATUS_AR: Record<string, string> = {
   ACTIVE: "نشط",
@@ -62,6 +54,11 @@ export default function TeamView() {
   const [suspendTarget, setSuspendTarget] = useState<Member | null>(null);
   // وضع فتح الحساب: دعوة حساب مسجل، أو إنشاء حساب جديد مباشرة (اسم + بريد + كلمة مرور)
   const [inviteMode, setInviteMode] = useState<"invite" | "create">("invite");
+  const [inviteRole, setInviteRole] = useState("SALES_AGENT");
+  // كل ما بتتفتح الدعوة بيرجع الدور الافتراضي — المنتقي والسطر الشارح لازم يتطابقوا.
+  useEffect(() => {
+    if (showInvite) setInviteRole("SALES_AGENT");
+  }, [showInvite]);
   // إعادة تعيين كلمة مرور عضو من الإدارة
   const [pwTarget, setPwTarget] = useState<Member | null>(null);
 
@@ -256,6 +253,20 @@ export default function TeamView() {
       </GlassCard>
 
       <GlassCard className="mt-3 p-4">
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2">
+              <ShieldCheck size={15} /> شو بيقدر كل دور؟
+            </span>
+            <ChevronDown size={16} className="shrink-0 transition-transform group-open:rotate-180" />
+          </summary>
+          <p className="mt-2 text-xs text-ink-muted">للقراءة بس — مأخوذ من صلاحيات النظام الفعلية. اختيار الدور بيتم من القوائم فوق.</p>
+          <RoleBlurbs className="mt-3" />
+          <RoleMatrix className="mt-3" />
+        </details>
+      </GlassCard>
+
+      <GlassCard className="mt-3 p-4">
         <h2 className="mb-2 text-sm font-bold text-ink">اسم مساحة العمل</h2>
         <form onSubmit={renameWorkspace} className="flex flex-col gap-2 sm:flex-row">
           <Field label="الاسم الجديد">
@@ -301,8 +312,8 @@ export default function TeamView() {
               <Input name="password" type="text" required minLength={8} maxLength={128} dir="ltr" autoComplete="off" className="num" />
             </Field>
           ) : null}
-          <Field label="الدور">
-            <Select name="role" defaultValue="SALES_AGENT">
+          <Field label="الدور" hint={ROLE_BLURB[inviteRole]}>
+            <Select name="role" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
               {ROLES.map((r) => (
                 <option key={r.value} value={r.value}>
                   {r.label}

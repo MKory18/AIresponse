@@ -125,7 +125,15 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     // P9 — قراءة الحملات فقط؛ الإنشاء/الاعتماد لصلاحيات أعلى.
     "campaigns.read",
   ],
-  SUPPORT_AGENT: SALES_SUPPORT.filter((p) => p !== "orders.write"),
+  // قرار المالك 2026-10-21 («الدعم امبلا بستلم»): بيستلم التحويلات وبيرد على الزبون
+  // (`channels.send_human` هو الي بيفتح مسار الرسالة). الباقي مثل البيعي بدون orders.write.
+  SUPPORT_AGENT: [
+    ...SALES_SUPPORT.filter((p) => p !== "orders.write"),
+    "channels.send_human",
+    "handoffs.read",
+    "handoffs.claim",
+    "handoffs.resolve",
+  ],
   VIEWER: [
     "customers.read",
     "conversations.read",

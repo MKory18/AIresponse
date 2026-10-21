@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input, Select } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { providerLabel, publicDetail } from "@/lib/provider-labels";
@@ -323,8 +324,8 @@ export default function AISettingsPage() {
                     : "ينخزن مشفّراً وما بينعرض بعد الحفظ."
                 }
               >
-                <Input
-                  type="password"
+                <PasswordInput
+                  kind="secret"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={form.hasCustomApiKey ? "•••• متخزن — فارغة = بلا تغيير" : "sk-…"}

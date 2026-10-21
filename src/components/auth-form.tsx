@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 import { BrandLogo } from "./brand-logo";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { PasswordInput } from "./ui/password-input";
 
 const HIGHLIGHTS = [
   { icon: MessagesSquare, title: "رد آلي ذكي", desc: "الوكيل الذكي يرد على عملائك لحظيًا على مدار الساعة" },
@@ -133,7 +134,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                 </>
               )}
               <Input name="email" type="email" required placeholder="البريد الإلكتروني" dir="ltr" autoComplete="email" className="h-10" aria-label="البريد الإلكتروني" />
-              <Input name="password" type="password" required placeholder="كلمة المرور" dir="ltr" autoComplete={mode === "login" ? "current-password" : "new-password"} className="h-10" minLength={8} aria-label="كلمة المرور" />
+              <PasswordInput name="password" required placeholder="كلمة المرور" dir="ltr" autoComplete={mode === "login" ? "current-password" : "new-password"} className="h-10" minLength={8} aria-label="كلمة المرور" />
               {error && (
                 <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950 dark:text-red-400" role="alert">
                   {error}

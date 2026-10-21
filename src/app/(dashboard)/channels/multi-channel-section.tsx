@@ -5,6 +5,7 @@ import { MessageCircle, PlugZap, Send, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { Field, Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard } from "@/components/ui/card";
 
@@ -162,18 +163,18 @@ export function MultiChannelSection() {
                     {meta.fields === "ig" && (
                       <>
                         <Field label="Instagram ID"><Input name="igId" required dir="ltr" placeholder="123456789" /></Field>
-                        <Field label="Page Access Token"><Input name="token" required dir="ltr" type="password" placeholder="EAA…" /></Field>
+                        <Field label="Page Access Token"><PasswordInput kind="secret" name="token" required dir="ltr" placeholder="EAA…" /></Field>
                       </>
                     )}
                     {meta.fields === "bot" && (
                       <Field label="Bot Token (من BotFather)">
-                        <Input name="botToken" required dir="ltr" type="password" placeholder="123456:ABC-DEF…" />
+                        <PasswordInput kind="secret" name="botToken" required dir="ltr" placeholder="123456:ABC-DEF…" />
                       </Field>
                     )}
                     {meta.fields === "wa" && (
                       <>
                         <Field label="Phone Number ID"><Input name="phoneNumberId" required dir="ltr" placeholder="123456789012345" /></Field>
-                        <Field label="System User Token"><Input name="token" required dir="ltr" type="password" placeholder="EAA…" /></Field>
+                        <Field label="System User Token"><PasswordInput kind="secret" name="token" required dir="ltr" placeholder="EAA…" /></Field>
                       </>
                     )}
                     <div className="flex items-end">

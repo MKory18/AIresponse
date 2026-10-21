@@ -5,6 +5,7 @@ import { Check, KeyRound, Palette, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { ThemePicker } from "@/components/theme-picker";
@@ -154,7 +155,7 @@ export default function AccountPage() {
                 <Input name="email" type="email" defaultValue={me.email} required dir="ltr" maxLength={255} className="num" />
               </Field>
               <Field label="كلمة المرور الحالية">
-                <Input name="currentPassword" type="password" required dir="ltr" autoComplete="current-password" className="num" />
+                <PasswordInput name="currentPassword" required dir="ltr" autoComplete="current-password" className="num" />
               </Field>
               <div className="sm:col-span-2">
                 <Button type="submit" size="sm" loading={emailBusy}>تغيير البريد</Button>
@@ -170,10 +171,10 @@ export default function AccountPage() {
             <form onSubmit={savePassword} className="space-y-3">
               <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2">
                 <Field label="كلمة المرور الحالية">
-                  <Input name="currentPassword" type="password" required dir="ltr" autoComplete="current-password" className="num" />
+                  <PasswordInput name="currentPassword" required dir="ltr" autoComplete="current-password" className="num" />
                 </Field>
                 <Field label="كلمة المرور الجديدة" hint="8 أحرف على الأقل.">
-                  <Input name="newPassword" type="password" required minLength={8} maxLength={128} dir="ltr" autoComplete="new-password" className="num" />
+                  <PasswordInput name="newPassword" required minLength={8} maxLength={128} dir="ltr" autoComplete="new-password" className="num" />
                 </Field>
               </div>
               <Button type="submit" size="sm" loading={pwBusy}>تغيير كلمة المرور</Button>
