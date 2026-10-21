@@ -366,6 +366,21 @@ describe("أصول وزخارف الثيمات", () => {
     expect(paletteFor("default", false)["font-display"]).toBeUndefined();
   });
 
+  it("⚠️ `--font-display` معرّف على `body` مش على بلوكات الثيم: متغيّرات next/font على body وما بتنشاف من html", () => {
+    const onBody = (key: string, fontVar: string) =>
+      new RegExp(`\\[data-theme="${key}"\\] body\\s*\\{[^}]*--font-display:\\s*var\\(${fontVar}\\)`).test(css);
+    expect(onBody("islamic", "--font-reem")).toBe(true);
+    expect(onBody("night", "--font-lalezar")).toBe(true);
+    for (const t of THEMES) {
+      for (const dark of t.forcesDark ? [true] : [false, true]) {
+        expect(paletteFor(t.key, dark)["font-display"], `${t.key}/${dark}`).toBeUndefined();
+      }
+    }
+    expect(read("src/app/layout.tsx")).toMatch(
+      /<body className=\{`\$\{arabic\.variable\} \$\{reem\.variable\} \$\{lalezar\.variable\}`\}>/
+    );
+  });
+
   // الرسمات الي بتغطّي لوحة الدخول وبطاقة الترحيب: (الملف ← نسبة العرض للارتفاع)
   const ART: [string, number][] = [["islamic-login", 3 / 4], ["islamic-hero", 4], ["night-login", 3 / 4], ["night-hero", 4]];
 

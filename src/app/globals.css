@@ -114,6 +114,17 @@ h1,
   font-family: var(--font-display, inherit);
 }
 
+/* ⚠️ `--font-display` لازم يتعرّف على `body` مش على `html` (بلوكات الثيم): متغيّرات الخطوط
+   (`--font-reem` · `--font-lalezar` · `--font-arabic`) بتجي من next/font كصنف على `body` — لو
+   انكتب على `html` بيصير غير صالح وقت الحساب وبيرجع الخط العادي بصمت (كان هيك: العناوين ما
+   اتغيّرت أبدًا بالثيمين). `tests/theme-system.test.ts` بيفرض المكان. */
+[data-theme="islamic"] body {
+  --font-display: var(--font-reem), var(--font-arabic), "Segoe UI", sans-serif;
+}
+[data-theme="night"] body {
+  --font-display: var(--font-lalezar), var(--font-arabic), "Segoe UI", sans-serif;
+}
+
 /* ═══════════════════════════ ثيم «إسلامي» ═══════════════════════════
    عاجي وزمرّدي بالفاتح · كحلي وذهبي بالداكن. الذهبي (--accent) للزخارف
    والخطوط بس؛ كل نص بيقرأ من --accent-fg / --primary-fg (تباين مفحوص
@@ -172,7 +183,6 @@ h1,
   --logo-bubble: 255 248 231;
   --ornament: 15 81 50;
   --ornament-alpha: 0.055;
-  --font-display: var(--font-reem), var(--font-arabic), "Segoe UI", sans-serif;
 }
 
 [data-theme="islamic"].dark {
@@ -227,7 +237,6 @@ h1,
   --logo-bubble: 255 248 231;
   --ornament: 217 184 108;
   --ornament-alpha: 0.075;
-  --font-display: var(--font-reem), var(--font-arabic), "Segoe UI", sans-serif;
 }
 
 /* القائمة الجانبية وبطاقة الترحيب: زمرّد غامق بنص عاجي وذهبي للمختار، بالمظهرين.
@@ -430,7 +439,6 @@ h1,
   --logo-bubble: 26 11 46;
   --ornament: 255 79 154;
   --ornament-alpha: 0.07;
-  --font-display: var(--font-lalezar), var(--font-arabic), "Segoe UI", sans-serif;
 }
 
 /* القائمة الجانبية أغمق من الصفحة — عمق بلا ظلال تقيلة. */
