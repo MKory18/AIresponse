@@ -168,7 +168,7 @@ export default function FeedbackPage() {
       {!loading && (
         <div className="space-y-2.5">
           {items.map((f) => (
-            <GlassCard key={f.id} className="flex flex-col gap-3 p-4 transition-all hover:shadow-glass md:flex-row md:items-start">
+            <GlassCard key={f.id} className="flex flex-col gap-3 p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700 md:flex-row md:items-start">
               {f.media?.type === "IMAGE" && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={f.media.url} alt="" className="h-20 w-20 shrink-0 rounded-xl object-cover" loading="lazy" />

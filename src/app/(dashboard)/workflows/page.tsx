@@ -255,7 +255,7 @@ export default function WorkflowsPage() {
       {!loading && (
         <div className="space-y-2.5">
           {items.map((wf) => (
-            <GlassCard key={wf.id} className="p-4 transition-all hover:shadow-glass">
+            <GlassCard key={wf.id} className="p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <button type="button" className="flex min-w-0 items-start gap-2.5 text-start" onClick={() => openDetail(wf.id)}>
                   <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${wf.isEnabled ? "bg-primary-soft text-primary" : "bg-surface-3 text-ink-subtle"}`}>

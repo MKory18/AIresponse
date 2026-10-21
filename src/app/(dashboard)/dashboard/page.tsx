@@ -57,7 +57,7 @@ function MiniStat({ label, value, tone }: { label: string; value: string | numbe
     red: "text-red-600 dark:text-red-300",
   };
   return (
-    <div className="glass-subtle rounded-xl px-3.5 py-3 transition-all duration-200 hover:-translate-y-0.5">
+    <div className="glass-subtle rounded-xl px-3.5 py-3 transition-colors">
       <p className="num text-lg font-bold leading-6 text-ink">{value}</p>
       <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-ink-muted">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${(tones[tone ?? "brand"])}`} aria-hidden />
@@ -99,26 +99,18 @@ export default function DashboardPage() {
   return (
     <div className="page-wrap">
       {/* Hero */}
-      <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 ring-1 ring-inset ring-brand-500/15 sm:px-6">
+      <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 sm:px-6">
         <div
           aria-hidden
-          className="absolute inset-x-0 top-0 h-1 rounded-t-3xl bg-primary/70"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -start-20 -top-24 h-64 w-64 rounded-full bg-brand-500/15 blur-3xl dark:bg-brand-500/20"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-28 end-10 h-56 w-56 rounded-full bg-sky-400/15 blur-3xl"
+          className="absolute inset-y-0 start-0 w-1 bg-primary"
         />
         <div className="relative flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-bold text-brand-700 dark:text-brand-300">
+            <p className="inline-flex items-center gap-1.5 rounded-[4px] bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-950 dark:text-brand-300">
               <Sparkles size={12} />
               {t.app.tagline}
             </p>
-            <h1 className="mt-2 text-xl font-bold leading-8 text-ink">{t.dashboard.greeting}</h1>
+            <h1 className="mt-2 text-xl font-semibold leading-8 text-ink">{t.dashboard.greeting}</h1>
             <p className="mt-1 text-[13px] text-ink-muted">{t.dashboard.welcomeBack}</p>
           </div>
           <div className="flex gap-2">

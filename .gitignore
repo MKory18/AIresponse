@@ -12,3 +12,6 @@ coverage
 .tmp-prod-safety-*
 .tmp-*
 .playwright-mcp/
+
+# لقطات فحص محلية (لا تدخل المستودع)
+fluent-*.png
