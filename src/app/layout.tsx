@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import { ToastProvider } from "@/components/ui/toast";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 const arabic = IBM_Plex_Sans_Arabic({
@@ -56,8 +57,9 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-// Applies the saved theme before first paint to avoid a flash.
-const themeScript = `(function(){try{var t=localStorage.getItem("theme");var d=t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d)document.documentElement.classList.add("dark");}catch(e){}})();`;
+// Applies the saved theme (data-theme) and scheme (.dark) before first paint to
+// avoid a flash — built from the same THEMES table as `resolveTheme`.
+const themeScript = THEME_INIT_SCRIPT;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -126,14 +126,16 @@ export function SetupChecklistView({
                 <span className="flex items-center gap-2">
                   <span
                     aria-hidden
+                    // ⚠️ بلا صنف `num` هون: `.num` = display:inline-block وبيطغى على
+                    // flex فالرقم ما بيتمركز. الرقم بيلتفّ بـ<span class="num"> جوّا.
                     className={cn(
-                      "num flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
                       step.done && "bg-emerald-600 text-white",
                       isNext && "bg-primary text-white",
                       !step.done && !isNext && "bg-surface-3 text-ink-muted"
                     )}
                   >
-                    {step.done ? <Check size={13} strokeWidth={3} /> : formatNumber(i + 1)}
+                    {step.done ? <Check size={13} strokeWidth={3} /> : <span className="num leading-none">{formatNumber(i + 1)}</span>}
                   </span>
                   <span className={cn("min-w-0 flex-1 truncate text-[13px] font-bold", step.done ? "text-ink-muted" : "text-ink")}>
                     {step.label}

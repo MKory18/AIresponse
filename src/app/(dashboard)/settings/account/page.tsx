@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, KeyRound, UserRound } from "lucide-react";
+import { Check, KeyRound, Palette, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { ThemePicker } from "@/components/theme-picker";
 
 type Me = { id: string; email: string; name: string; isSuperAdmin: boolean };
 
@@ -121,6 +122,13 @@ export default function AccountPage() {
   return (
     <div className="page-wrap">
       <PageHeader title="حسابي" description="اسمك، بريدك، وكلمة مرورك. تغيير البريد أو كلمة المرور يتطلب كلمة المرور الحالية." />
+      {/* المظهر مستقل عن بيانات الحساب — بيشتغل حتى لو التحميل فشل. */}
+      <GlassCard className="p-4">
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-ink">
+          <Palette size={15} /> المظهر
+        </h2>
+        <ThemePicker />
+      </GlassCard>
       {loadError && <ErrorState description={loadError} onRetry={() => void load()} />}
       {loading ? (
         <div className="space-y-3">
