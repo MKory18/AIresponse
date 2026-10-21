@@ -56,6 +56,13 @@
   --brand-800: 12 59 94;
   --brand-900: 8 46 74;
   --brand-950: 5 30 47;
+  /* علامة Zaki (كانت sky-400 / blue-800 / sky-200 ثابتة بالمكوّن) */
+  --logo-from: 56 189 248;
+  --logo-via: 15 108 189;
+  --logo-to: 30 64 175;
+  --logo-spark: 186 230 253;
+  --logo-glow: 37 99 235;
+  --logo-bubble: 255 255 255;
 }
 
 .dark {
@@ -99,6 +106,272 @@
 
 html {
   font-feature-settings: "ss01", "ss02";
+}
+
+/* خط العناوين: الثيمات بتعرّف --font-display؛ بدونه بيورّث الخط العادي (ولا تغيير). */
+h1,
+.font-display {
+  font-family: var(--font-display, inherit);
+}
+
+/* ═══════════════════════════ ثيم «إسلامي» ═══════════════════════════
+   عاجي وزمرّدي بالفاتح · كحلي وذهبي بالداكن. الذهبي (--accent) للزخارف
+   والخطوط بس؛ كل نص بيقرأ من --accent-fg / --primary-fg (تباين مفحوص
+   بـ tests/theme-system.test.ts).
+   ⚠️ كتلتين منفصلتين (:not(.dark) و.dark) — كتلة وحدة كانت رح تطغى على .dark
+   لأنها أبعد بالترتيب. */
+[data-theme="islamic"]:not(.dark) {
+  color-scheme: light;
+  --background: 246 240 225;
+  --surface: 255 252 245;
+  --surface-glass: 255 252 245;
+  --surface-elevated: 255 252 245;
+  --surface-muted: 250 246 236;
+  --border: 222 211 181;
+  --border-glass: 222 211 181;
+  --text: 28 40 34;
+  --text-muted: 66 82 72;
+  --text-subtle: 92 106 97;
+  --brand: 15 81 50;
+  --brand-strong: 11 61 38;
+  --primary: 15 81 50;
+  --primary-hover: 11 61 38;
+  --primary-soft: 224 238 228;
+  --primary-fg: 15 81 50;
+  --success: 16 110 60;
+  --warning: 133 77 0;
+  --danger: 176 32 32;
+  --info: 0 95 184;
+  --line: 222 211 181;
+  --surface-1: 246 240 225;
+  --surface-2: 255 252 245;
+  --surface-3: 238 231 213;
+  --surface-hover: 241 234 216;
+  --accent: 176 132 38;
+  --accent-fg: 122 86 12;
+  --showcase: 11 61 46;
+  --shadow-card: 0 1px 2px rgb(60 45 10 / 0.08), 0 0 2px rgb(60 45 10 / 0.08);
+  --shadow-pop: 0 8px 18px rgb(60 45 10 / 0.18);
+  --glass-shadow: 0 1px 2px rgb(60 45 10 / 0.08), 0 0 2px rgb(60 45 10 / 0.08);
+  --brand-50: 236 245 239;
+  --brand-100: 211 232 219;
+  --brand-200: 168 209 183;
+  --brand-300: 117 179 141;
+  --brand-400: 63 143 102;
+  --brand-500: 26 107 70;
+  --brand-600: 15 81 50;
+  --brand-700: 12 65 41;
+  --brand-800: 10 51 34;
+  --brand-900: 7 38 26;
+  --brand-950: 4 26 17;
+  --logo-from: 232 208 150;
+  --logo-via: 26 107 70;
+  --logo-to: 11 61 46;
+  --logo-spark: 245 230 190;
+  --logo-glow: 15 81 50;
+  --logo-bubble: 255 248 231;
+  --ornament: 15 81 50;
+  --ornament-alpha: 0.055;
+  --font-display: var(--font-reem), var(--font-arabic), "Segoe UI", sans-serif;
+}
+
+[data-theme="islamic"].dark {
+  color-scheme: dark;
+  --background: 11 22 38;
+  --surface: 17 33 58;
+  --surface-glass: 17 33 58;
+  --surface-elevated: 24 44 75;
+  --surface-muted: 14 27 47;
+  --border: 44 66 100;
+  --border-glass: 44 66 100;
+  --text: 243 236 217;
+  --text-muted: 201 194 174;
+  --text-subtle: 160 156 140;
+  --brand: 217 184 108;
+  --brand-strong: 232 208 150;
+  --primary: 22 121 90;
+  --primary-hover: 17 98 72;
+  --primary-soft: 16 54 56;
+  --primary-fg: 217 184 108;
+  --success: 84 173 84;
+  --warning: 240 180 60;
+  --danger: 242 128 128;
+  --info: 98 171 245;
+  --line: 44 66 100;
+  --surface-1: 11 22 38;
+  --surface-2: 17 33 58;
+  --surface-3: 24 44 75;
+  --surface-hover: 30 53 88;
+  --accent: 217 184 108;
+  --accent-fg: 217 184 108;
+  --showcase: 6 33 27;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 2px rgb(0 0 0 / 0.45);
+  --shadow-pop: 0 8px 18px rgb(0 0 0 / 0.5);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 2px rgb(0 0 0 / 0.45);
+  --brand-50: 236 245 239;
+  --brand-100: 211 232 219;
+  --brand-200: 240 224 170;
+  --brand-300: 232 208 150;
+  --brand-400: 217 184 108;
+  --brand-500: 22 121 90;
+  --brand-600: 17 98 72;
+  --brand-700: 14 78 58;
+  --brand-800: 11 60 46;
+  --brand-900: 8 44 34;
+  --brand-950: 6 30 24;
+  --logo-from: 232 208 150;
+  --logo-via: 22 121 90;
+  --logo-to: 8 44 34;
+  --logo-spark: 245 230 190;
+  --logo-glow: 217 184 108;
+  --logo-bubble: 255 248 231;
+  --ornament: 217 184 108;
+  --ornament-alpha: 0.075;
+  --font-display: var(--font-reem), var(--font-arabic), "Segoe UI", sans-serif;
+}
+
+/* القائمة الجانبية وبطاقة الترحيب: زمرّد غامق بنص عاجي وذهبي للمختار، بالمظهرين.
+   بنعيد تعريف المتغيّرات **جوّا نطاقها بس** — فكل صنف جواها (bg-surface-2 ·
+   text-ink-muted · bg-primary-soft…) بياخد الألوان بلا ما نغيّر ولا مكوّن. */
+[data-theme="islamic"]:not(.dark) [data-pane="nav"] {
+  --surface-2: 10 54 41;
+  --surface-3: 17 70 53;
+  --surface-hover: 19 76 58;
+  --line: 33 94 72;
+  --text: 246 240 225;
+  --text-muted: 203 218 208;
+  --text-subtle: 176 200 188;
+  --primary: 201 163 90;
+  --primary-soft: 22 88 66;
+  --primary-fg: 232 208 150;
+  --brand-700: 240 222 168;
+  --brand-200: 240 222 168;
+}
+[data-theme="islamic"].dark [data-pane="nav"] {
+  --surface-2: 6 33 27;
+  --surface-3: 12 49 40;
+  --surface-hover: 15 56 46;
+  --line: 24 78 62;
+  --text: 243 236 217;
+  --text-muted: 196 210 200;
+  --text-subtle: 162 188 174;
+  --primary: 217 184 108;
+  --primary-soft: 17 72 56;
+  --primary-fg: 232 208 150;
+  --brand-700: 232 208 150;
+  --brand-200: 232 208 150;
+}
+[data-theme="islamic"] [data-hero] {
+  --surface-2: 10 54 41;
+  --surface-3: 17 70 53;
+  --surface-hover: 19 76 58;
+  --line: 33 94 72;
+  --text: 246 240 225;
+  --text-muted: 203 218 208;
+  --text-subtle: 176 200 188;
+  --primary: 201 163 90;
+  --primary-soft: 22 88 66;
+  --primary-fg: 232 208 150;
+  --brand-50: 22 88 66;
+  --brand-300: 232 208 150;
+  --brand-700: 240 222 168;
+  --brand-950: 22 88 66;
+}
+
+/* ── زخارف الثيم الإسلامي (SVG هندسي بـ public/brand/ornaments) ───────────
+   كلها قناع (mask) + لون من المتغيّرات: حادة بكل مقاس، وبتتلوّن مع الثيم،
+   وبحجم بايتات. ولا آية ولا خط عربي كزخرفة (بتطلع بأماكن عابرة). */
+
+/* خلفية الصفحة: بلاطة نجمية خفيفة جدًا بتبان بين البطاقات. */
+[data-theme="islamic"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: rgb(var(--ornament) / var(--ornament-alpha));
+  -webkit-mask: url("/brand/ornaments/girih-tile.svg") 0 0 / 80px 80px repeat;
+  mask: url("/brand/ornaments/girih-tile.svg") 0 0 / 80px 80px repeat;
+}
+
+/* فاصل تحت عنوان الصفحة: خط ذهبي ونجمة ثمانية بنصه. */
+[data-theme="islamic"] [data-page-header] {
+  position: relative;
+  border-bottom-color: rgb(var(--accent) / 0.55);
+}
+[data-theme="islamic"] [data-page-header]::after {
+  content: "";
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateX(-50%);
+  background-color: rgb(var(--accent));
+  -webkit-mask: url("/brand/ornaments/star-8.svg") center / contain no-repeat;
+  mask: url("/brand/ornaments/star-8.svg") center / contain no-repeat;
+}
+
+/* شريط أقواس مدبّبة بأعلى القائمة الجانبية. */
+[data-theme="islamic"] [data-pane="nav"]::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 11px;
+  pointer-events: none;
+  background-color: rgb(var(--primary-fg) / 0.7);
+  -webkit-mask: url("/brand/ornaments/arch-band.svg") center top / 40px 14px repeat-x;
+  mask: url("/brand/ornaments/arch-band.svg") center top / 40px 14px repeat-x;
+}
+
+/* لوحة الدخول: خلفية رسمة المدينة (3:4) بدل نقاط الثيم الافتراضي. المحتوى بيطلع لفوق على
+   السما الهادية، والفوتر بينزل على الأرض الغامقة، والأفق بيضل ظاهر بنص اللوحة التحتاني.
+   الغلاف الداكن بالتدرّج بيضمن قراءة النص الأبيض (تباين مفحوص بالتركيب). */
+[data-theme="islamic"] [data-showcase-dots] {
+  display: none;
+}
+[data-theme="islamic"] [data-showcase] {
+  background-image:
+    linear-gradient(to left, rgb(2 18 13 / 0.4), rgb(2 18 13 / 0.2) 45%, rgb(2 18 13 / 0) 75%),
+    linear-gradient(to bottom, rgb(2 18 13 / 0.6), rgb(2 18 13 / 0.5) 45%, rgb(2 18 13 / 0.32) 65%, rgb(2 18 13 / 0) 85%),
+    url("/brand/themes/islamic-login.webp");
+  background-size: cover;
+  background-position: center bottom;
+  justify-content: flex-start;
+  gap: 2.25rem;
+}
+[data-theme="islamic"] [data-showcase] > :last-child {
+  margin-top: auto;
+}
+
+/* بطاقة الترحيب بالرئيسية: شريط بانورامي، والمباني الطويلة عالشمال والنص عاليمين (RTL)
+   فالغلاف الداكن من جهة البداية (يمين). */
+[data-theme="islamic"] [data-hero] {
+  min-height: 9.5rem;
+  background-image:
+    linear-gradient(to left, rgb(3 24 18 / 0.9), rgb(3 24 18 / 0.62) 42%, rgb(3 24 18 / 0.05) 78%),
+    url("/brand/themes/islamic-hero.webp");
+  background-size: cover;
+  background-position: center 70%;
+}
+
+/* علامة Zaki: البلاطة نجمة ثمانية (الفقاعة والحرف نفسهم). clip-path بيقصّ الظل فالتوهّج على الغلاف. */
+[data-theme="islamic"] [data-brand-logo] {
+  filter: drop-shadow(0 3px 6px rgb(var(--logo-glow) / 0.45));
+}
+[data-theme="islamic"] [data-logo-tile] {
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: polygon(50% 0, 64.6% 14.6%, 85.4% 14.6%, 85.4% 35.4%, 100% 50%, 85.4% 64.6%, 85.4% 85.4%, 64.6% 85.4%, 50% 100%, 35.4% 85.4%, 14.6% 85.4%, 14.6% 64.6%, 0 50%, 14.6% 35.4%, 14.6% 14.6%, 35.4% 14.6%);
+}
+[data-theme="islamic"] [data-logo-spark] {
+  display: none;
+}
+
+/* رسمات الحالات الفاضية مرسومة بأزرق مخضرّ — بنزحّها للزمرّدي. */
+[data-theme="islamic"] img[data-illustration] {
+  filter: hue-rotate(-48deg) saturate(0.9);
 }
 
 body {

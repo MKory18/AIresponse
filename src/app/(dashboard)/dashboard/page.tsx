@@ -100,7 +100,7 @@ export default function DashboardPage() {
   return (
     <div className="page-wrap">
       {/* Hero */}
-      <div className="glass relative overflow-hidden rounded-2xl px-5 py-5 sm:px-6">
+      <div data-hero className="glass relative overflow-hidden rounded-2xl px-5 py-5 sm:px-6">
         <div
           aria-hidden
           className="absolute inset-y-0 start-0 w-1 bg-primary"

@@ -50,9 +50,9 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <main className="min-h-screen bg-surface-1 lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* ── Showcase panel (desktop) ─────────────────────────── */}
-      <div className="relative hidden overflow-hidden bg-showcase lg:flex lg:flex-col lg:justify-between lg:p-10">
+      <div data-showcase className="relative hidden overflow-hidden bg-showcase lg:flex lg:flex-col lg:justify-between lg:p-10">
         {/* soft dot pattern */}
-        <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div aria-hidden data-showcase-dots className="pointer-events-none absolute inset-0">
           <div
             className="absolute inset-0 opacity-[0.12]"
             style={{ backgroundImage: "radial-gradient(rgb(255 255 255 / 0.9) 1px, transparent 1px)", backgroundSize: "22px 22px" }}

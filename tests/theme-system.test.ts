@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import {
@@ -17,7 +17,7 @@ import {
   type ThemeEnv,
 } from "@/lib/theme";
 import { ThemePickerView } from "@/components/theme-picker";
-import { WHITE, contrast, luminance, paletteFor, rgb } from "./helpers/theme-css";
+import { WHITE, contrast, luminance, paletteFor, rgb, scopedPalette } from "./helpers/theme-css";
 
 /**
  * نظام الثيمات.
@@ -30,6 +30,20 @@ import { WHITE, contrast, luminance, paletteFor, rgb } from "./helpers/theme-css
  */
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+
+/** أبعاد ملف WebP من رأسه (بلا مكتبة صور): VP8 (lossy) · VP8L (lossless) · VP8X (موسّع). */
+function webpSize(b: Buffer): { width: number; height: number } {
+  expect(b.toString("ascii", 0, 4)).toBe("RIFF");
+  expect(b.toString("ascii", 8, 12)).toBe("WEBP");
+  const fmt = b.toString("ascii", 12, 16);
+  if (fmt === "VP8 ") return { width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff };
+  if (fmt === "VP8L") {
+    const v = b.readUInt32LE(21);
+    return { width: 1 + (v & 0x3fff), height: 1 + ((v >> 14) & 0x3fff) };
+  }
+  if (fmt === "VP8X") return { width: 1 + b.readUIntLE(24, 3), height: 1 + b.readUIntLE(27, 3) };
+  throw new Error(`صيغة WebP مجهولة: ${fmt}`);
+}
 
 // ───────────────────────── المنطق الصرف ─────────────────────────
 
@@ -249,6 +263,7 @@ const REQUIRED = [
   "surface-1", "surface-2", "surface-3", "surface-hover", "line", "text", "text-muted", "text-subtle",
   "primary", "primary-hover", "primary-soft", "primary-fg", "brand", "accent", "accent-fg", "showcase",
   "shadow-card", "shadow-pop", ...[50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950].map((n) => `brand-${n}`),
+  "logo-from", "logo-via", "logo-to", "logo-spark", "logo-glow", "logo-bubble",
 ];
 
 const COMBOS = THEMES.flatMap((t) => (t.forcesDark ? [[t.key, true]] : [[t.key, false], [t.key, true]])) as [string, boolean][];
@@ -297,6 +312,84 @@ describe.each(COMBOS)("تباين الثيم «%s» (داكن: %s)", (key, dark)
   it("الحالات (نجاح/تحذير/خطر) مقروءة على السطح", () => {
     for (const st of ["success", "warning", "danger", "info"]) {
       expect(contrast(s(st), s("surface-2")), st).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+// ───────────── نطاقات داكنة جوّا الثيم (قائمة جانبية · بطاقة ترحيب) ─────────────
+
+const SCOPES = ["[data-pane=\"nav\"]", "[data-hero]"];
+const SCOPE_COMBOS = COMBOS.flatMap(([k, d]) => SCOPES.map((sc) => [k, d, sc])) as [string, boolean, string][];
+
+describe.each(SCOPE_COMBOS)("نطاق الثيم «%s» (داكن: %s) %s", (key, dark, scope) => {
+  const p = scopedPalette(key, dark, scope);
+  const s = (n: string) => rgb(p![n]);
+
+  it.skipIf(!p)("النص ≥ 7:1 على الأسطح، والمخفّف والخافت ≥ 4.5:1 حتى على الحالات", () => {
+    for (const sf of ["surface-2", "surface-3"]) expect(contrast(s("text"), s(sf)), `text/${sf}`).toBeGreaterThanOrEqual(7);
+    for (const sf of ["surface-2", "surface-3", "surface-hover", "primary-soft"]) {
+      expect(contrast(s("text-muted"), s(sf)), `muted/${sf}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(s("text-subtle"), s(sf)), `subtle/${sf}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.skipIf(!p)("`text-primary` (البند المختار) مقروء على أسطح النطاق وحالاته", () => {
+    for (const sf of ["surface-2", "surface-3", "surface-hover", "primary-soft"]) {
+      expect(contrast(s("primary-fg"), s(sf)), `primary-fg/${sf}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+// ───────────────────── أصول الثيمات ومقابضها ─────────────────────
+
+describe("أصول وزخارف الثيمات", () => {
+  const css = read("src/app/globals.css");
+
+  it("كل `/brand/…` مذكور بالـCSS موجود فعلًا بـpublic/ (بلاش 404 صامت)", () => {
+    const urls = [...css.matchAll(/url\(\s*["']?(\/brand\/[^"')\s]+)["']?\s*\)/g)].map((m) => m[1]!);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const u of new Set(urls)) expect(existsSync(join(process.cwd(), "public", u)), `ناقص: ${u}`).toBe(true);
+  });
+
+  it("المقابض الي بتعتمد عليها الثيمات موجودة بالمكوّنات (بلا لمس كل صفحة)", () => {
+    expect(read("src/components/ui/card.tsx")).toContain("data-page-header");
+    expect(read("src/components/ui/empty-state.tsx")).toContain("data-illustration");
+    expect(read("src/components/auth-form.tsx")).toContain("data-showcase-dots");
+    expect(read("src/components/auth-form.tsx")).toMatch(/<div data-showcase /);
+    expect(read("src/components/app-sidebar.tsx")).toContain('data-pane="nav"');
+    expect(read("src/app/(dashboard)/dashboard/page.tsx")).toContain("data-hero");
+  });
+
+  it("خط العناوين: بيتحمّل بلا preload (الافتراضي ما بيدفع بايت)، والافتراضي ما بيعرّفه", () => {
+    expect(read("src/app/layout.tsx")).toMatch(/Reem_Kufi\(\{[^}]*variable: "--font-reem"[^}]*preload: false/s);
+    expect(css).toMatch(/--font-display:\s*var\(--font-reem\)/);
+    expect(paletteFor("default", false)["font-display"]).toBeUndefined();
+  });
+
+  // الرسمات الي بتغطّي لوحة الدخول وبطاقة الترحيب: (الملف ← نسبة العرض للارتفاع)
+  const ART: [string, number][] = [["islamic-login", 3 / 4], ["islamic-hero", 4]];
+
+  it("رسمات الثيمات: النسبة الصحيحة وحجم خفيف (ما بنحمّل ميغابايتات لصفحة الدخول)", () => {
+    for (const [file, ratio] of ART) {
+      const buf = readFileSync(join(process.cwd(), "public", "brand", "themes", `${file}.webp`));
+      const { width, height } = webpSize(buf);
+      expect(width / height, `${file} نسبة`).toBeCloseTo(ratio, 1);
+      expect(buf.length, `${file} حجم`).toBeLessThan(150 * 1024);
+    }
+  });
+
+  it("⚠️ لوحة الدخول وبطاقة الترحيب: غلاف داكن (gradient) **فوق** الصورة — النص الأبيض ما بيتّكل على الرسمة لحاله", () => {
+    for (const sel of ['[data-theme="islamic"] [data-showcase]', '[data-theme="islamic"] [data-hero]']) {
+      const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // نفس المحدّد ممكن يتكرّر (متغيّرات النطاق + الخلفية): بنفتّش بكل الكتل عن الي فيها صورة.
+      const rules = [...css.matchAll(new RegExp(`\\n${esc}\\s*\\{([^}]*)\\}`, "g"))];
+      expect(rules.length, `${sel}: القاعدة ناقصة`).toBeGreaterThan(0);
+      const bg = rules.map((r) => /background-image:([^;]*);/.exec(r[1]!)).find(Boolean) ?? null;
+      expect(bg, `${sel}: background-image ناقص`).toBeTruthy();
+      const first = bg![1]!.indexOf("linear-gradient(");
+      const art = bg![1]!.indexOf("url(");
+      expect(first, `${sel}: بلا غلاف`).toBeGreaterThanOrEqual(0);
+      expect(first, `${sel}: الغلاف لازم يسبق الصورة (الأول = الأعلى)`).toBeLessThan(art);
     }
   });
 });

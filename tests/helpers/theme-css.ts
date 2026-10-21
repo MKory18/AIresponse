@@ -48,6 +48,28 @@ export function paletteFor(themeKey: string, dark: boolean): Record<string, stri
   return pal;
 }
 
+/**
+ * لوحة جوّا نطاق (القائمة الجانبية `[data-pane="nav"]` · بطاقة الترحيب `[data-hero]`):
+ * لوحة الثيم ثم إعادة تعريف النطاق (العام أولًا ثم الخاص بالمظهر، زي الـcascade).
+ * `null` = الثيم ما عرّف هالنطاق (يعني بياخد لوحة الثيم زي ما هي).
+ */
+export function scopedPalette(themeKey: string, dark: boolean, scope: string): Record<string, string> | null {
+  const pal = paletteFor(themeKey, dark);
+  const sels = [`[data-theme="${themeKey}"] ${scope}`];
+  if (!themeDef(themeKey).forcesDark) {
+    sels.push(dark ? `[data-theme="${themeKey}"].dark ${scope}` : `[data-theme="${themeKey}"]:not(.dark) ${scope}`);
+  }
+  let found = false;
+  for (const sel of sels) {
+    const b = block(sel);
+    if (b) {
+      Object.assign(pal, b);
+      found = true;
+    }
+  }
+  return found ? pal : null;
+}
+
 export type RGB = [number, number, number];
 
 /** `"15 108 189"` أو `"15 108 189 / 0.5"` ← [15,108,189]. */

@@ -17,7 +17,7 @@ export const THEME_STORAGE_KEY = "zr-theme";
 /** مفتاح المظهر (فاتح/داكن) — نفس المفتاح القديم، ما بينكسر الي محفوظ. */
 export const SCHEME_STORAGE_KEY = "theme";
 
-export type ThemeKey = "default";
+export type ThemeKey = "default" | "islamic";
 
 export interface ThemeDef {
   key: ThemeKey;
@@ -36,6 +36,13 @@ export const THEMES: ThemeDef[] = [
     description: "الواجهة الأساسية: مسطّحة ونظيفة وهادئة للعمل اليومي.",
     forcesDark: false,
     swatches: ["#f3f3f3", "#ffffff", "#0f6cbd", "#479ef5"],
+  },
+  {
+    key: "islamic",
+    label: "إسلامي",
+    description: "عاجي وزمرّدي بزخارف هندسية (نجمة ثمانية وأقواس)، وبالداكن كحلي وذهبي.",
+    forcesDark: false,
+    swatches: ["#f6f0e1", "#fffcf5", "#0f5132", "#b08426"],
   },
 ];
 

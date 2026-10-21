@@ -72,7 +72,8 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("border-b border-line pb-4", className)}>
+    // `data-page-header`: مقبض للثيمات (الفاصل الزخرفي تحت العنوان) بلا ما نلمس كل صفحة.
+    <div data-page-header className={cn("border-b border-line pb-4", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold leading-8 tracking-tight text-ink lg:text-[28px]">{title}</h1>

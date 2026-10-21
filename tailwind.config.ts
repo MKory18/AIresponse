@@ -29,6 +29,13 @@ const config: Config = {
         },
         // لوحة الدخول الجانبية (كانت لون ثابت `bg-[…]` مش قابل للثيم).
         showcase: "rgb(var(--showcase) / <alpha-value>)",
+        // علامة Zaki: تدرّج + شرارة (كانت sky-400/blue-800/sky-200 ثابتة).
+        logo: {
+          from: "rgb(var(--logo-from) / <alpha-value>)",
+          via: "rgb(var(--logo-via) / <alpha-value>)",
+          to: "rgb(var(--logo-to) / <alpha-value>)",
+          spark: "rgb(var(--logo-spark) / <alpha-value>)",
+        },
         brand: {
           50: "rgb(var(--brand-50) / <alpha-value>)",
           100: "rgb(var(--brand-100) / <alpha-value>)",
