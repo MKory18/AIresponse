@@ -7,6 +7,7 @@ import { Bell, ChevronDown, ChevronLeft, CircleHelp, LogOut, Menu, Search, UserR
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { groupLanding, pageForPath, type NavGroupView } from "@/lib/nav-model";
+import { searchPages } from "@/lib/nav-search";
 import { guideForPath, visitGuide } from "@/lib/page-guides";
 import { PageGuidePanel } from "./page-guide";
 import { Sidebar } from "./app-sidebar";
@@ -27,6 +28,10 @@ export function AppShell({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // قفز سريع للصفحات من صندوق البحث (`lib/nav-search.ts`): اقتراحات + أسهم + Enter.
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const [jumpIndex, setJumpIndex] = useState(-1);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [narrow, setNarrow] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -113,12 +118,58 @@ export function AppShell({
     return list;
   }, [hit]);
 
+  const matches = useMemo(() => (jumpOpen ? searchPages(query, groups) : []), [jumpOpen, query, groups]);
+  const showJump = jumpOpen && matches.length > 0;
+
+  function closeJump() {
+    setJumpOpen(false);
+    setJumpIndex(-1);
+  }
+
   function onSearch(e: React.FormEvent) {
     e.preventDefault();
+    // Enter على اقتراح مختار ← الصفحة. بلا اختيار ← بحث المحادثات زي ما كان.
+    const picked = jumpIndex >= 0 ? matches[jumpIndex] : undefined;
+    if (picked) {
+      closeJump();
+      setQuery("");
+      router.push(picked.href);
+      return;
+    }
     const q = query.trim();
     if (!q) return;
+    closeJump();
     router.push(`/conversations?q=${encodeURIComponent(q)}`);
   }
+
+  function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Escape") {
+      closeJump();
+    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && matches.length > 0) {
+      e.preventDefault();
+      const n = matches.length;
+      setJumpIndex((i) => (e.key === "ArrowDown" ? (i + 1) % n : i <= 0 ? n - 1 : i - 1));
+    }
+  }
+
+  // اختصار: «/» أو Ctrl+K بيفتح البحث (إلا وإنت بتكتب بحقل). مخفي بالجوال ← ما بيعمل شي.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+      const combo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k";
+      const slash = e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey;
+      if (!combo && !slash) return;
+      const input = searchRef.current;
+      if (!input || input.offsetParent === null) return;
+      e.preventDefault();
+      input.focus();
+      input.select();
+      setJumpOpen(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     // `--shell-extra`: ارتفاع شريط التبويبات — صندوق الوارد (شاشة كاملة) بيطرحه
@@ -164,15 +215,65 @@ export function AppShell({
                 ))}
               </nav>
               <div className="ms-auto flex items-center gap-2">
-                <form onSubmit={onSearch} role="search" className="relative hidden md:block">
+                <form
+                  onSubmit={onSearch}
+                  role="search"
+                  className="relative hidden md:block"
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closeJump();
+                  }}
+                >
                   <Search size={16} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
                   <input
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={`${t.common.search}…`}
+                    ref={searchRef}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setJumpOpen(true);
+                      setJumpIndex(-1);
+                    }}
+                    onFocus={() => setJumpOpen(true)}
+                    onKeyDown={onSearchKey}
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={showJump}
+                    aria-controls="quick-jump"
+                    aria-activedescendant={jumpIndex >= 0 ? "jump-" + jumpIndex : undefined}
+                    placeholder={`${t.common.search} أو انتقل لصفحة…`}
                     aria-label={t.common.search}
                     className="h-9 w-56 rounded-lg border border-transparent bg-surface-3 ps-9 pe-3 text-sm text-ink outline-none transition-all placeholder:text-ink-subtle focus:w-72 focus:border-primary focus:bg-surface-2 focus:ring-1 focus:ring-primary"
                   />
+                  {showJump && (
+                    <ul
+                      id="quick-jump"
+                      role="listbox"
+                      aria-label="الصفحات"
+                      className="absolute start-0 top-full z-50 mt-1.5 w-72 overflow-hidden rounded-xl border border-line bg-surface-2 py-1 shadow-pop"
+                    >
+                      {matches.map((m, i) => (
+                        <li key={m.href} id={"jump-" + i} role="option" aria-selected={i === jumpIndex}>
+                          <Link
+                            href={m.href}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              closeJump();
+                              setQuery("");
+                            }}
+                            className={cn(
+                              "flex items-center justify-between gap-3 px-3 py-2 text-[13px] transition-colors",
+                              i === jumpIndex ? "bg-primary-soft text-primary" : "text-ink hover:bg-surface-hover"
+                            )}
+                          >
+                            <span className="font-semibold">{m.label}</span>
+                            <span className="text-[11px] text-ink-subtle">{m.groupLabel}</span>
+                          </Link>
+                        </li>
+                      ))}
+                      <li role="presentation" className="border-t border-line px-3 py-1.5 text-[11px] text-ink-subtle">
+                        ↑↓ للتنقل · Enter للانتقال · أو اكتب واضغط Enter لتبحث بالمحادثات
+                      </li>
+                    </ul>
+                  )}
                 </form>
                 {guideHit && (
                   <button
