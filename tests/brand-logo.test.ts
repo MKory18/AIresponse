@@ -56,4 +56,14 @@ describe("علامة Zaki (BrandLogo)", () => {
     expect(poly![1]!.split(",")).toHaveLength(16);
     expect(css).toMatch(/\[data-theme="islamic"\] \[data-brand-logo\]\s*\{[^}]*drop-shadow/);
   });
+
+  it("المدينة الليلية: البلاطة شمس (دائرة بخطوط أفقية) والفقاعة غامقة والتوهّج على الغلاف", () => {
+    const css = read("src/app/globals.css");
+    const tile = /\[data-theme="night"\] \[data-logo-tile\]\s*\{([^}]*)\}/.exec(css);
+    expect(tile, "قاعدة البلاطة ناقصة").toBeTruthy();
+    expect(tile![1]).toMatch(/border-radius:\s*9999px/);
+    expect(tile![1]).toMatch(/mask:\s*linear-gradient\(/);
+    expect(css).toMatch(/\[data-theme="night"\]\s*\{[^}]*--logo-bubble:\s*26 11 46/);
+    expect(css).toMatch(/\[data-theme="night"\] \[data-brand-logo\]\s*\{[^}]*drop-shadow/);
+  });
 });

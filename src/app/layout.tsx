@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans_Arabic, Reem_Kufi } from "next/font/google";
+import { IBM_Plex_Sans_Arabic, Lalezar, Reem_Kufi } from "next/font/google";
 import { ToastProvider } from "@/components/ui/toast";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
@@ -12,12 +12,21 @@ const arabic = IBM_Plex_Sans_Arabic({
 });
 
 /**
- * خط عناوين الثيم الإسلامي (كوفي). `preload: false`: ما بينزل إلا لما صفحة بتستعمله
- * فعلًا — الثيم الافتراضي ما بيعرّف `--font-display` فما بيطلبه ولا بحمّل بايت زيادة.
+ * خطوط عناوين الثيمات: كوفي للإسلامي (Reem Kufi) وعريض للمدينة الليلية (Lalezar).
+ * `preload: false`: ما بتنزل إلا لما صفحة بتستعملها فعلًا — الثيم الافتراضي ما بيعرّف
+ * `--font-display` فما بيطلبها ولا بحمّل بايت زيادة.
  */
 const reem = Reem_Kufi({
   subsets: ["arabic"],
   variable: "--font-reem",
+  display: "swap",
+  preload: false,
+});
+
+const lalezar = Lalezar({
+  subsets: ["arabic"],
+  weight: "400",
+  variable: "--font-lalezar",
   display: "swap",
   preload: false,
 });
@@ -75,7 +84,7 @@ const themeScript = THEME_INIT_SCRIPT;
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
-      <body className={`${arabic.variable} ${reem.variable}`}>
+      <body className={`${arabic.variable} ${reem.variable} ${lalezar.variable}`}>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         {children}
       </body>

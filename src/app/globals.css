@@ -374,6 +374,196 @@ h1,
   filter: hue-rotate(-48deg) saturate(0.9);
 }
 
+/* ═══════════════════════ ثيم «المدينة الليلية» ═══════════════════════
+   غروب نيون على مدينة ساحلية — ليلي دائمًا (بيفرض .dark) فكتلة وحدة بدل اتنتين.
+   بنفسجي غامق للأسطح، ووردي للتعبئة، وسماوي للتمييز والتركيز، وأصفر/برتقالي للشمس.
+   الرسمات أصلية (SVG + صور GPT) — ولا لعبة ولا ماركة ولا شعار. التباين مفحوص بالاختبار. */
+[data-theme="night"] {
+  color-scheme: dark;
+  --background: 18 8 33;
+  --surface: 28 15 52;
+  --surface-glass: 28 15 52;
+  --surface-elevated: 36 20 68;
+  --surface-muted: 22 11 42;
+  --border: 66 42 120;
+  --border-glass: 66 42 120;
+  --text: 245 238 255;
+  --text-muted: 205 192 232;
+  --text-subtle: 170 156 210;
+  --brand: 34 211 238;
+  --brand-strong: 103 232 249;
+  --primary: 194 24 107;
+  --primary-hover: 160 18 88;
+  --primary-soft: 62 17 74;
+  --primary-fg: 255 121 183;
+  --success: 52 211 153;
+  --warning: 251 191 36;
+  --danger: 251 113 133;
+  --info: 56 189 248;
+  --line: 66 42 120;
+  --surface-1: 18 8 33;
+  --surface-2: 28 15 52;
+  --surface-3: 38 22 72;
+  --surface-hover: 48 29 92;
+  --accent: 34 211 238;
+  --accent-fg: 34 211 238;
+  --showcase: 26 11 46;
+  --shadow-card: 0 0 0 1px rgb(66 42 120 / 0.55), 0 8px 24px -14px rgb(224 64 251 / 0.5);
+  --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 79 154 / 0.35);
+  --glass-shadow: 0 0 0 1px rgb(66 42 120 / 0.55), 0 8px 24px -14px rgb(224 64 251 / 0.5);
+  --brand-50: 253 232 243;
+  --brand-100: 251 207 232;
+  --brand-200: 249 168 212;
+  --brand-300: 244 114 182;
+  --brand-400: 236 72 153;
+  --brand-500: 194 24 107;
+  --brand-600: 160 18 88;
+  --brand-700: 131 14 72;
+  --brand-800: 100 12 56;
+  --brand-900: 70 10 42;
+  --brand-950: 44 6 28;
+  --logo-from: 255 209 102;
+  --logo-via: 255 79 154;
+  --logo-to: 194 24 107;
+  --logo-spark: 255 255 255;
+  --logo-glow: 224 64 251;
+  --logo-bubble: 26 11 46;
+  --ornament: 255 79 154;
+  --ornament-alpha: 0.07;
+  --font-display: var(--font-lalezar), var(--font-arabic), "Segoe UI", sans-serif;
+}
+
+/* القائمة الجانبية أغمق من الصفحة — عمق بلا ظلال تقيلة. */
+[data-theme="night"] [data-pane="nav"] {
+  --surface-2: 13 6 24;
+  --surface-3: 24 12 46;
+  --surface-hover: 34 19 66;
+  --line: 52 32 96;
+}
+
+/* ── زخارف المدينة الليلية ─────────────────────────────────────────────────
+   خلفية الصفحة: وهج غروب من تحت ووهج سماوي بالزاوية، وأفق المدينة (SVG أصلي)
+   ثابت بأسفل الشاشة بشفافية — بيبان بين البطاقات وعالصفحات القصيرة. */
+[data-theme="night"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 45% at 50% 108%, rgb(255 79 154 / 0.28), transparent 70%),
+    radial-gradient(40% 30% at 85% 0%, rgb(34 211 238 / 0.1), transparent 70%);
+}
+[data-theme="night"] body::after {
+  content: "";
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  height: 220px;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.45;
+  background: url("/brand/ornaments/night-skyline.svg") center bottom / auto 220px repeat-x;
+}
+
+/* شريط غروب (نيون) أعلى القائمة، وخط نيون تحت عنوان كل صفحة بعنوان متدرّج. */
+[data-theme="night"] [data-pane="nav"]::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 3px;
+  pointer-events: none;
+  background: linear-gradient(90deg, #22d3ee, #e040fb 40%, #ff4f9a 70%, #ffd166);
+  box-shadow: 0 0 14px rgb(224 64 251 / 0.55);
+}
+[data-theme="night"] [data-page-header] {
+  position: relative;
+  border-bottom-color: transparent;
+}
+[data-theme="night"] [data-page-header]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ff4f9a, #ffd166 45%, #22d3ee);
+  box-shadow: 0 0 12px rgb(255 79 154 / 0.5);
+}
+[data-theme="night"] [data-page-header] h1 {
+  background: linear-gradient(90deg, #ff79b7, #ffd166);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 10px rgb(255 79 154 / 0.35));
+}
+
+/* لوحة الدخول: رسمة المدينة معكوسة أفقيًا (الشمس عاليسار بعيد عن النص اللي عاليمين RTL)
+   بطبقة خلفية (-2) وغلاف داكن فوقها (-1) والمحتوى فوقهم — isolation بيخلّي الطبقتين
+   فوق خلفية اللوحة نفسها. */
+[data-theme="night"] [data-showcase-dots] {
+  display: none;
+}
+[data-theme="night"] [data-showcase] {
+  isolation: isolate;
+  justify-content: flex-start;
+  gap: 2.25rem;
+}
+[data-theme="night"] [data-showcase] > :last-child {
+  margin-top: auto;
+}
+[data-theme="night"] [data-showcase]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background: url("/brand/themes/night-login.webp") center bottom / cover no-repeat;
+  transform: scaleX(-1);
+}
+[data-theme="night"] [data-showcase]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(to top, rgb(14 6 26 / 0.8), rgb(14 6 26 / 0.5) 8%, rgb(14 6 26 / 0) 16%),
+    linear-gradient(to left, rgb(14 6 26 / 0.4), rgb(14 6 26 / 0.2) 45%, rgb(14 6 26 / 0) 75%),
+    linear-gradient(to bottom, rgb(14 6 26 / 0.55), rgb(14 6 26 / 0.4) 45%, rgb(14 6 26 / 0.25) 65%, rgb(14 6 26 / 0) 85%);
+}
+
+/* بطاقة الترحيب: شريط المدينة، والغلاف الداكن من جهة النص (يمين). */
+[data-theme="night"] [data-hero] {
+  min-height: 9.5rem;
+  background-image:
+    linear-gradient(to left, rgb(18 8 33 / 0.92), rgb(18 8 33 / 0.7) 40%, rgb(18 8 33 / 0.05) 78%),
+    url("/brand/themes/night-hero.webp");
+  background-size: cover;
+  background-position: center 65%;
+}
+
+/* علامة Zaki: شمس بخطوط أفقية (الفقاعة غامقة والحرف مفرّغ بلون الشمس) وتوهّج نيون. */
+[data-theme="night"] [data-brand-logo] {
+  filter: drop-shadow(0 0 8px rgb(224 64 251 / 0.55));
+}
+[data-theme="night"] [data-logo-tile] {
+  border-radius: 9999px;
+  box-shadow: none;
+  background-image: linear-gradient(180deg, #ffd166 0%, #ff8a3d 36%, #ff4f9a 66%, #c2186b 100%);
+  -webkit-mask: linear-gradient(#000 0 60%, transparent 60% 64%, #000 64% 72%, transparent 72% 77%, #000 77% 86%, transparent 86% 91%, #000 91% 100%);
+  mask: linear-gradient(#000 0 60%, transparent 60% 64%, #000 64% 72%, transparent 72% 77%, #000 77% 86%, transparent 86% 91%, #000 91% 100%);
+}
+[data-theme="night"] [data-logo-spark] {
+  display: none;
+}
+
+/* رسمات الحالات الفاضية (أزرق مخضرّ) ← وردي نيون. */
+[data-theme="night"] img[data-illustration] {
+  filter: hue-rotate(115deg) saturate(1.2);
+}
+
 body {
   @apply bg-surface-1 font-sans text-ink antialiased;
   text-rendering: optimizeLegibility;

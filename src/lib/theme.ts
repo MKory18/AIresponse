@@ -17,7 +17,7 @@ export const THEME_STORAGE_KEY = "zr-theme";
 /** مفتاح المظهر (فاتح/داكن) — نفس المفتاح القديم، ما بينكسر الي محفوظ. */
 export const SCHEME_STORAGE_KEY = "theme";
 
-export type ThemeKey = "default" | "islamic";
+export type ThemeKey = "default" | "islamic" | "night";
 
 export interface ThemeDef {
   key: ThemeKey;
@@ -43,6 +43,13 @@ export const THEMES: ThemeDef[] = [
     description: "عاجي وزمرّدي بزخارف هندسية (نجمة ثمانية وأقواس)، وبالداكن كحلي وذهبي.",
     forcesDark: false,
     swatches: ["#f6f0e1", "#fffcf5", "#0f5132", "#b08426"],
+  },
+  {
+    key: "night",
+    label: "المدينة الليلية",
+    description: "غروب نيون على مدينة ساحلية: بنفسجي غامق مع وردي وسماوي وشمس برتقالية — ليلي دائمًا.",
+    forcesDark: true,
+    swatches: ["#120821", "#1c0f34", "#c2186b", "#22d3ee"],
   },
 ];
 

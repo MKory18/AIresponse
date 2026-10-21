@@ -367,7 +367,7 @@ describe("أصول وزخارف الثيمات", () => {
   });
 
   // الرسمات الي بتغطّي لوحة الدخول وبطاقة الترحيب: (الملف ← نسبة العرض للارتفاع)
-  const ART: [string, number][] = [["islamic-login", 3 / 4], ["islamic-hero", 4]];
+  const ART: [string, number][] = [["islamic-login", 3 / 4], ["islamic-hero", 4], ["night-login", 3 / 4], ["night-hero", 4]];
 
   it("رسمات الثيمات: النسبة الصحيحة وحجم خفيف (ما بنحمّل ميغابايتات لصفحة الدخول)", () => {
     for (const [file, ratio] of ART) {
@@ -376,6 +376,17 @@ describe("أصول وزخارف الثيمات", () => {
       expect(width / height, `${file} نسبة`).toBeCloseTo(ratio, 1);
       expect(buf.length, `${file} حجم`).toBeLessThan(150 * 1024);
     }
+  });
+
+  it("المدينة الليلية: الرسمة معكوسة (الشمس بعيد عن النص) بطبقة -2 والغلاف الداكن -1 فوقها", () => {
+    const rule = (sel: string) => new RegExp(sel.replace(/[[\]]/g, "\\$&") + "\\s*{([^}]*)}").exec(css)?.[1] ?? "";
+    const art = rule('[data-theme="night"] [data-showcase]::before');
+    const veil = rule('[data-theme="night"] [data-showcase]::after');
+    expect(art).toContain("night-login.webp");
+    expect(art).toContain("scaleX(-1)");
+    expect(veil).toContain("linear-gradient(");
+    expect(Number(/z-index:\s*(-?\d+)/.exec(art)![1])).toBeLessThan(Number(/z-index:\s*(-?\d+)/.exec(veil)![1]));
+    expect(rule('[data-theme="night"] [data-showcase]')).toContain("isolation: isolate");
   });
 
   it("⚠️ لوحة الدخول وبطاقة الترحيب: غلاف داكن (gradient) **فوق** الصورة — النص الأبيض ما بيتّكل على الرسمة لحاله", () => {
@@ -420,6 +431,15 @@ describe("منتقي الثيم", () => {
     expect(out).toMatch(/data-scheme="dark"[^>]*>/);
     expect(out).not.toContain('disabled=""'); // (كلمة disabled بأسماء أصناف Tailwind مش المقصودة)
     expect(out).not.toContain("ليلي بطبيعته");
+  });
+
+  it("ثيم ليلي: شارة «ليلي دائمًا» وزر «فاتح» معطّل مع سببه (مش بيختفي بصمت)", () => {
+    const out = html({ theme: "night", dark: true });
+    expect(out).toContain("ليلي دائمًا");
+    expect(out).toContain("ليلي بطبيعته");
+    expect(out).toMatch(/aria-checked="true"[^>]*data-theme-card="night"/);
+    expect(out).toMatch(/disabled=""[^>]*data-scheme="light"/);
+    expect(out).not.toMatch(/disabled=""[^>]*data-scheme="dark"/);
   });
 
   it("كل ثيم بالمنتقي معرّف بـ themeDef", () => {

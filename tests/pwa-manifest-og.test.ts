@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("next/font/google", () => ({
   IBM_Plex_Sans_Arabic: () => ({ variable: "--font-arabic", className: "" }),
   Reem_Kufi: () => ({ variable: "--font-reem", className: "" }),
+  Lalezar: () => ({ variable: "--font-lalezar", className: "" }),
 }));
 
 import manifest from "@/app/manifest";
