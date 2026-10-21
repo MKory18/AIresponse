@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ClipboardList, PackageSearch, Printer, Search, Trash2 } from "lucide-react";
+import { ClipboardList, Printer, Search, Trash2 } from "lucide-react";
 import { formatNumber, label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -229,7 +229,7 @@ export default function OrdersPage() {
       {!loading && visible.length === 0 && !error && (
         <GlassCard>
           <EmptyState
-            icon={<PackageSearch size={28} strokeWidth={1.5} />}
+            illustration="/brand/empty-orders.webp"
             title={t.orders.emptyTitle}
             description={t.orders.emptyDesc}
           />

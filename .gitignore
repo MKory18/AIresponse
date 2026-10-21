@@ -13,5 +13,7 @@ coverage
 .tmp-*
 .playwright-mcp/
 
+# ملف تجاوز Compose محلي (منافذ الجهاز) — ما بينرفع
+docker-compose.override.yml
 # لقطات فحص محلية (لا تدخل المستودع)
 fluent-*.png
