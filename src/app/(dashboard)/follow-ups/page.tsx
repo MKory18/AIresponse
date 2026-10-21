@@ -91,7 +91,7 @@ export default function FollowUpsPage() {
       {!loading && !error && (
         <div className="space-y-2.5">
           {items.map((f) => (
-            <GlassCard key={f.id} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
+            <GlassCard key={f.id} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700">
               <div className="min-w-0">
                 <p className="flex items-center gap-2 truncate text-sm font-bold text-ink">
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:text-brand-300">

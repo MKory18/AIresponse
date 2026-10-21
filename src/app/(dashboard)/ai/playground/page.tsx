@@ -394,8 +394,7 @@ export default function AIPlaygroundPage() {
             </div>
           )}
 
-          <div className="border-t border-line/60 bg-surface-2/60 p-3 backdrop-blur-xl dark:bg-white/[0.02]">
-            <div className="glass-subtle flex items-end gap-1.5 rounded-2xl p-1.5">
+          <div className="border-t border-line bg-surface-2 p-3">            <div className="glass-subtle flex items-end gap-1.5 rounded-2xl p-1.5">
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}

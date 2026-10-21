@@ -102,7 +102,7 @@ export default function HandoffsPage() {
       {!loading && !error && (
         <div className="space-y-2.5">
           {items.map((h) => (
-            <GlassCard key={h.id} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-all hover:shadow-glass">
+            <GlassCard key={h.id} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700">
               <div className="min-w-0">
                 <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-ink">
                   <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:text-red-400">

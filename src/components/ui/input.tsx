@@ -2,23 +2,23 @@ import { forwardRef } from "react";
 import { cn } from "@/lib/cn";
 
 const base =
-  "w-full rounded-2xl border border-line bg-surface-3/70 px-4 text-sm text-ink placeholder:text-ink-subtle outline-none transition-all focus:border-primary focus:bg-surface-2 focus:ring-4 focus:ring-primary/10 disabled:opacity-50 dark:bg-white/[0.04]";
+  "w-full rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink placeholder:text-ink-subtle outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:bg-surface-3 disabled:opacity-60 dark:bg-surface-3";
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...props }, ref) {
-    return <input ref={ref} className={cn(base, "h-11", className)} {...props} />;
+    return <input ref={ref} className={cn(base, "h-9", className)} {...props} />;
   }
 );
 
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function Textarea({ className, ...props }, ref) {
-    return <textarea ref={ref} className={cn(base, "py-2.5 leading-relaxed", className)} {...props} />;
+    return <textarea ref={ref} className={cn(base, "py-2 leading-relaxed", className)} {...props} />;
   }
 );
 
 export const Select = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   function Select({ className, ...props }, ref) {
-    return <select ref={ref} className={cn(base, "h-11 cursor-pointer", className)} {...props} />;
+    return <select ref={ref} className={cn(base, "h-9 cursor-pointer pe-8", className)} {...props} />;
   }
 );
 

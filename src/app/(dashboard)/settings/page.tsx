@@ -15,7 +15,7 @@ export default function SettingsPage() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {sections.map((s) => (
           <Link key={s.href} href={s.href}>
-            <GlassCard className="group flex items-start gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-glass">
+            <GlassCard className="group flex items-start gap-3 p-4 transition-all duration-200 hover:border-brand-300/80 dark:hover:border-brand-700">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
                 <s.icon size={18} />
               </span>
