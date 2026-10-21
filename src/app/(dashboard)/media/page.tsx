@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileUp, Images, LayoutGrid, List, Search, Trash2, Upload } from "lucide-react";
+import { FileUp, LayoutGrid, List, Search, Trash2, Upload } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -449,7 +449,7 @@ export default function MediaPage() {
 
       {!loading && items.length === 0 && !error && (
         <GlassCard>
-          <EmptyState icon={<Images size={28} strokeWidth={1.5} />} title={t.media.emptyTitle} description={t.media.emptyDesc} />
+          <EmptyState illustration="/brand/empty-media.webp" title={t.media.emptyTitle} description={t.media.emptyDesc} />
         </GlassCard>
       )}
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { FileSpreadsheet, ImagePlus, Package, Plus, Search, ArrowUpLeft } from "lucide-react";
+import { FileSpreadsheet, ImagePlus, Plus, Search, ArrowUpLeft } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -271,7 +271,7 @@ export default function ProductsPage() {
       {!loading && products.length === 0 && !error && (
         <GlassCard>
           <EmptyState
-            icon={<Package size={28} strokeWidth={1.5} />}
+            illustration="/brand/empty-products.webp"
             title="لا توجد منتجات"
             description="أضف أول منتج لبدء البيع عبر المحادثات."
             action={<Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> منتج جديد</Button>}
