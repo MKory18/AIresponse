@@ -181,6 +181,7 @@ async function executeAction(
         conversationId: conversation.id,
         sourceMessageId: `auto:${automationId}:${event.eventId}:${actionIndex}`,
         text,
+        automationSource: "AUTOMATION",
       });
       break;
     }

@@ -229,6 +229,11 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         campaign: (r, w) => w.externalIdempotencyKey != null && r.workspaceId === w.workspaceId && r.externalIdempotencyKey === w.externalIdempotencyKey,
         // Page catalogs — mirrors the real @@unique constraints.
         catalog: (r, w) => r.workspaceId === w.workspaceId && r.name === w.name,
+        // Orders mirror the real unique keys: idempotencyKey (@unique,
+        // nullable) and orderNumber (@unique).
+        order: (r, w) =>
+          (w.idempotencyKey != null && r.idempotencyKey === w.idempotencyKey) ||
+          (w.orderNumber != null && r.orderNumber === w.orderNumber),
       };
       const uniq = uniqMap[name];
       if (uniq) {

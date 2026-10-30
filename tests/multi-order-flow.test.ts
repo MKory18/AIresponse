@@ -161,8 +161,8 @@ describe("multi-order flow — a conversation holds many orders", () => {
   });
 });
 
-describe("multi-order flow — editing a placed order from chat", () => {
-  it("quantity edit updates the placed order and reprices it", async () => {
+describe("multi-order flow — a placed order is protected from direct chat edits", () => {
+  it("a quantity edit on a placed order is refused and only logged for review", async () => {
     await updateDraftFromExtraction(db as Db, {
       workspaceId: WS_A, conversationId, customerId,
       extraction: { productId: productIdA, quantity: 3, phone: "0930000000", rawAddress: "دويلعة", province: "دمشق" },
@@ -170,6 +170,7 @@ describe("multi-order flow — editing a placed order from chat", () => {
     });
     const draft = await db.orderDraft.findUniqueOrThrow({ where: { conversationId } }) as never as { id: string };
     const created = await createOrderFromDraft(db as Db, AGENT, { draftId: draft.id });
+    const beforeTotal = Number((await getOwnedOrder(db as Db, WS_A, created.orderId)).total);
 
     const result = await handleOrderIntent(db as Db, {
       workspaceId: WS_A, conversationId, customerId,
@@ -179,20 +180,21 @@ describe("multi-order flow — editing a placed order from chat", () => {
       },
       customerText: "زوّد الكمية خمس حبات",
     });
-    expect(result.action).toBe("ORDER_UPDATED");
-    expect(result.orderId).toBe(created.orderId);
-    expect(result.total).toBe(750000); // locked unit price 150000 × 5, no delivery fee
-
+    // Phase 0.3 — a confirmed order is never rewritten by one message.
+    expect(result.action).toBe("NONE");
     const order = await getOwnedOrder(db as Db, WS_A, created.orderId);
-    expect(Number(order.total)).toBe(750000);
+    expect(Number(order.total)).toBe(beforeTotal);
     const items = db._stores.orderItem as any[];
     expect(items).toHaveLength(1);
-    expect(items[0].quantity).toBe(5);
-    // Only ONE order — an edit never duplicates it.
-    expect(await orderRows()).toHaveLength(1);
+    expect(items[0].quantity).toBe(3); // untouched
+    expect(await orderRows()).toHaveLength(1); // never duplicates
+
+    // The request is preserved as an audited edit request for staff review.
+    const audits = (db._stores.auditLog as any[]).filter((a) => a.action === "order.edit_requested");
+    expect(audits.length).toBeGreaterThan(0);
   });
 
-  it("address edit updates delivery details on the placed order", async () => {
+  it("an address edit on a placed order is refused and only logged for review", async () => {
     await updateDraftFromExtraction(db as Db, {
       workspaceId: WS_A, conversationId, customerId,
       extraction: { productId: productIdA, quantity: 2, phone: "0930000000", rawAddress: "دويلعة", province: "دمشق" },
@@ -210,9 +212,9 @@ describe("multi-order flow — editing a placed order from chat", () => {
       },
       customerText: "غيّر العنوان المزة الشارع الخامس",
     });
-    expect(result.action).toBe("ORDER_UPDATED");
+    expect(result.action).toBe("NONE");
     const order = await getOwnedOrder(db as Db, WS_A, created.orderId);
-    expect(order.deliveryAddress).toBe("المزة الشارع الخامس");
+    expect(order.deliveryAddress).toBe("دويلعة"); // untouched
     expect(order.province).toBe("دمشق");
   });
 

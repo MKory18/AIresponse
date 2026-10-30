@@ -121,6 +121,30 @@ describe("Phase 5 — deterministic primitives", () => {
     expect(parseQuantity("99999", { max: 100 }).reason).toBe("EXCEEDS_MAX");
   });
 
+  it("parses tens/hundreds and composites (Phase 0.2)", () => {
+    expect(parseQuantity("بدي عشرين قطعة").value).toBe(20);
+    expect(parseQuantity("عشرين").value).toBe(20);
+    expect(parseQuantity("ثلاثين").value).toBe(30);
+    expect(parseQuantity("خمسين").value).toBe(50);
+    expect(parseQuantity("مية").value).toBe(100);
+    expect(parseQuantity("مية وخمسين", { max: 1000 }).value).toBe(150);
+    expect(parseQuantity("خمسة وعشرين").value).toBe(25);
+    expect(parseQuantity("بدي 10 قطع").value).toBe(10);
+  });
+
+  it("never reads a quantity from inside words, codes or day names (Phase 0.2)", () => {
+    expect(parseQuantity("الاثنين").value).toBeNull();
+    expect(parseQuantity("يوم الاثنين").value).toBeNull();
+    expect(parseQuantity("عندي استفسار").value).toBeNull();
+    expect(parseQuantity("LG50").value).toBeNull();
+    expect(parseQuantity("TW-500").value).toBeNull();
+  });
+
+  it("refuses to guess when two unrelated quantities appear (Phase 0.2)", () => {
+    expect(parseQuantity("بدي 3 و 5").value).toBeNull();
+    expect(parseQuantity("بدي 3 و 5").reason).toBe("AMBIGUOUS_QUANTITY");
+  });
+
   it("resolves products: sku, name, normalized, ambiguity", async () => {
     await createProduct(db as Db, AGENT, { name: "ماء الكمأة الأصلي", sku: "TW-ORIG", price: 200000 });
     const list = (await db.product.findMany({})) as any[];
@@ -135,8 +159,24 @@ describe("Phase 5 — deterministic primitives", () => {
     expect(parseConfirmation("نعم أكد").signal).toBe("YES");
     expect(parseConfirmation("لا إلغاء").signal).toBe("NO");
     expect(parseConfirmation("تمام").signal).toBe("YES");
-    expect(parseConfirmation("بدي أسأل عن المنتج تمام الحكي").signal).toBe("NONE");
-    expect(parseConfirmation("وين تبيعون؟").signal).toBe("NONE");
+    expect(parseConfirmation("بدي أسأل عن المنتج تمام الحكي").signal).toBe("UNKNOWN");
+    expect(parseConfirmation("وين تبيعون؟").signal).toBe("UNKNOWN");
+  });
+
+  it("never turns a question or greeting into a decision (Phase 0.1)", () => {
+    expect(parseConfirmation("تمام").signal).toBe("YES");
+    expect(parseConfirmation("نعم").signal).toBe("YES");
+    expect(parseConfirmation("أكد الطلب").signal).toBe("YES");
+    expect(parseConfirmation("يلا أكد الطلب").signal).toBe("YES");
+    expect(parseConfirmation("أي لون عندكم؟").signal).toBe("UNKNOWN");
+    expect(parseConfirmation("أهلا").signal).toBe("UNKNOWN");
+    expect(parseConfirmation("لا").signal).toBe("NO");
+    expect(parseConfirmation("بلا مشكلة بدي أطلب").signal).toBe("UNKNOWN");
+    expect(parseConfirmation("نعم لا").signal).toBe("UNKNOWN");
+  });
+
+  it("keeps a negation of another verb from becoming a refusal (Phase 0.1)", () => {
+    expect(parseConfirmation("يلا أكد الطلب، لا تؤجله").signal).not.toBe("NO");
   });
 });
 
@@ -182,11 +222,21 @@ describe("Phase 5 — pricing & delivery", () => {
       workspaceId: WS_A, product: { price: 10, currency: "USD" }, quantity: 1, province: "درعا",
     });
     expect(blocked.deliveryAvailable).toBe(false);
+    // Phase 1.5 — a workspace that manages delivery rules never treats an
+    // unconfigured province as free delivery.
     const unknown = await calculatePricing(db as Db, {
       workspaceId: WS_A, product: { price: 10, currency: "USD" }, quantity: 1, province: "لندن",
     });
-    expect(unknown.deliveryAvailable).toBe(true);
-    expect(unknown.deliveryReason).toBe("NO_RULE_DEFAULT_FEE");
+    expect(unknown.deliveryAvailable).toBe(false);
+    expect(unknown.deliveryReason).toBe("NO_DELIVERY_RULE");
+  });
+
+  it("keeps a permissive default for workspaces with no delivery rules at all", async () => {
+    const b = await calculatePricing(db as Db, {
+      workspaceId: WS_A, product: { price: 10, currency: "USD" }, quantity: 1, province: "لندن",
+    });
+    expect(b.deliveryAvailable).toBe(true);
+    expect(b.deliveryReason).toBe("NO_RULE_DEFAULT_FEE");
   });
 
   it("summary is deterministic — no AI-generated prices", async () => {

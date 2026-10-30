@@ -12,7 +12,7 @@
  */
 import { prisma } from "../src/core/db/prisma";
 import { runJobs } from "../src/modules/jobs/handlers";
-import { nextPollDelayMs } from "../src/modules/jobs/service";
+import { nextPollDelayMs, shouldRunMaintenance } from "../src/modules/jobs/service";
 import { processDueFollowUps } from "../src/modules/automation/followup-service";
 import { registerAutomationBridge } from "../src/modules/automation/engine";
 import { registerWorkflowBridge } from "../src/modules/automation/workflow-bridge";
@@ -20,13 +20,19 @@ import { runIntegrationScheduler } from "../src/modules/integrations/scheduler";
 import { childLogger } from "../src/core/logger";
 
 const log = childLogger("worker");
-const POLL_INTERVAL_RAW = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 1000);
+const POLL_INTERVAL_RAW = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 500);
 const POLL_INTERVAL_MS =
-  Number.isFinite(POLL_INTERVAL_RAW) && POLL_INTERVAL_RAW >= 250 ? POLL_INTERVAL_RAW : 1000;
+  Number.isFinite(POLL_INTERVAL_RAW) && POLL_INTERVAL_RAW >= 250 ? POLL_INTERVAL_RAW : 500;
 // PERF — short re-poll after a full batch (backlog draining); idle cadence
 // unchanged. Tunable without code changes; safe default.
 const BUSY_POLL_RAW = Number(process.env.WORKER_BUSY_POLL_MS ?? 250);
 const BUSY_POLL_MS = Number.isFinite(BUSY_POLL_RAW) && BUSY_POLL_RAW >= 50 ? BUSY_POLL_RAW : 250;
+// PERF — heavy maintenance sweeps (stale jobs · stuck outbound · orphaned
+// inbound) are backstops, not per-reply work: run once every N cycles instead
+// of every cycle. Bounded to >=1; `1` = old behaviour (every cycle).
+const MAINTENANCE_EVERY_RAW = Number(process.env.WORKER_MAINTENANCE_EVERY_CYCLES ?? 10);
+const MAINTENANCE_EVERY =
+  Number.isFinite(MAINTENANCE_EVERY_RAW) && MAINTENANCE_EVERY_RAW >= 1 ? Math.trunc(MAINTENANCE_EVERY_RAW) : 10;
 const CYCLE_LIMIT = 25;
 const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -49,7 +55,12 @@ async function cycle(): Promise<void> {
   let followUpOutcome: "ok" | "failed" = "ok";
   try {
     try {
-      const result = await runJobs(prisma, { limit: CYCLE_LIMIT, workerId: WORKER_ID });
+      const result = await runJobs(prisma, {
+        limit: CYCLE_LIMIT,
+        workerId: WORKER_ID,
+        sameCycle: true,
+        maintenance: shouldRunMaintenance(cycles, MAINTENANCE_EVERY),
+      });
       lastProcessed = result.processed;
       lastFailed = result.failed;
     } catch (err) {
@@ -107,6 +118,16 @@ async function main(): Promise<void> {
       currentCycle = null;
     }
     if (stopping) break;
+    // نبضة العامل — إثبات أن الحلقة حيّة (فحص /health). best-effort.
+    try {
+      await prisma.workerHeartbeat.upsert({
+        where: { workerId: WORKER_ID },
+        update: { lastCycleAt: new Date(), cycles, processed: lastProcessed, failed: lastFailed },
+        create: { workerId: WORKER_ID, lastCycleAt: new Date(), cycles, processed: lastProcessed, failed: lastFailed },
+      });
+    } catch (err) {
+      log.error({ err }, "worker_heartbeat_failed");
+    }
     // PERF — backlog-aware polling: a full batch means more work is likely
     // waiting, so re-poll quickly; otherwise keep the idle cadence exactly.
     await new Promise((r) =>

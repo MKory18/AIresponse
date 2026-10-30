@@ -131,6 +131,7 @@ export async function executeFollowUp(db: Db, f: ClaimedFollowUp): Promise<"SENT
       // Outbound idempotency: the follow-up itself is the source identity.
       sourceMessageId: `followup:${f.id}`,
       text: f.messageText,
+      automationSource: "FOLLOWUP",
     });
     if (result.deliveryStatus === "SENT") {
       await db.followUp.update({ where: { id: f.id }, data: { status: "SENT", executedAt: new Date() } });

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>تقرير إصلاح الموثوقية والأداء — سيستم ٧</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; direction: rtl; text-align: right; color: #1a1f26; line-height: 1.7; font-size: 14px; }
+  h1 { font-size: 24px; color: #0f2a45; margin: 0 0 6px; }
+  h2 { font-size: 19px; color: #0f2a45; border-bottom: 2px solid #d7e2ee; padding-bottom: 4px; margin-top: 26px; }
+  h3 { font-size: 16px; color: #14395c; margin-top: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { border: 1px solid #dbe3ec; padding: 6px 8px; font-size: 13px; text-align: right; vertical-align: top; }
+  th { background: #eef3f9; color: #0f2a45; }
+  code { font-family: Consolas, monospace; background: #f3f6fa; padding: 1px 4px; border-radius: 3px; direction: ltr; display: inline-block; }
+  .risk { background: #fff1f1; border-right: 4px solid #d9463f; padding: 8px 10px; margin: 10px 0; border-radius: 4px; }
+  .fix { background: #fff6e8; border-right: 4px solid #e0912f; padding: 8px 10px; margin: 10px 0; border-radius: 4px; }
+  .ok { background: #f0f8f1; border-right: 4px solid #3aa655; padding: 8px 10px; margin: 10px 0; border-radius: 4px; }
+  .small { color: #5a6b7d; font-size: 12px; }
+  .meta { color: #5a6b7d; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>تقرير إصلاح الموثوقية والأداء<br>سيستم ٧ — نظام الردود والمبيعات</h1>
+<p class="meta">الفرع: <code>fix/reliability-performance-repair</code> · مبني على <code>iahmed-main</code> @ <code>b5224dc</code> · التاريخ: ٣٠ تشرين الأول ٢٠٢٦</p>
+
+<h2>١ · باختصار</h2>
+<p>كل بند كان «أحمر» بتقرير الفحص صار إله إصلاح فعلي + اختبار (فاشل قبل، ناجح بعد)، وما انكسر أي سلوك موجود. البوابات الخمسة كلها خضرا: typecheck · lint · الاختبارات · فحص الأسرار · build. ولا رفع مباشر على <code>main</code>، وكل التغييرات على فرع منفصل وغير مُرحّلة.</p>
+<div class="ok"><b>الأهم:</b> الوكيل صار <b>ما بيعمل طلب ولا بيلغي طلب</b> من جملة عادية أو غامضة، و<b>ما بيكتب على طلب منطلق</b>، و<b>بيوقف كل رد آلي لحظة ما يمسك الموظف المحادثة</b>. ومع هيك صار في <b>رقم حقيقي لزمن الرد</b> منقاس على كل رسالة.</div>
+
+<h2>٢ · جدول حالة الإصلاحات</h2>
+<table>
+<tr><th>المرحلة</th><th>البند</th><th>الحالة</th></tr>
+<tr><td>٠</td><td>مفسّر نعم/لا — كلمة كاملة · «أي» مش نعم · تعارض = غير واضح</td><td>✅ انصلح</td></tr>
+<tr><td>٠</td><td>مفسّر الكمية — كلمة كاملة · عشرات/مئات · مركّب «و» · كود/اسم يوم مش كمية</td><td>✅ انصلح</td></tr>
+<tr><td>٠</td><td>منع تعديل الطلب المنطلق من المحادثة (يُسجّل للمراجعة فقط)</td><td>✅ انصلح</td></tr>
+<tr><td>٠</td><td>فحص استلام الموظف ببوابة الإرسال النهائية</td><td>✅ انصلح</td></tr>
+<tr><td>١</td><td>إنشاء الطلب بمعاملة (تأكيدان متزامنان = طلب واحد بلا ٥٠٠)</td><td>✅ انصلح</td></tr>
+<tr><td>١</td><td>تعديل المحافظة/الكمية بلا تلف (الخصم والمجموع سليمان)</td><td>✅ انصلح</td></tr>
+<tr><td>١</td><td>محافظة غير معرّفة عند وجود قواعد توصيل = غير متاحة (مش مجانية)</td><td>✅ انصلح</td></tr>
+<tr><td>١</td><td>إلغاء الطلب ينشر حدث Cancel ويوقف المتابعات</td><td>✅ انصلح</td></tr>
+<tr><td>٢</td><td>حارس إرسال موحّد + مصادر آليّة صادقة (حملة مش متنكّرة كموظف)</td><td>✅ انصلح</td></tr>
+<tr><td>٢</td><td>معالجة مهمة الذكاء بنفس دورة العامل (same-cycle)</td><td>✅ انصلح</td></tr>
+<tr><td>٢</td><td>أعمال الصيانة كل ١٠ دورات بدل كل دورة</td><td>✅ انصلح</td></tr>
+<tr><td>٢</td><td>دورة العامل الفاضية ١٠٠٠ ← ٥٠٠ مللي (قابلة للضبط)</td><td>✅ انصلح</td></tr>
+<tr><td>٢</td><td>تسجيل زمن الرد الحقيقي على كل رسالة</td><td>✅ انصلح</td></tr>
+<tr><td>٢</td><td>تفصيل «زمن أول رد» حسب المصدر (وكيل/موظف/أتمتة)</td><td>✅ انصلح</td></tr>
+<tr><td>٣</td><td>تقارير الطلبات حسب العملة (بندان منفصلان)</td><td>✅ انصلح</td></tr>
+<tr><td>٣</td><td>فهرس الطلبات (المساحة، الزمن) لتقارير لا تبطؤ مع النمو</td><td>✅ انصلح</td></tr>
+<tr><td>٣</td><td>فحص صحة العامل + تنبيه على /health</td><td>✅ انصلح</td></tr>
+<tr><td>٣</td><td>إشعار تيليجرام بلا اسم/رقم إلا بتفعيل صريح</td><td>✅ انصلح</td></tr>
+<tr><td>٣</td><td>نسخ احتياطي/استرجاع موثّق + سكربتات</td><td>🟡 جاهز · التجربة الحيّة بدها أدوات pg</td></tr>
+</table>
+
+<h2>٣ · تغييرات قاعدة البيانات</h2>
+<p>كلها <b>إضافية فقط</b> — بلا حذف عمود أو جدول، وبلا تغيير نوع، وآمنة على البيانات الموجودة:</p>
+<table>
+<tr><th>الترحيل</th><th>التغيير</th></tr>
+<tr><td>20261030000000</td><td>عمودا <code>respondedAt</code> و<code>replyLatencyMs</code> على الرسائل + فهرس</td></tr>
+<tr><td>20261030000001</td><td>فهرس <code>Order(workspaceId, createdAt)</code></td></tr>
+<tr><td>20261030000002</td><td>جدول <code>WorkerHeartbeat</code> (نبضة العامل) + فهرس</td></tr>
+</table>
+<p class="small">الصفوف القديمة تبقى NULL (زمن غير معروف) — ما في قيمة مُخترعة.</p>
+
+<h2>٤ · قبل / بعد — زمن الرد</h2>
+<div class="risk"><b>⚠️ تنبيه:</b> الأرقام تحت <b>تقدير من الكود والإعدادات</b>، مش قياس حي على مزوّد ذكاء حقيقي (بدو مزوّد ومفتاح شغّالين). ما في نسب مئوية مُختلقة.</div>
+<table>
+<tr><th>العامل</th><th>قبل</th><th>بعد</th></tr>
+<tr><td>دورة العامل الفاضية</td><td>١٠٠٠ مللي ثانية</td><td>٥٠٠ مللي ثانية (حد أدنى ٢٥٠ وقابلة للضبط)</td></tr>
+<tr><td>عدد دورات انتظار الرد</td><td>دورتان (ويبهوك ثم ذكاء)</td><td>دورة واحدة للذكاء (same-cycle)</td></tr>
+<tr><td>أعمال الصيانة (مسح حتى ٢٠×٥٠٠ صف)</td><td>كل دورة</td><td>كل ١٠ دورات</td></tr>
+</table>
+<p class="small">المتبقّي: قياس «قبل/بعد» حيّ على ٢٠ محادثة حقيقية — بند تشغيلي بدو مزوّد شغّال.</p>
+
+<h2>٥ · الاختبارات والإصدارات</h2>
+<table>
+<tr><th>البند</th><th>قبل</th><th>بعد</th></tr>
+<tr><td>ملفات الاختبار</td><td>٩٩</td><td>١٠٢</td></tr>
+<tr><td>اختبارات ناجحة</td><td>١٥٣٣</td><td>١٥٦٤ (+٣١)</td></tr>
+<tr><td>متخطّى</td><td>٨</td><td>٨</td></tr>
+</table>
+<p>الإصدارات: Node 22 · Next.js 14.2.35 · Prisma 5.22.0 · Vitest 2.1.9 · PostgreSQL (pgvector/pg16 في CI).</p>
+<div class="ok">البوابات: <b>typecheck ✅ · lint ✅ · اختبارات ١٥٦٤ ✅ · فحص أسرار ✅ · build ✅ · prisma validate ✅</b>.</div>
+
+<h2>٦ · أبرز الملفات المتغيّرة</h2>
+<ul>
+<li><code>orders/primitives.ts</code> — مفسّر الكمية والتأكيد من جديد.</li>
+<li><code>orders/order-service.ts</code> — حراسة التعديل · إنشاء ذرّي · إعادة تسعير سليمة · حدث الإلغاء + إلغاء المتابعات · إشعار تيليجرام بلا PII.</li>
+<li><code>orders/intelligence.ts</code> — رسائل تعديل الطلب.</li>
+<li><code>orders/delivery.ts</code> — محافظة غير معرّفة.</li>
+<li><code>orders/notify.ts</code> (جديد) — نص الإشعار + مفتاح الخصوصية.</li>
+<li><code>channels/send-policy.ts</code> · <code>channels/outbound.ts</code> — الحارس الموحّد + قياس الزمن.</li>
+<li><code>automation/*</code> · <code>campaigns/campaign-runner.ts</code> — مصادر آليّة صادقة.</li>
+<li><code>jobs/service.ts</code> · <code>jobs/handlers.ts</code> · <code>jobs/worker-health.ts</code> (جديد) · <code>scripts/worker.ts</code> — same-cycle · صيانة مُحكمة · نبضة.</li>
+<li><code>analytics/service.ts</code> — زمن أول رد حسب المصدر + تقارير العملة.</li>
+<li><code>app/api/health/route.ts</code> — فحص العامل.</li>
+<li><code>docs/BACKUP-RESTORE.md</code> + <code>scripts/db-backup.ps1</code> · <code>db-restore.ps1</code> · <code>db-counts.ts</code> (جديدة).</li>
+</ul>
+
+<h2>٧ · متبقٍّ بصراحة</h2>
+<ul>
+<li>⚠️ القياس الحي للسرعة على مزوّد حقيقي — بدو مزوّد ومفتاح شغّالين.</li>
+<li>⚠️ تجربة الاسترجاع الحيّة — بدها أدوات <code>pg_dump/pg_restore</code> ومهلة صيانة (السكربتات والوثيقة جاهزة).</li>
+<li>دمج الاستخراج والرد باستدعاء واحد (بند ٥ بالسرعة) — متوسط الحجم، يحتاج قرارك ومخاطره أعلى.</li>
+<li>توسيع المخزن المؤقت للإعدادات (بند ٤) — المخزن موجود جزئيًا (مخزن المتجهات ٦٠ ثانية).</li>
+</ul>
+
+<h2>٨ · حالة git</h2>
+<ul>
+<li>الفرع: <code>fix/reliability-performance-repair</code> @ <code>b5224dc</code>.</li>
+<li>كل التغييرات <b>غير مُرحّلة</b> — بانتظار مراجعتك والرفع كطلب دمج.</li>
+<li>لا رفع على <code>main</code> · لا إعادة/حذف لشغل سابق · لا مساس بالريموت أو بمزوّد الذكاء.</li>
+</ul>
+<p class="small">لأي بند تريد تفصيله أو تعديل قرار منه (استلام الموظف · تعديل الطلب · محافظة غير معرّفة · خصوصية تيليجرام) — قلّي وبعدّله على نفس الفرع.</p>
+
+</body>
+</html>

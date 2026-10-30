@@ -123,17 +123,20 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
         // OCR-2026-10-16: الملاحظات الداخلية ليست رسائل زبون — إلا هنا كانت
         // تعدّ messages واردة وتضخّم FRT (الملاحظة تُعدّ "أول رد").
         where: { workspaceId, conversationId: { in: conversationIds }, deletedAt: null, isNote: false },
-        select: { conversationId: true, direction: true, createdAt: true },
+        select: { conversationId: true, direction: true, senderType: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       })
     : [];
 
   // firstResponseTime per conversation (see definition above).
   const frtMinutes: number[] = [];
-  const byConversation = new Map<string, { direction: string; createdAt: Date }[]>();
+  // Phase 3 — split the first response by its real source so a slow AI is never
+  // confused with a slow human team (or a scheduled automation/campaign).
+  const frtBySource: Record<"ai" | "human" | "automation", number[]> = { ai: [], human: [], automation: [] };
+  const byConversation = new Map<string, { direction: string; senderType: string; createdAt: Date }[]>();
   for (const m of messages) {
     const list = byConversation.get(m.conversationId) ?? [];
-    list.push({ direction: m.direction, createdAt: new Date(m.createdAt) });
+    list.push({ direction: m.direction, senderType: m.senderType, createdAt: new Date(m.createdAt) });
     byConversation.set(m.conversationId, list);
   }
   for (const [convId, list] of byConversation) {
@@ -143,7 +146,10 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
       (m) => m.direction === "OUTBOUND" && new Date(m.createdAt).getTime() >= firstInbound.createdAt.getTime()
     );
     if (firstOutbound) {
-      frtMinutes.push((new Date(firstOutbound.createdAt).getTime() - firstInbound.createdAt.getTime()) / 60_000);
+      const gap = (new Date(firstOutbound.createdAt).getTime() - firstInbound.createdAt.getTime()) / 60_000;
+      frtMinutes.push(gap);
+      const source = firstOutbound.senderType === "HUMAN" ? "human" : firstOutbound.senderType === "AI" ? "ai" : "automation";
+      frtBySource[source].push(gap);
     }
     void convId;
   }
@@ -159,6 +165,12 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
       avgMinutes: avg(frtMinutes),
       medianMinutes: median(frtMinutes),
       count: frtMinutes.length,
+      // تفصيل حسب مصدر أول رد (Phase 3). `automation` = نظام/أتمتة/حملة.
+      bySource: {
+        ai: { avgMinutes: avg(frtBySource.ai), medianMinutes: median(frtBySource.ai), count: frtBySource.ai.length },
+        human: { avgMinutes: avg(frtBySource.human), medianMinutes: median(frtBySource.human), count: frtBySource.human.length },
+        automation: { avgMinutes: avg(frtBySource.automation), medianMinutes: median(frtBySource.automation), count: frtBySource.automation.length },
+      },
     },
     resolution: {
       avgMinutes: avg(resolutionMinutes),
@@ -174,7 +186,7 @@ export async function getOrderAnalytics(db: DbClient, workspaceId: string, q: Ra
   const { start, end } = resolveRange(q);
   const orders = await db.order.findMany({
     where: { workspaceId, createdAt: { gte: start, lt: end } },
-    select: { status: true, subtotal: true, discount: true, deliveryFee: true, total: true, province: true },
+    select: { status: true, subtotal: true, discount: true, deliveryFee: true, total: true, province: true, currency: true },
   });
   const sum = (pred: (o: (typeof orders)[number]) => boolean, field: "total" | "subtotal") =>
     orders.filter(pred).reduce((s, o) => s + Number(o[field]), 0);
@@ -202,6 +214,27 @@ export async function getOrderAnalytics(db: DbClient, workspaceId: string, q: Ra
         return acc;
       }, {})
     ).map(([province, count]) => ({ province, count })),
+    // Phase 3 — عملات مختلفة لا تُجمع ببعضها: كل عملة بند منفصل (٢٠$ + ١٥٠٬٠٠٠ ل.س
+    // = بندان، لا رقم واحد مضلّل). الجمع العام أعلاه يبقى كما هو للتوافق.
+    byCurrency: Object.entries(
+      orders.reduce<Record<string, { created: number; confirmed: number; createdGmv: number; confirmedGmv: number }>>(
+        (acc, o) => {
+          const key = o.currency ?? "UNKNOWN";
+          const entry = acc[key] ?? { created: 0, confirmed: 0, createdGmv: 0, confirmedGmv: 0 };
+          entry.created += 1;
+          entry.createdGmv += Number(o.total);
+          if (confirmedStatuses.includes(o.status)) {
+            entry.confirmed += 1;
+            entry.confirmedGmv += Number(o.total);
+          }
+          acc[key] = entry;
+          return acc;
+        },
+        {}
+      )
+    )
+      .map(([currency, v]) => ({ currency, ...v }))
+      .sort((a, b) => b.confirmedGmv - a.confirmedGmv),
   };
 }
 

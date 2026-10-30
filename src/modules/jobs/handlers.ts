@@ -582,7 +582,10 @@ function getDb(): HandlerDb {
   return currentDb;
 }
 
-export async function runJobs(db: HandlerDb, opts?: { limit?: number; workerId?: string }) {
+export async function runJobs(
+  db: HandlerDb,
+  opts?: { limit?: number; workerId?: string; maintenance?: boolean; sameCycle?: boolean }
+) {
   currentDb = db;
   // Track each job's workspace so handlers can scope tenant-isolated work.
   const pending = await (db as any).backgroundJob.findMany({

@@ -333,21 +333,39 @@ export async function recoverOrphanedInboundMessages(
   return { recovered, skipped };
 }
 
-export async function processPendingJobs(
+/**
+ * PERF — should the heavy maintenance sweeps run this cycle?
+ * Pure helper (tested): sweeps are idempotent backstops, not per-reply work, so
+ * a busy worker can run them once every N cycles. `every <= 1` (default) keeps
+ * the exact old behaviour — maintenance runs every cycle.
+ */
+export function shouldRunMaintenance(cycle: number, every: number): boolean {
+  const n = Math.trunc(every);
+  if (!Number.isFinite(n) || n <= 1) return true;
+  return cycle % n === 0;
+}
+
+/**
+ * Runs ONE bounded batch of pending jobs (oldest first). `createdAfter`
+ * restricts the batch to jobs created at/after a moment — used by the
+ * same-cycle follow-through below so a freshly enqueued AI job is picked up
+ * without waiting for the next poll.
+ */
+async function processJobBatch(
   db: Db,
   handlers: Record<string, JobHandler>,
-  opts: { limit?: number; workerId?: string } = {}
+  limit: number,
+  workerId: string | undefined,
+  createdAfter?: Date
 ): Promise<{ processed: number; failed: number }> {
-  await recoverStaleJobs(db);
-  // Recover stuck outbound messages across all workspaces before processing new jobs
-  await recoverStuckOutboundMessages(db, { maxAgeMinutes: 10, limit: 20 });
-  // Durable backstop: re-queue inbound messages that never reached a terminal
-  // AI decision (enqueue failure, exhausted job attempts, worker downtime).
-  await recoverOrphanedInboundMessages(db, { limit: 20 });
   const jobs = await db.backgroundJob.findMany({
-    where: { status: "PENDING", runAfter: { lte: new Date() } },
+    where: {
+      status: "PENDING",
+      runAfter: { lte: new Date() },
+      ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+    },
     orderBy: { createdAt: "asc" },
-    take: opts.limit ?? 10,
+    take: limit,
   });
 
   let processed = 0;
@@ -363,7 +381,7 @@ export async function processPendingJobs(
         startedAt: new Date(),
         attempts: { increment: 1 },
         lockedAt: new Date(),
-        lockedBy: opts.workerId ?? "worker",
+        lockedBy: workerId ?? "worker",
       },
     });
     if (claimed.count === 0) continue;
@@ -430,4 +448,44 @@ export async function processPendingJobs(
   }
 
   return { processed, failed };
+}
+
+/**
+ * Processes pending jobs. Before the first batch it runs the maintenance sweeps
+ * (stale-job recovery, stuck outbound, orphaned inbound) — skippable via
+ * `maintenance: false` so a busy worker can run them once every N cycles.
+ *
+ * PERF — same-cycle follow-through (`sameCycle: true`): a webhook/inbound job
+ * often enqueues a `process_ai_message` job while being processed. Without it
+ * that AI job waits a full poll interval before the next batch. When enabled,
+ * one extra bounded batch runs immediately for jobs created during this cycle,
+ * so a reply starts within the same worker tick instead of the next.
+ */
+export async function processPendingJobs(
+  db: Db,
+  handlers: Record<string, JobHandler>,
+  opts: { limit?: number; workerId?: string; maintenance?: boolean; sameCycle?: boolean } = {}
+): Promise<{ processed: number; failed: number }> {
+  const limit = opts.limit ?? 10;
+  if (opts.maintenance !== false) {
+    await recoverStaleJobs(db);
+    // Recover stuck outbound messages across all workspaces before processing new jobs
+    await recoverStuckOutboundMessages(db, { maxAgeMinutes: 10, limit: 20 });
+    // Durable backstop: re-queue inbound messages that never reached a terminal
+    // AI decision (enqueue failure, exhausted job attempts, worker downtime).
+    await recoverOrphanedInboundMessages(db, { limit: 20 });
+  }
+
+  const cycleStartedAt = new Date();
+  const result = await processJobBatch(db, handlers, limit, opts.workerId);
+
+  if (opts.sameCycle) {
+    // Only jobs created AFTER the first batch's snapshot — no re-running work
+    // the batch already claimed (that would be a no-op but wasted queries).
+    const extra = await processJobBatch(db, handlers, limit, opts.workerId, cycleStartedAt);
+    result.processed += extra.processed;
+    result.failed += extra.failed;
+  }
+
+  return result;
 }
