@@ -26,6 +26,22 @@ export interface SenderNameResult {
   avatarUrl: string | null;
   /** True when the answer came from cache/throttle (no Graph call). */
   cached: boolean;
+  /**
+   * P21 — نتيجة تفصيلية آمنة للتشخيص (بلا توكن/بيانات زبون):
+   * ok = اسم/صورة، empty = Graph رد بلا اسم، network = فشل اتصال، cached = محفوظ.
+   */
+  status: "ok" | "empty" | "network" | "cached";
+  httpStatus?: number;
+  errorCode?: number;
+}
+
+export interface ResolveSenderNameOptions {
+  workspaceId: string;
+  psid: string;
+  pageToken: string | null;
+  client: FacebookClient;
+  /** P21 — تجاوز كاش/التهدئة (زر «تحديث الاسم والصورة»). */
+  force?: boolean;
 }
 
 /**
@@ -44,11 +60,11 @@ export interface SenderNameResult {
  */
 export async function resolveSenderName(
   db: Db,
-  opts: { workspaceId: string; psid: string; pageToken: string | null; client: FacebookClient }
+  opts: ResolveSenderNameOptions
 ): Promise<SenderNameResult> {
   const started = Date.now();
-  const { workspaceId, psid, pageToken, client } = opts;
-  if (!psid || !pageToken) return { name: null, avatarUrl: null, cached: true };
+  const { workspaceId, psid, pageToken, client, force } = opts;
+  if (!psid || !pageToken) return { name: null, avatarUrl: null, cached: true, status: "empty" };
 
   let identity: {
     id: string;
@@ -76,11 +92,19 @@ export async function resolveSenderName(
   // network window restores real names fast after transient outages instead
   // of hiding them for a day.
   if (
-    (hasFullProfile && checkedAgeMs < STALE_REFRESH_MS) ||
-    checkedAgeMs < NEGATIVE_CACHE_MS ||
-    networkFailAgeMs < NETWORK_NEGATIVE_CACHE_MS
+    !force &&
+    ((hasFullProfile && checkedAgeMs < STALE_REFRESH_MS) ||
+      checkedAgeMs < NEGATIVE_CACHE_MS ||
+      networkFailAgeMs < NETWORK_NEGATIVE_CACHE_MS)
   ) {
-    return { name: null, avatarUrl: null, cached: true };
+    // P21 — نرجع القيم المحفوظة (وليس null) كي تُكمَّل صفوف العميل الناقصة من
+    // الهوية؛ الاستدعاء idempotent ولا يكتب شيئًا إن كانت القيم مطابقة.
+    return {
+      name: identity?.displayName ?? null,
+      avatarUrl: identity?.avatarUrl ?? null,
+      cached: true,
+      status: "cached",
+    };
   }
 
   // getSenderProfile never throws: null means the request itself failed
@@ -101,7 +125,12 @@ export async function resolveSenderName(
       } else {
         metadata.profileCheckedAt = new Date().toISOString();
       }
-      await (db as any).channelIdentity.update({ where: { id: identity.id }, data: { metadata } });
+      // P21 — خزّن الاسم/الصورة على الهوية فور وصولهما: يضمن أن الكاش/التحديث
+      // اللاحق يرجّع القيمة الحقيقية حتى لو تأخر/فشل تحديث صف العميل.
+      const data: Record<string, unknown> = { metadata };
+      if (profile?.name) data.displayName = profile.name;
+      if (profile?.avatarUrl) data.avatarUrl = profile.avatarUrl;
+      await (db as any).channelIdentity.update({ where: { id: identity.id }, data });
     } catch {
       // never break ingestion on bookkeeping
     }
@@ -115,7 +144,7 @@ export async function resolveSenderName(
   if (!profile) {
     log.warn({ workspaceId, httpStatus: "network", durationMs: Date.now() - started }, "sender_profile_failed");
     log.warn({ workspaceId, status: "failed", durationMs: Date.now() - started }, "profile_fetch_failed");
-    return { name: null, avatarUrl: null, cached: false };
+    return { name: null, avatarUrl: null, cached: false, status: "network" };
   }
   if (!profile.name && !profile.avatarUrl) {
     // Graph answered but gave no usable fields (or an explicit error) — log
@@ -126,9 +155,22 @@ export async function resolveSenderName(
       "sender_profile_empty"
     );
     log.warn({ workspaceId, status: "empty", durationMs: Date.now() - started }, "profile_fetch_failed");
-    return { name: null, avatarUrl: null, cached: false };
+    return {
+      name: null,
+      avatarUrl: null,
+      cached: false,
+      status: "empty",
+      httpStatus: profile.httpStatus,
+      errorCode: profile.errorCode,
+    };
   }
   log.info({ workspaceId, httpStatus: profile.httpStatus, nameObtained: Boolean(profile.name), avatarObtained: Boolean(profile.avatarUrl), durationMs: Date.now() - started }, "sender_profile_ok");
   log.info({ workspaceId, status: "completed", durationMs: Date.now() - started }, "profile_fetch_completed");
-  return { name: profile.name, avatarUrl: profile.avatarUrl, cached: false };
+  return {
+    name: profile.name,
+    avatarUrl: profile.avatarUrl,
+    cached: false,
+    status: "ok",
+    httpStatus: profile.httpStatus,
+  };
 }

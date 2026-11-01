@@ -408,8 +408,23 @@ export default function Inbox() {
   }
 
   // P8 — مساعد البيع: اقتراحات داخلية فقط، لا يُرسل شيء تلقائيًا.
-  async function loadCoach(conversationId: string) {
-    setCoachLoading(true);
+  // P21 — تحديث اسم/صورة العميل من فيسبوك بطلب الموظف (يتجاوز الكاش السلبي).
+  async function refreshCustomerProfile(): Promise<{ ok: boolean; message: string }> {
+    if (!customer) return { ok: false, message: "ما في عميل محدد." };
+    try {
+      const res = await fetch(`/api/customers/${customer.id}/refresh-profile`, { method: "POST" });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+      if (res.ok && data?.ok) {
+        const fresh = await fetch(`/api/customers/${customer.id}`);
+        if (fresh.ok) setCustomer((await fresh.json()) as CustomerDetail);
+      }
+      return { ok: Boolean(data?.ok), message: data?.message ?? (res.ok ? "تم التحديث." : "تعذّر التحديث.") };
+    } catch {
+      return { ok: false, message: "تعذّر الاتصال بالخادم." };
+    }
+  }
+
+  async function loadCoach(conversationId: string) {    setCoachLoading(true);
     setCoachError(false);
     try {
       // OCR-2026-10-16 #9: body فاضي كان باربع INVALID_BODY دايمًا — المسار
@@ -803,6 +818,7 @@ export default function Inbox() {
           customer={customer}
           orderDraft={orderDraftCard}
           pageName={selected ? pageNameOf(selected) : null}
+          onRefreshProfile={refreshCustomerProfile}
         />
       </aside>
       <Drawer open={panelOpen} onClose={() => setPanelOpen(false)} side="end" until="xl" title="ملف العميل">

@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Facebook, MapPin, Package, Phone, Sparkles } from "lucide-react";
+import { Facebook, MapPin, Package, Phone, RefreshCw, Sparkles } from "lucide-react";
 import { formatNumber, label, t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
@@ -14,13 +15,32 @@ export function CustomerPanel({
   customer,
   orderDraft,
   pageName,
+  onRefreshProfile,
 }: {
   customer: CustomerDetail | null;
   orderDraft: DraftInfo | null;
   pageName?: string | null;
+  onRefreshProfile?: () => Promise<{ ok: boolean; message: string }>;
 }) {
+  const [refreshingProfile, setRefreshingProfile] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+
   if (!customer) {
     return <EmptyState title={t.customer.noSelection} className="h-full" />;
+  }
+
+  async function refreshProfile() {
+    if (!onRefreshProfile) return;
+    setRefreshingProfile(true);
+    setProfileMessage(null);
+    try {
+      const r = await onRefreshProfile();
+      setProfileMessage(r.message);
+    } catch {
+      setProfileMessage("تعذّر تحديث الاسم — جرّب مرة ثانية.");
+    } finally {
+      setRefreshingProfile(false);
+    }
   }
 
   return (
@@ -54,6 +74,22 @@ export function CustomerPanel({
               </Badge>
             )}
           </div>
+          {onRefreshProfile && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => void refreshProfile()}
+                disabled={refreshingProfile}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-brand-600 transition hover:bg-brand-500/10 disabled:opacity-60 dark:text-brand-300"
+              >
+                <RefreshCw size={11} className={refreshingProfile ? "animate-spin" : ""} />
+                {refreshingProfile ? "جارٍ التحديث…" : "تحديث الاسم والصورة"}
+              </button>
+              {profileMessage && (
+                <p className="mt-1 max-w-[220px] text-[10px] leading-relaxed text-ink-subtle">{profileMessage}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
