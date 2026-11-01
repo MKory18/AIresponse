@@ -34,6 +34,8 @@ export const JOB_TYPES = [
   // P17 — اسم/صورة المرسل من Graph: مهمة تجميلية خارج مسار الرد تمامًا،
   // كي لا يدفع الزبون الجديد ثمن نداء Graph (حتى 4 ثوان) قبل أول رد.
   "resolve_sender_profile",
+  // P19 — إشعار تيليجرام بمسودة طلب صارت READY (مجموعة/توبيك محدّد).
+  "notify_order_ready",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

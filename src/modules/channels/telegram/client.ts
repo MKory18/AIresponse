@@ -91,10 +91,20 @@ export class TelegramClient {
   async sendMessage(
     botToken: string,
     chatId: string | number,
-    payload: { text?: string; photo?: string; document?: string; caption?: string }
+    payload: {
+      text?: string;
+      photo?: string;
+      document?: string;
+      caption?: string;
+      /** Forum topic id (message_thread_id) for groups with topics. */
+      messageThreadId?: number;
+      parseMode?: "HTML" | "MarkdownV2";
+    }
   ): Promise<{ messageId: number }> {
     const method = payload.photo ? "sendPhoto" : payload.document ? "sendDocument" : "sendMessage";
     const body: Record<string, unknown> = { chat_id: chatId };
+    if (payload.messageThreadId !== undefined) body.message_thread_id = payload.messageThreadId;
+    if (payload.parseMode) body.parse_mode = payload.parseMode;
     if (method === "sendMessage") body.text = payload.text ?? "";
     else {
       body[payload.photo ? "photo" : "document"] = payload.photo ?? payload.document;

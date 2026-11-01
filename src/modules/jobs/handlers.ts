@@ -568,6 +568,152 @@ async function handleResolveSenderProfile(
   return { success: true };
 }
 
+/**
+ * P19 — notify_order_ready: يرسل بيانات الطلب الجاهز لمجموعة/توبيك تيليجرام.
+ *
+ * - المستقل: ما بيعطّل الرد ولا إنشاء الطلب (مهمة خلفية).
+ * - idempotent: مفتاح المهمة لكل مسودة/جيل، وفحص أثر سابق قبل الإرسال.
+ * - لا يرسل إذا: المسودة ما عادت READY/انحوّلت لطلب/انلغت، أو الإعدادات مطفية.
+ * - بيانات الزبون (اسم/هاتف/عنوان) تُرسل للمجموعة الخاصة التي حدّدها المالك فقط.
+ */
+async function handleNotifyOrderReady(
+  db: HandlerDb,
+  payload: Record<string, unknown>,
+  workspaceId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!workspaceId) return { success: false, error: "MISSING_WORKSPACE_CONTEXT" };
+  const draftId = String(payload.draftId ?? "");
+  if (!draftId) return { success: true };
+
+  const draft = await db.orderDraft.findUnique({ where: { id: draftId } });
+  if (!draft || draft.workspaceId !== workspaceId) return { success: true };
+  if (draft.state !== "READY" || draft.orderId) return { success: true };
+
+  const settings = await db.telegramOrderSettings.findUnique({ where: { workspaceId } });
+  if (!settings?.enabled || !settings.chatId || !settings.botTokenEnc) return { success: true };
+
+  const generation = draft.idempotencyKey ?? "first";
+  // أثر إرسال سابق لنفس الجيل = لا تكرار (حتى لو أعيدت المهمة بعد تعافٍ).
+  try {
+    const already = await (db as any).auditLog.findFirst({
+      where: {
+        workspaceId,
+        action: "order.ready_notified_telegram",
+        entityType: "OrderDraft",
+        entityId: draft.id,
+        metadata: { path: ["generation"], equals: generation },
+      },
+      select: { id: true },
+    });
+    if (already) return { success: true };
+  } catch {
+    // فلتر JSON غير مدعوم في بعض القواعد/البدائل — نكمل بحماية مفتاح المهمة.
+  }
+
+  const [conversation, customer, product] = await Promise.all([
+    db.conversation.findUnique({
+      where: { id: draft.conversationId },
+      select: { channelId: true },
+    }),
+    db.customer.findUnique({
+      where: { id: draft.customerId },
+      select: { name: true, phone: true, workspaceId: true },
+    }),
+    draft.productId
+      ? db.product.findUnique({
+          where: { id: draft.productId },
+          select: { name: true, price: true, currency: true, workspaceId: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  // عزل: كل الأطراف لازم يكونوا بنفس مساحة المهمة.
+  if (customer && customer.workspaceId !== workspaceId) return { success: true };
+  if (product && product.workspaceId !== workspaceId) return { success: true };
+  const channel = conversation?.channelId
+    ? await db.channel.findUnique({
+        where: { id: conversation.channelId },
+        select: { displayName: true, workspaceId: true },
+      })
+    : null;
+  if (channel && channel.workspaceId !== workspaceId) return { success: true };
+
+  // إجمالي تقديري (قبل التوصيل) من محرك الأسعار — أفضل جهد، بلا اختراع.
+  let estimatedTotal: string | null = null;
+  if (product && draft.quantity) {
+    try {
+      const { calculatePricing } = await import("@/modules/orders/pricing");
+      const breakdown = await calculatePricing(db as never, {
+        workspaceId,
+        product: { price: product.price, currency: product.currency },
+        quantity: draft.quantity,
+        province: draft.province,
+      });
+      if (breakdown?.total !== undefined && breakdown?.total !== null) {
+        estimatedTotal = String(breakdown.total);
+      }
+    } catch {
+      estimatedTotal = null;
+    }
+  }
+
+  const { buildOrderReadyMessage } = await import("@/modules/integrations/telegram-orders");
+  const text = buildOrderReadyMessage({
+    pageName: channel?.displayName ?? null,
+    customerName: draft.customerName ?? customer?.name ?? null,
+    phone: draft.phone ?? customer?.phone ?? null,
+    province: draft.province,
+    address: draft.rawAddress,
+    productName: draft.productName ?? product?.name ?? null,
+    quantity: draft.quantity,
+    unitPrice: product ? product.price.toString() : null,
+    currency: product?.currency ?? null,
+    estimatedTotal,
+  });
+
+  let messageThreadId: number | undefined;
+  if (settings.topicId) {
+    const n = Number(settings.topicId);
+    if (Number.isInteger(n) && n > 0) messageThreadId = n;
+  }
+
+  const { getTelegramClient, TelegramApiError } = await import("@/modules/channels/telegram/client");
+  const { decryptSecret } = await import("@/core/crypto");
+  try {
+    const token = decryptSecret(settings.botTokenEnc);
+    const result = await getTelegramClient().sendMessage(token, settings.chatId, {
+      text,
+      parseMode: "HTML",
+      ...(messageThreadId ? { messageThreadId } : {}),
+    });
+    const { recordAudit } = await import("@/modules/audit/service");
+    await recordAudit(db, {
+      workspaceId,
+      userId: null,
+      action: "order.ready_notified_telegram",
+      entityType: "OrderDraft",
+      entityId: draft.id,
+      metadata: {
+        generation,
+        chatId: settings.chatId,
+        topicId: settings.topicId ?? null,
+        messageId: result.messageId,
+      },
+    });
+    return { success: true };
+  } catch (err) {
+    if (err instanceof TelegramApiError) {
+      log.warn(
+        { workspaceId, draftId: draft.id, kind: err.kind, code: err.code ?? null },
+        "telegram_order_ready_failed"
+      );
+      // فشل عابر → إعادة محاولة من الطابور؛ دائم → يظهر FAILED للمراجعة.
+      return { success: false, error: `TELEGRAM_${err.kind}_${err.code ?? "ERROR"}` };
+    }
+    throw err;
+  }
+}
+
 /** evaluate_automation: runs the Automation Engine for one trusted event. */
 async function handleEvaluateAutomation(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
   const { evaluateEvent } = await import("@/modules/automation/engine");
@@ -653,6 +799,8 @@ export function getJobHandlers(): Record<string, JobHandler> {
       handleProcessAIMessage(db, payload, workspaceId),
     resolve_sender_profile: (payload, _jobId, workspaceId) =>
       handleResolveSenderProfile(db, payload, workspaceId),
+    notify_order_ready: (payload, _jobId, workspaceId) =>
+      handleNotifyOrderReady(db, payload, workspaceId),
     generate_summary: (payload) => handleGenerateSummary(db, payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(db, payload),
     process_channel_inbound: (payload) => handleChannelInbound(db, payload),

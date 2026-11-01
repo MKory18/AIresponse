@@ -259,7 +259,8 @@ describe("Phase 5 — order draft", () => {
     });
     const draft = await draftRow();
     expect(draft.state).toBe("COLLECTING");
-    expect(result.missingFields).toEqual(["quantity", "phone", "address"]);
+    // P18 — هاتف الزبون موجود بملفه، فالمسودة بتبلش فيه: الناقص كمية + عنوان.
+    expect(result.missingFields).toEqual(["quantity", "address"]);
   });
 
   it("collects across messages: product then quantity then phone then address", async () => {
@@ -268,7 +269,8 @@ describe("Phase 5 — order draft", () => {
     expect(computeMissingFields(draft)).toContain("quantity");
     await updateDraftFromExtraction(db as Db, { workspaceId: WS_A, conversationId, customerId, extraction: { quantity: 3 }, source: "TEST" });
     draft = await draftRow();
-    expect(computeMissingFields(draft)).toEqual(["phone", "address"]);
+    // P18 — الهاتف مأخوذ من ملف العميل أصلًا؛ الناقص العنوان فقط.
+    expect(computeMissingFields(draft)).toEqual(["address"]);
     await updateDraftFromExtraction(db as Db, { workspaceId: WS_A, conversationId, customerId, extraction: { phone: "٠٩٣٠٠٠٠٠٠٠" }, source: "TEST" });
     draft = await draftRow();
     expect(draft.phone).toBe("0930000000");
@@ -292,7 +294,8 @@ describe("Phase 5 — order draft", () => {
   it("invalid phone from AI is dropped, not stored", async () => {
     await updateDraftFromExtraction(db as Db, { workspaceId: WS_A, conversationId, customerId, extraction: { phone: "abc123" }, source: "AI" });
     const draft = await draftRow();
-    expect(draft.phone).toBeNull();
+    // P18 — قيمة الموديل غير الصالحة ما انحفظت؛ ضل هاتف ملف العميل الصالح.
+    expect(draft.phone).toBe("0930000000");
   });
 });
 

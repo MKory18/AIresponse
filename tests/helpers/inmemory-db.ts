@@ -417,6 +417,8 @@ export function createFakeDb() {
   const customerIntelRunRows: Row[] = [];
   // البيانات المطلوب تجميعها (إعداد لكل مساحة).
   const collectionFieldSettingRows: Row[] = [];
+  // P19 — إشعار الطلبات الجاهزة على تيليجرام.
+  const telegramOrderSettingsRows: Row[] = [];
 
   const db = {
     _stores: {
@@ -446,12 +448,13 @@ export function createFakeDb() {
       customerIntel: customerIntelRows,
       customerIntelRun: customerIntelRunRows,
       collectionFieldSetting: collectionFieldSettingRows,
+      telegramOrderSettings: telegramOrderSettingsRows,
     },
     customer: makeModel("customer", customer, { status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     message: makeModel("message", message, { deliveryStatus: "PENDING", isNote: false, metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channelIdentity: makeModel("channelIdentity", channelIdentity, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    channel: makeModel("channel", channel, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    channel: makeModel("channel", channel, { orderRequiredFields: ["product", "quantity", "phone", "address"], tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     workspaceMember: makeModel("workspaceMember", workspaceMember, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     auditLog: makeModel("auditLog", auditLog, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     product: makeModel("product", product, { currency: "USD", stockStatus: "IN_STOCK", stockQty: 0, tags: [], benefits: [], objections: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -509,6 +512,7 @@ export function createFakeDb() {
     customerIntel: makeModel("customerIntel", customerIntelRows, { status: "PENDING", data: {}, fieldMeta: {}, confidence: 0, attempts: 0, lastError: null, extractedAt: null, reviewedAt: null, reviewedBy: null, lastMessageId: null }),
     customerIntelRun: makeModel("customerIntelRun", customerIntelRunRows, { status: "QUEUED", provider: null, model: null, latencyMs: null, errorCode: null, startedAt: null, finishedAt: null }),
     collectionFieldSetting: makeModel("collectionFieldSetting", collectionFieldSettingRows, { kind: "TEXT", required: false, enabled: true, sortOrder: 0, isCustom: false }),
+    telegramOrderSettings: makeModel("telegramOrderSettings", telegramOrderSettingsRows, { enabled: false }),
   };
 
   const conversationModel = db.conversation as any;
