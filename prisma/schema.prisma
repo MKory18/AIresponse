@@ -1234,6 +1234,10 @@ model OrderDraft {
   rawAddress       String?
   province         String?
   notes            String?
+  // P22 — سلة المسودة: عدة منتجات في طلب واحد. كل عنصر:
+  // { productId, productName, variantId, quantity }. الحقول المفردة فوق
+  // تبقى مرآة للعنصر الأول (توافق خلفي وواجهات قديمة).
+  items            Json            @default("[]")
   entityConfidence Json            @default("{}")
   missingFields    String[]        @default([])
   idempotencyKey   String?         @unique

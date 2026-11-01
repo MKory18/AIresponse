@@ -610,7 +610,10 @@ async function handleNotifyOrderReady(
     // فلتر JSON غير مدعوم في بعض القواعد/البدائل — نكمل بحماية مفتاح المهمة.
   }
 
-  const [conversation, customer, product] = await Promise.all([
+  const { parseDraftItems } = await import("@/modules/orders/draft-service");
+  const draftItems = parseDraftItems(draft);
+  const itemIds = [...new Set(draftItems.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
+  const [conversation, customer, products] = await Promise.all([
     db.conversation.findUnique({
       where: { id: draft.conversationId },
       select: { channelId: true },
@@ -619,17 +622,16 @@ async function handleNotifyOrderReady(
       where: { id: draft.customerId },
       select: { name: true, phone: true, workspaceId: true },
     }),
-    draft.productId
-      ? db.product.findUnique({
-          where: { id: draft.productId },
-          select: { name: true, price: true, currency: true, workspaceId: true },
+    itemIds.length
+      ? db.product.findMany({
+          where: { id: { in: itemIds }, workspaceId },
+          select: { id: true, name: true, price: true, currency: true, workspaceId: true },
         })
-      : Promise.resolve(null),
+      : Promise.resolve([]),
   ]);
 
   // عزل: كل الأطراف لازم يكونوا بنفس مساحة المهمة.
   if (customer && customer.workspaceId !== workspaceId) return { success: true };
-  if (product && product.workspaceId !== workspaceId) return { success: true };
   const channel = conversation?.channelId
     ? await db.channel.findUnique({
         where: { id: conversation.channelId },
@@ -638,15 +640,35 @@ async function handleNotifyOrderReady(
     : null;
   if (channel && channel.workspaceId !== workspaceId) return { success: true };
 
-  // إجمالي تقديري (قبل التوصيل) من محرك الأسعار — أفضل جهد، بلا اختراع.
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const messageItems = draftItems
+    .map((item) => {
+      const product = item.productId ? productById.get(item.productId) : null;
+      if (item.productId && !product) return null;
+      return {
+        name: item.productName || product?.name || "منتج",
+        quantity: item.quantity,
+        unitPrice: product ? product.price.toString() : null,
+      };
+    })
+    .filter((x): x is { name: string; quantity: number | null; unitPrice: string | null } => Boolean(x));
+
+  // إجمالي تقديري من محرك الأسعار لكل البنود — أفضل جهد، بلا اختراع.
   let estimatedTotal: string | null = null;
-  if (product && draft.quantity) {
+  const pricedItems = draftItems
+    .map((item) => {
+      const product = item.productId ? productById.get(item.productId) : null;
+      return product && item.quantity
+        ? { price: product.price, quantity: item.quantity, currency: product.currency }
+        : null;
+    })
+    .filter((x): x is { price: (typeof products)[number]["price"]; quantity: number; currency: string } => Boolean(x));
+  if (pricedItems.length > 0 && pricedItems.length === draftItems.length) {
     try {
-      const { calculatePricing } = await import("@/modules/orders/pricing");
-      const breakdown = await calculatePricing(db as never, {
+      const { calculateCartPricing } = await import("@/modules/orders/pricing");
+      const breakdown = await calculateCartPricing(db as never, {
         workspaceId,
-        product: { price: product.price, currency: product.currency },
-        quantity: draft.quantity,
+        items: pricedItems,
         province: draft.province,
       });
       if (breakdown?.total !== undefined && breakdown?.total !== null) {
@@ -657,6 +679,8 @@ async function handleNotifyOrderReady(
     }
   }
 
+  const firstItem = draftItems[0] ?? null;
+  const firstMessageItem = messageItems[0] ?? null;
   const { buildOrderReadyMessage } = await import("@/modules/integrations/telegram-orders");
   const text = buildOrderReadyMessage({
     pageName: channel?.displayName ?? null,
@@ -664,10 +688,11 @@ async function handleNotifyOrderReady(
     phone: draft.phone ?? customer?.phone ?? null,
     province: draft.province,
     address: draft.rawAddress,
-    productName: draft.productName ?? product?.name ?? null,
-    quantity: draft.quantity,
-    unitPrice: product ? product.price.toString() : null,
-    currency: product?.currency ?? null,
+    productName: firstMessageItem?.name ?? draft.productName ?? null,
+    quantity: draftItems.length === 1 ? firstItem?.quantity ?? draft.quantity : null,
+    unitPrice: firstMessageItem?.unitPrice ?? null,
+    currency: products[0]?.currency ?? null,
+    ...(messageItems.length > 1 ? { items: messageItems } : {}),
     estimatedTotal,
   });
 

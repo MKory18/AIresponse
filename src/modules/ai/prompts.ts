@@ -258,7 +258,8 @@ export function extractionInstruction(): string {
   return [
     "استخرج الكيانات من رسالة العميل مع استخدام سياق المحادثة (مثلاً «بدي 3» بعد حديث عن منتج يعني 3 من ذلك المنتج).",
     "أعد JSON فقط:",
-    '{"intent":"...","confidence":0-1,"entities":{"customer_name","phone","address","province","product","product_variant","quantity","notes"},"missingFields":[],"memories":[{"type":"FACT|PREFERENCE|NOTE","content":"..."}],"requestedAction":"ANSWER|CREATE_ORDER|HANDOFF_HUMAN|CLARIFY"}',
+    '{"intent":"...","confidence":0-1,"entities":{"customer_name","phone","address","province","product","product_variant","quantity","products":[{"name","quantity"}],"notes"},"missingFields":[],"memories":[{"type":"FACT|PREFERENCE|NOTE","content":"..."}],"requestedAction":"ANSWER|CREATE_ORDER|HANDOFF_HUMAN|CLARIFY"}',
+    "إذا ذكر الزبون أكثر من منتج، املأ products لكل منتج مع كميته (واترك product/quantity للعنصر الأول فقط).",
     "استخرج فقط ما ذُكر صراحة. لا تخمّن أسعاراً. memories فقط للمعلومات المفيدة مستقبلاً (ليس «مرحبا»).",
     "missingFields لطلب غير مكتمل: أدرج phone/address/product/quantity الناقصة فقط إذا كان intent هو ORDER_CREATE.",
   ].join("\n");

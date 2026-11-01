@@ -2,7 +2,7 @@ import type { Db } from "@/modules/customers/service";
 import { AppError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { parseQuantity, parseConfirmation, normalizePhone, type ResolvableProduct } from "./primitives";
-import { getOrCreateDraft, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, recycleDraftForNewOrder } from "./draft-service";
+import { getOrCreateDraft, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, recycleDraftForNewOrder, parseDraftItems } from "./draft-service";
 import { evaluateOrderRules, aggregateVerdict, publishDuplicateEvent, detectDuplicate } from "./rules";
 import { createOrderFromDraft, mergeCustomerData, updateOrderFromChat, cancelLatestOrderFromConversation } from "./order-service";
 import type { ExtractionResult } from "@/modules/ai/structured";
@@ -99,7 +99,7 @@ export async function handleOrderIntent(
   if (intent === "ORDER_CREATE" || intent === "ORDER_UPDATE" || intent === "UNKNOWN") {
     const draft = await db.orderDraft.findUnique({ where: { conversationId: params.conversationId } });
     const confirmationRelevant =
-      draft && (draft.state === "READY" || draft.state === "CONFIRMING") && draft.productId && draft.quantity;
+      draft && (draft.state === "READY" || draft.state === "CONFIRMING") && parseDraftItems(draft).length > 0;
     if (confirmationRelevant) {
       const signal = parseConfirmation(params.customerText);
       if (signal.signal === "NO") {
@@ -159,20 +159,28 @@ export async function handleOrderIntent(
   // 3. Order creation/update → merge extraction into the persisted draft.
   if (intent === "ORDER_CREATE" || intent === "ORDER_UPDATE" || extraction.requestedAction === "CREATE_ORDER") {
     const entities = extraction.entities;
+    // P22 — عدة منتجات في رسالة واحدة: نبني سلة من entities.products.
+    const multiItems = Array.isArray(entities.products)
+      ? entities.products
+          .filter((p) => p && typeof p.name === "string" && p.name.trim())
+          .slice(0, 20)
+          .map((p) => ({ productName: p.name.trim(), quantity: p.quantity ?? null }))
+      : [];
     const draftInput: Parameters<typeof updateDraftFromExtraction>[1]["extraction"] = {
-      productName: entities.product ?? null,
-      quantity: entities.quantity ?? null,
+      productName: multiItems.length ? null : entities.product ?? null,
+      quantity: multiItems.length ? null : entities.quantity ?? null,
       customerName: entities.customer_name ?? null,
       phone: entities.phone ?? null,
       rawAddress: entities.address ?? null,
       province: entities.province ?? null,
       notes: entities.notes ?? null,
+      ...(multiItems.length ? { items: multiItems } : {}),
       confidence: {},
     };
 
     // Deterministic quantity re-parse from the raw text when AI missed it
     // ("بدي 3" / "ثلاث قطع" / "٣").
-    if (!draftInput.quantity) {
+    if (!draftInput.quantity && !multiItems.length) {
       const q = parseQuantity(params.customerText);
       if (q.value) {
         draftInput.quantity = q.value;
@@ -183,7 +191,7 @@ export async function handleOrderIntent(
     // Deterministic product re-resolution from raw text when the AI missed it
     // ("بدي 3" after "بدي ماء الكمأة" — context product). Scoped to the page's
     // catalog allowlist the same way the direct merge below is.
-    if (!draftInput.productName && !draftInput.productId) {
+    if (!draftInput.productName && !draftInput.productId && !multiItems.length) {
       const { resolveProduct } = await import("./primitives");
       const products = await listResolvableProducts(db, params.workspaceId, params.allowedProductIds);
       const resolution = resolveProduct(params.customerText, products);
@@ -198,7 +206,7 @@ export async function handleOrderIntent(
     // edited (update of the PLACED order) or recycled into a fresh cart for a
     // new order in the same conversation.
     if (draft.state === "CONVERTED" || draft.state === "CANCELLED") {
-      const wantsNewProduct = Boolean(draftInput.productName || draftInput.productId);
+      const wantsNewProduct = multiItems.length > 0 || Boolean(draftInput.productName || draftInput.productId);
       const wantsEdit = Boolean(draftInput.quantity || draftInput.rawAddress || draftInput.province || draftInput.notes);
       if (intent === "ORDER_UPDATE" && !wantsNewProduct) {
         if (!wantsEdit) return { handled: false, action: "NONE" };

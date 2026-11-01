@@ -50,6 +50,12 @@ async function seed(opts?: { enabled?: boolean; fields?: string[] }) {
     price: 150000,
     currency: "SYP",
   });
+  const productB = await createProduct(db as unknown as Db, AGENT, {
+    name: "عسل الكمأة",
+    sku: "HON-900",
+    price: 50000,
+    currency: "SYP",
+  });
   const customer = (await db.customer.create({
     data: { workspaceId: WS, name: "سامر", phone: "0791234567", address: "عمان - الدوار السابع", province: "عمان" },
   } as never)) as { id: string };
@@ -76,7 +82,7 @@ async function seed(opts?: { enabled?: boolean; fields?: string[] }) {
       topicId: "42",
     },
   } as never);
-  return { product, customer, channel };
+  return { product, productB, customer, channel };
 }
 
 function notifyJobs() {
@@ -98,7 +104,12 @@ describe("P19 — إرسال الطلب الجاهز إلى تيليجرام", (
       workspaceId: WS,
       conversationId: db._stores.conversation[0].id,
       customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 2 },
+      extraction: {
+        items: [
+          { productName: "ماء الكمأة", quantity: 2 },
+          { productName: "عسل الكمأة", quantity: 1 },
+        ],
+      },
       source: "TEST",
     });
     expect(r.becameReady).toBe(true);
@@ -112,7 +123,9 @@ describe("P19 — إرسال الطلب الجاهز إلى تيليجرام", (
     expect(calls[0].body.message_thread_id).toBe(42);
     expect(calls[0].body.parse_mode).toBe("HTML");
     const text = String(calls[0].body.text);
+    // P22 — الرسالة تعرض كل منتجات السلة، لا الأول فقط.
     expect(text).toContain("ماء الكمأة");
+    expect(text).toContain("عسل الكمأة");
     expect(text).toContain("0791234567");
     expect(text).toContain("عمان");
 

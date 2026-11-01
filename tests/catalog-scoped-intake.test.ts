@@ -43,7 +43,9 @@ describe("page catalogs gate ORDER intake too", () => {
     });
     expect(result.draft.productId).toBeNull();
     expect(result.missingFields).toContain("product");
-    expect(result.missingFields).not.toContain("quantity"); // quantity merged fine
+    // P22 — الكمية صارت لكل بند: منتج خارج الكتالوج ما بينضاف للسلّة،
+    // فلا تبقى كمية معلّقة بلا منتج.
+    expect(result.missingFields).toContain("quantity");
   });
 
   it("an empty allowlist blocks every product intake", async () => {

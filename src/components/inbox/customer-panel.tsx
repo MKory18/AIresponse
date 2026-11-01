@@ -203,6 +203,13 @@ function draftMissingLabel(key: string): string {
 
 function OrderDraftCard({ draft }: { draft: DraftInfo }) {
   const complete = draft.missingFields.length === 0;
+  // P22 — سلة: اعرض كل المنتجات (مع توافق خلفي للمسودات المفردة).
+  const items =
+    draft.items && draft.items.length > 0
+      ? draft.items
+      : draft.productName
+        ? [{ productName: draft.productName, quantity: draft.quantity }]
+        : [];
   // P19 — العدد الكلي يتبع إعداد الصفحة (قد يزيد الاسم)؛ لا نسبة سالبة.
   const total = Math.max(draft.requiredFields?.length ?? 4, draft.missingFields.length);
   const pct = complete ? 100 : Math.max(0, Math.min(100, Math.round(((total - draft.missingFields.length) / total) * 100)));
@@ -226,8 +233,12 @@ function OrderDraftCard({ draft }: { draft: DraftInfo }) {
         />
       </div>
       <div className="space-y-1 text-[11px] text-ink-muted">
-        {draft.productName && <Row text={`${t.customer.product}: ${draft.productName}`} />}
-        {draft.quantity && <Row text={`${t.customer.quantity}: ${formatNumber(draft.quantity)}`} />}
+        {items.map((item, idx) => (
+          <Row
+            key={`${item.productName ?? "item"}-${idx}`}
+            text={`${t.customer.product}: ${item.productName || "—"}${item.quantity ? ` × ${formatNumber(item.quantity)}` : ""}`}
+          />
+        ))}
         <Row icon={<Phone size={11} />} text={draft.phone ? `${t.customer.phone}: ✓` : `${t.customer.phone}: —`} ok={Boolean(draft.phone)} />
         <Row
           icon={<MapPin size={11} />}

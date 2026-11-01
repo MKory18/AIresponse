@@ -19,12 +19,101 @@ export interface DraftExtractionInput {
   productName?: string | null;
   productId?: string | null;
   quantity?: number | null;
+  /** P22 — عدة منتجات في رسالة واحدة (سلة). */
+  items?: {
+    productName?: string | null;
+    productId?: string | null;
+    quantity?: number | null;
+    variantId?: string | null;
+  }[];
   customerName?: string | null;
   phone?: string | null;
   rawAddress?: string | null;
   province?: string | null;
   notes?: string | null;
   confidence?: Record<string, number>;
+}
+
+/** عنصر سلة داخل مسودة الطلب (يُخزَّن JSON في OrderDraft.items). */
+export interface DraftItem {
+  productId: string | null;
+  productName: string;
+  variantId: string | null;
+  quantity: number | null;
+}
+
+/**
+ * P22 — يقرأ سلة المسودة. توافق خلفي: المسودات القديمة (بلا items) ترجع
+ * منتجها المفرد. اسم المنتج قد يكون فارغًا بالمسودات القديمة (productId فقط) —
+ * مسار إنشاء الطلب يجيب الاسم من قاعدة البيانات.
+ */
+export function parseDraftItems(draft: {
+  items?: unknown;
+  productId?: string | null;
+  productName?: string | null;
+  variantId?: string | null;
+  quantity?: number | null;
+}): DraftItem[] {
+  let raw: unknown = draft.items;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = [];
+    }
+  }
+  const items: DraftItem[] = [];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const o = entry as Record<string, unknown>;
+      const productId = typeof o.productId === "string" && o.productId ? o.productId : null;
+      const name = typeof o.productName === "string" ? o.productName.trim() : "";
+      if (!productId && !name) continue;
+      const q = typeof o.quantity === "number" && Number.isFinite(o.quantity) ? Math.trunc(o.quantity) : null;
+      items.push({
+        productId,
+        productName: name,
+        variantId: typeof o.variantId === "string" && o.variantId ? o.variantId : null,
+        quantity: q && q > 0 ? q : null,
+      });
+      if (items.length >= 20) break;
+    }
+  }
+  if (items.length === 0 && draft.productId) {
+    items.push({
+      productId: draft.productId,
+      productName: (draft.productName ?? "").trim(),
+      variantId: draft.variantId ?? null,
+      quantity: draft.quantity && draft.quantity > 0 ? draft.quantity : null,
+    });
+  }
+  return items;
+}
+
+/** دمج عنصر جديد: نفس المنتج = تحديث الكمية (آخر قيمة صريحة تفوز) لا تكرار. */
+function mergeDraftItems(existing: DraftItem[], incoming: DraftItem[]): DraftItem[] {
+  const result = existing.map((i) => ({ ...i }));
+  for (const item of incoming) {
+    const idx = result.findIndex(
+      (x) =>
+        (item.productId && x.productId === item.productId) ||
+        (!item.productId && item.productName && x.productName === item.productName)
+    );
+    if (idx >= 0) {
+      const prev = result[idx];
+      result[idx] = {
+        productId: item.productId ?? prev.productId,
+        productName: item.productName || prev.productName,
+        variantId: item.variantId ?? prev.variantId,
+        quantity: item.quantity ?? prev.quantity,
+      };
+    } else {
+      result.push(item);
+    }
+    if (result.length >= 20) break;
+  }
+  return result.slice(0, 20);
 }
 
 export async function getOrCreateDraft(db: Db, workspaceId: string, conversationId: string, customerId: string) {
@@ -56,6 +145,7 @@ export async function getOrCreateDraft(db: Db, workspaceId: string, conversation
         customerId,
         state: "COLLECTING",
         ...seed,
+        items: [] as Prisma.InputJsonValue,
         missingFields: computeMissingFields({
           productId: null,
           quantity: null,
@@ -107,69 +197,96 @@ export async function updateDraftFromExtraction(
 
   const data: Prisma.OrderDraftUncheckedUpdateInput = {};
 
-  // Product resolution (deterministic, DB-backed).
-  let resolvedProductId = draft.productId;
-  let resolvedProductName: string | null = null;
-  if (params.extraction.productName || params.extraction.productId) {
-    if (params.extraction.productId) {
-      // Page-catalog gate (same allowlist the reply path uses): an id
-      // outside the catalog is treated as never sighted, not an error.
-      const allow = params.allowedProductIds;
-      if (!allow || allow.includes(params.extraction.productId)) {
-        // P18 — لا نثق بمعرّف جاي من الموديل: لازم يكون منتجًا نشطًا في نفس
-        // المساحة. معرّف مساحة أخرى/محذوف = كأنه ما انذكر.
-        const owned = (await db.product.findFirst({
+  // P22 — سلة متعددة المنتجات: ندمج كل منتج مذكور (items) أو المفرد القديم.
+  const existingItems = parseDraftItems(draft);
+  const rawItems =
+    Array.isArray(params.extraction.items) && params.extraction.items.length > 0
+      ? params.extraction.items
+      : params.extraction.productName || params.extraction.productId
+        ? [
+            {
+              productName: params.extraction.productName,
+              productId: params.extraction.productId,
+              quantity: params.extraction.quantity,
+              variantId: null as string | null,
+            },
+          ]
+        : [];
+
+  if (rawItems.length > 0) {
+    // اسم المنتج يُحلّ من قاعدة البيانات (لا ثقة بنص الموديل)، ومعرّف المنتج
+    // يُتحقق من المساحة/النشاط/الكتالوج. كل شيء خارجها = كأنه ما انذكر.
+    const allowed = params.allowedProductIds;
+    const needsName = rawItems.some((i) => !i.productId && i.productName);
+    const catalogProducts = needsName
+      ? ((await db.product.findMany({
           where: {
-            id: params.extraction.productId,
             workspaceId: params.workspaceId,
             isActive: true,
             isArchived: false,
+            ...(allowed ? { id: { in: allowed } } : {}),
           },
-          select: { id: true, name: true },
-        })) as { id: string; name: string } | null;
-        if (owned) {
-          resolvedProductId = owned.id;
-          resolvedProductName = owned.name;
+        })) as unknown as ResolvableProduct[])
+      : [];
+    const withAliases = catalogProducts.map((p) => ({
+      ...p,
+      aliases: [p.name, ...(((p as unknown as { tags?: string[] }).tags ?? []).filter((t) => t.length > 2))],
+    }));
+    const idList = [...new Set(rawItems.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
+    const ownedById = new Map(
+      (idList.length
+        ? await db.product.findMany({
+            where: {
+              id: { in: idList },
+              workspaceId: params.workspaceId,
+              isActive: true,
+              isArchived: false,
+              ...(allowed ? { id: { in: allowed } } : {}),
+            },
+            select: { id: true, name: true },
+          })
+        : []
+      ).map((p) => [p.id, p] as const)
+    );
+
+    const incoming: DraftItem[] = [];
+    for (const raw of rawItems) {
+      let productId: string | null = null;
+      let productName = "";
+      if (raw.productId) {
+        const owned = ownedById.get(raw.productId);
+        if (!owned) continue;
+        productId = owned.id;
+        productName = owned.name;
+      } else if (raw.productName) {
+        const resolution = resolveProduct(raw.productName, withAliases);
+        if (resolution.status === "AMBIGUOUS") {
+          // Ambiguity → ask, never guess.
+          await eventBus.publish(makeEvent("OrderDraftUpdated", params.workspaceId, { draftId: draft.id, ambiguous: true }));
+          return { draft, ambiguousCandidates: resolution.candidates!.map((c) => c.name) };
         }
+        if (resolution.status !== "RESOLVED") continue; // NOT_FOUND: لا نضيف منتجًا وهميًا
+        productId = resolution.product!.id;
+        productName = resolution.product!.name;
+      } else {
+        continue;
       }
-    } else {
-      const products = (await db.product.findMany({
-        where: {
-          workspaceId: params.workspaceId, isActive: true, isArchived: false,
-          // The catalog allowlist scopes ORDER INTAKE the same way it
-          // scopes the reply: a page may only order what its catalog holds.
-          ...(params.allowedProductIds ? { id: { in: params.allowedProductIds } } : {}),
-        },
-      })) as unknown as ResolvableProduct[];
-      const withAliases = products.map((p) => ({
-        ...p,
-        aliases: [p.name, ...(((p as unknown as { tags?: string[] }).tags ?? []).filter((t) => t.length > 2))],
-      }));
-      const resolution = resolveProduct(params.extraction.productName!, withAliases);
-      if (resolution.status === "RESOLVED") {
-        resolvedProductId = resolution.product!.id;
-        resolvedProductName = resolution.product!.name;
-      } else if (resolution.status === "AMBIGUOUS") {
-        // Ambiguity → ask, never guess.
-        await eventBus.publish(makeEvent("OrderDraftUpdated", params.workspaceId, { draftId: draft.id, ambiguous: true }));
-        return { draft, ambiguousCandidates: resolution.candidates!.map((c) => c.name) };
-      }
-      // NOT_FOUND keeps the previous product (contextual continuation).
+      const quantity = raw.quantity && raw.quantity > 0 ? Math.trunc(raw.quantity) : null;
+      incoming.push({ productId, productName, variantId: raw.variantId ?? null, quantity });
     }
-  }
-  if (
-    resolvedProductId &&
-    (resolvedProductId !== draft.productId ||
-      (resolvedProductName !== null && resolvedProductName !== draft.productName))
-  ) {
-    data.productId = resolvedProductId;
-    // اسم المنتج للعرض في بطاقة المسودة — من قاعدة البيانات، لا من الموديل.
-    if (resolvedProductName) data.productName = resolvedProductName;
+
+    const merged = mergeDraftItems(existingItems, incoming);
+    applyCartToDraftData(data, merged);
+  } else if (params.extraction.quantity && params.extraction.quantity > 0 && existingItems.length > 0) {
+    // كمية بلا اسم منتج ("بدي 3" بعد «بدي ماء الكمأة») = تحديث آخر عنصر
+    // بالسلّة (السياق الحالي)، لا إنشاء عنصر بلا منتج.
+    const qty = Math.trunc(params.extraction.quantity);
+    const items = existingItems.map((item, idx) =>
+      idx === existingItems.length - 1 ? { ...item, quantity: qty } : item
+    );
+    applyCartToDraftData(data, items);
   }
 
-  if (params.extraction.quantity && params.extraction.quantity > 0) {
-    data.quantity = params.extraction.quantity;
-  }
   if (params.extraction.customerName && !draft.customerName) data.customerName = params.extraction.customerName;
   if (params.extraction.notes) data.notes = params.extraction.notes;
 
@@ -258,6 +375,7 @@ export async function updateDraftFromExtraction(
 
 export function computeMissingFields(
   draft: {
+    items?: unknown;
     productId: string | null;
     quantity: number | null;
     customerName?: string | null;
@@ -269,13 +387,28 @@ export function computeMissingFields(
 ): RequiredDraftField[] {
   const required = new Set(requiredFields);
   const missing: RequiredDraftField[] = [];
-  // المنتج والكمية دائمًا مطلوبان — بدونهم ما في طلب.
-  if (!draft.productId) missing.push("product");
-  if (!draft.quantity || draft.quantity <= 0) missing.push("quantity");
+  // P22 — الحساب على السلة: منتج/كمية لكل عنصر. مسودة فارغة = الاثنان ناقصان.
+  const items = parseDraftItems(draft);
+  if (items.length === 0) {
+    missing.push("product", "quantity");
+  } else {
+    if (items.some((i) => !i.productId)) missing.push("product");
+    if (items.some((i) => !i.quantity || i.quantity <= 0)) missing.push("quantity");
+  }
   if (required.has("phone") && !draft.phone) missing.push("phone");
   if (required.has("address") && !draft.rawAddress && !draft.province) missing.push("address");
   if (required.has("name") && !draft.customerName) missing.push("name");
   return missing;
+}
+
+/** مرآة العنصر الأول للحقول المفردة (توافق خلفي/بطاقة/ملخص). */
+function applyCartToDraftData(data: Prisma.OrderDraftUncheckedUpdateInput, items: DraftItem[]): void {
+  data.items = items as unknown as Prisma.InputJsonValue;
+  const first = items[0] ?? null;
+  data.productId = first?.productId ?? null;
+  data.productName = first?.productName || null;
+  data.variantId = first?.variantId ?? null;
+  data.quantity = first?.quantity ?? null;
 }
 
 /** الحقول المطلوبة لهذه المحادثة حسب صفحتها؛ غياب القناة = الافتراضي. */
@@ -354,6 +487,7 @@ export async function recycleDraftForNewOrder(db: Db, workspaceId: string, draft
       variantId: null,
       quantity: null,
       notes: null,
+      items: [] as Prisma.InputJsonValue,
       missingFields: ["product", "quantity"],
       entityConfidence: {},
       idempotencyKey,
@@ -400,16 +534,28 @@ export async function cancelDraft(db: Db, ctx: ActorContext, draftId: string) {
 
 /** Deterministic order summary text for the AI to phrase (never prices from AI). */
 export function buildDraftSummary(draft: {
+  items?: unknown;
+  productId?: string | null;
   productName?: string | null;
   quantity: number | null;
+  variantId?: string | null;
   phone: string | null;
   rawAddress: string | null;
   province: string | null;
   missingFields: string[];
 }): string {
   const lines: string[] = [];
-  if (draft.productName) lines.push(`المنتج: ${draft.productName}`);
-  if (draft.quantity) lines.push(`الكمية: ${draft.quantity}`);
+  const items = parseDraftItems(draft);
+  if (items.length > 0) {
+    lines.push("المنتجات:");
+    for (const item of items) {
+      const qty = item.quantity ? ` × ${item.quantity}` : "";
+      lines.push(`- ${item.productName || "منتج"}${qty}`);
+    }
+  } else if (draft.productName) {
+    lines.push(`المنتج: ${draft.productName}`);
+    if (draft.quantity) lines.push(`الكمية: ${draft.quantity}`);
+  }
   if (draft.phone) lines.push(`الهاتف: ${draft.phone}`);
   if (draft.rawAddress || draft.province) {
     lines.push(`العنوان: ${[draft.province, draft.rawAddress].filter(Boolean).join(" - ")}`);
