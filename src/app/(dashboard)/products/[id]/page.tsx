@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
 import { ComplianceCard } from "@/components/products/compliance-card";
+import { productSaveError } from "@/lib/product-save-error";
 
 type MediaAsset = { id: string; url: string; type: string; title: string | null; category: string };
 type Faq = { id: string; question: string; answer: string; isActive: boolean };
@@ -52,6 +53,17 @@ const TABS = [
   { key: "compliance", label: "الامتثال" },
 ];
 
+/** P18 — نتيجة الحفظ جنب الزر نفسه، بدل شريط فوق الصفحة فقط. */
+function SaveFeedback({ saved, error }: { saved: boolean; error: string | null }) {
+  if (saved) {
+    return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">تم الحفظ ✓</span>;
+  }
+  if (error) {
+    return <span className="max-w-[420px] text-xs leading-relaxed text-red-600 dark:text-red-400">{error}</span>;
+  }
+  return null;
+}
+
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
   const [product, setProduct] = useState<ProductDetail | null>(null);
@@ -67,7 +79,11 @@ export default function ProductDetailPage() {
   const [tiers, setTiers] = useState<{ label: string; price: string }[]>([]);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/products/${params.id}`);
+    // PERF — المنتج والوسائط مستقلان: نطلبهما بالتوازي بدل انتظار واحد ورا التاني.
+    const [res, mediaRes] = await Promise.all([
+      fetch(`/api/products/${params.id}`),
+      fetch("/api/media?limit=50"),
+    ]);
     if (!res.ok) {
       setError("المنتج غير موجود");
       return;
@@ -75,7 +91,6 @@ export default function ProductDetailPage() {
     const data = (await res.json()) as ProductDetail;
     setProduct(data);
     setTiers(data.priceTiers.map((t) => ({ label: t.label, price: String(Number(t.price)) })));
-    const mediaRes = await fetch("/api/media?limit=50");
     if (mediaRes.ok) setMediaAssets((await mediaRes.json()).items);
   }, [params.id]);
 
@@ -87,6 +102,7 @@ export default function ProductDetailPage() {
     const fd = new FormData(form);
     setSaving(true);
     setSaved(false);
+    setError(null);
     const payload: Record<string, unknown> = {};
     for (const [key, value] of fd.entries()) {
       if (key === "price" || key === "compareAtPrice") {
@@ -98,19 +114,26 @@ export default function ProductDetailPage() {
       }
     }
     Object.assign(payload, extra);
-    const res = await fetch(`/api/products/${params.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setSaved(true);
-      load();
-      setTimeout(() => setSaved(false), 2000);
-    } else {
-      const data = await res.json();
-      setError(data.message ?? "فشل الحفظ");
+    try {
+      const res = await fetch(`/api/products/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setSaved(true);
+        load();
+        setTimeout(() => setSaved(false), 2500);
+      } else {
+        // P18 — سبب الفشل جنب الزر بالعربي (صلاحية/حقل طويل/خادم)، مش شريط
+        // فوق الصفحة ممكن ما ينشاف.
+        const data = await res.json().catch(() => null);
+        setError(productSaveError(res.status, data));
+      }
+    } catch {
+      setError("تعذّر الاتصال بالخادم — ما انحفظ شي. جرّب مرة ثانية.");
+    } finally {
+      setSaving(false);
     }
     void section;
   }
@@ -283,7 +306,8 @@ export default function ProductDetailPage() {
               <Field label="الوسوم (سطر لكل وسم)">
                 <Textarea name="tags" defaultValue={product.tags.join("\n")} rows={2} />
               </Field>
-              <div className="flex justify-end md:col-span-2">
+              <div className="flex items-center justify-end gap-3 md:col-span-2">
+                <SaveFeedback saved={saved} error={error} />
                 <Button type="submit" loading={saving} disabled={saving}>حفظ</Button>
               </div>
             </GlassCard>
@@ -390,7 +414,8 @@ export default function ProductDetailPage() {
                   </div>
                 </div>
               )}
-              <div className="flex justify-end">
+              <div className="flex items-center justify-end gap-3">
+                <SaveFeedback saved={saved} error={error} />
                 <Button type="submit" loading={saving} disabled={saving}>حفظ</Button>
               </div>
             </GlassCard>
@@ -431,7 +456,8 @@ export default function ProductDetailPage() {
               <Field label="ملاحظات البيع">
                 <Textarea name="salesNotes" defaultValue={product.salesNotes ?? ""} rows={2} />
               </Field>
-              <div className="flex justify-end md:col-span-2">
+              <div className="flex items-center justify-end gap-3 md:col-span-2">
+                <SaveFeedback saved={saved} error={error} />
                 <Button type="submit" loading={saving} disabled={saving}>حفظ</Button>
               </div>
             </GlassCard>

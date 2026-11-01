@@ -324,7 +324,17 @@ export async function updateFaq(
 /** FAQ retrieval: direct structured lookup — no vector search needed. */
 export async function findMatchingFaqs(
   db: Db,
-  params: { workspaceId: string; query: string; productId?: string; limit?: number }
+  params: {
+    workspaceId: string;
+    query: string;
+    productId?: string;
+    limit?: number;
+    /**
+     * P18 — حدود كتالوج الصفحة. عند تمريرها (حتى []) ما بترجع إلا أسئلة
+     * عامة (productId = null) أو أسئلة منتج داخل الكتالوج. undefined = بلا تقييد.
+     */
+    allowedProductIds?: string[] | null;
+  }
 ) {
   const words = params.query.split(/\s+/).filter((w) => w.length > 2).slice(0, 6);
   if (words.length === 0) return [];
@@ -332,12 +342,16 @@ export async function findMatchingFaqs(
     ...words.map((w) => ({ question: { contains: w, mode: "insensitive" as const } })),
     ...words.map((w) => ({ answer: { contains: w, mode: "insensitive" as const } })),
   ];
+  const allowedFilter: Prisma.FaqWhereInput | null = params.allowedProductIds
+    ? { OR: [{ productId: null }, { productId: { in: params.allowedProductIds } }] }
+    : null;
   const where: Prisma.FaqWhereInput = {
     workspaceId: params.workspaceId,
     isActive: true,
     AND: [
       { OR: wordMatches },
       ...(params.productId ? [{ productId: params.productId }] : []),
+      ...(allowedFilter ? [allowedFilter] : []),
     ],
   };
   return db.faq.findMany({ where, take: params.limit ?? 3 });

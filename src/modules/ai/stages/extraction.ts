@@ -20,6 +20,7 @@ import { extractionResultSchema, validateStructured, type ExtractionResult, type
 import { heuristicIntent, looksLikeInjection } from "../intent";
 import { saveMemories, loadMemory } from "../memory";
 import { buildAIContext } from "../context-builder";
+import { buildCatalogBoundary } from "../catalog-boundary";
 import { wantsMedia } from "@/modules/media/request";
 import type { VectorStore } from "@/modules/knowledge/vector-store";
 import { PgVectorStore } from "@/modules/knowledge/vector-store";
@@ -221,6 +222,22 @@ export async function runExtraction(
         ? undefined
         : [];
 
+  // P18 — حدود الكتالوج: أسماء المنتجات المسموحة تُحقن بتعليمات الرد كي لا
+  // «يتذكّر» الذكاء منتجًا حُذف من كتالوج الصفحة (من محادثة/معرفة/ذاكرة).
+  // undefined = ما في كتالوجات أصلًا (سلوك قديم) → بلا حدود.
+  let catalogBoundary: string | undefined;
+  if (allowedProductIds !== undefined) {
+    const ids = allowedProductIds.slice(0, 40);
+    const names =
+      ids.length > 0
+        ? ((await db.product.findMany({
+            where: { workspaceId: params.workspaceId, id: { in: ids } },
+            select: { name: true },
+          })) as { name: string }[]).map((p) => p.name)
+        : [];
+    catalogBoundary = buildCatalogBoundary(names);
+  }
+
   // Order Intelligence: deterministic draft/rules handling for order intents.
   let orderResult: Awaited<ReturnType<typeof handleOrderIntent>> | null = null;
   if (
@@ -273,6 +290,8 @@ export async function runExtraction(
       workspaceId: params.workspaceId,
       query: customerText,
       productId: productId ?? undefined,
+      // P18 — نفس حدود الصفحة تُطبَّق على المعرفة/الأسئلة الجاهزة.
+      allowedProductIds,
       knowledgeLimit: 4,
     })
   );
@@ -355,6 +374,7 @@ export async function runExtraction(
       plan,
       extractionUser,
       salesPlan,
+      catalogBoundary,
     },
   };
 }
