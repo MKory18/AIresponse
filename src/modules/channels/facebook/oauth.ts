@@ -70,7 +70,10 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
     response_type: "code",
     // pages_read_engagement: required by GET /{page-id} (connection smoke test);
     // without it Graph returns error #100 "Page Public Content Access".
-    scope: "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement",
+    // pages_user_profile (P21): required for the sender's REAL name/picture
+    // (GET /{psid}?fields=name,profile_pic) — without it Graph returns empty.
+    scope:
+      "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,pages_user_profile",
   });
   return `https://www.facebook.com/${process.env.META_GRAPH_VERSION ?? "v21.0"}/dialog/oauth?${params}`;
 }

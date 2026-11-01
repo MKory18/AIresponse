@@ -243,7 +243,11 @@ describe("Phase 6 — OAuth state protection", () => {
 
   it("tampered state fails", async () => {
     const state = await createOAuthState(WS_A, "user-1");
-    await expect(verifyOAuthState(state.slice(0, -2) + "xx")).rejects.toBeTruthy();
+    // P21 — اعبث بمحتوى الحمولة (بعد أول نقطة) لا بآخر حرفين: تغيير آخر حرفين
+    // في base64url قد يغيّر بتّات حشو فقط فيبقى التوقيع صالحًا (اختبار متذبذب).
+    const index = state.indexOf(".") + 5;
+    const tampered = `${state.slice(0, index)}${state[index] === "a" ? "b" : "a"}${state.slice(index + 1)}`;
+    await expect(verifyOAuthState(tampered)).rejects.toBeTruthy();
   });
 
   it("selection token binds workspace and expires logic", async () => {
