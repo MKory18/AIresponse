@@ -15,6 +15,9 @@ import {
   type IntelSnapshotShape,
 } from "./fields";
 import { enabledFieldDefs, getCollectionFields } from "./settings";
+import { customerFieldForIntelKey, syncIntelToCustomer } from "./customer-sync";
+import { recordFieldChanges } from "@/modules/audit/service";
+import { atomically } from "@/modules/channels/webhook-tx";
 
 const log = childLogger("intelligence");
 
@@ -98,7 +101,8 @@ export interface ExtractionOptions {
  * - Idempotent: صف CustomerIntelRun واحد لكل messageId (unique).
  * - لا يمس الرسالة الأصلية ولا يحذفها مهما فشل المزوّد.
  * - لا يرسل أي شيء للعميل — لا يستدعي مسار الإرسال إطلاقًا.
- * - يُدخل فقط حين تكون الصفحة COLLECTION_ONLY (تحقق لحظي من قاعدة البيانات).
+ * - يعمل في وضع الردّ (AUTO_REPLY) ووضع التجميع (COLLECTION_ONLY) — الاستخراج
+ *   مهمة خلفية منفصلة عن الرد، والوضع المجهول فقط مرفوض (فشل آمن).
  * - أي قيمة غير موجودة بالنص تُسقط قبل الحفظ (grounding).
  */
 export async function runCustomerIntelExtraction(
@@ -123,7 +127,7 @@ export async function runCustomerIntelExtraction(
 
   const conversation = await db.conversation.findUnique({
     where: { id: message.conversationId },
-    select: { id: true, workspaceId: true, channelId: true },
+    select: { id: true, workspaceId: true, channelId: true, customerId: true },
   });
   if (!conversation || conversation.workspaceId !== params.workspaceId || !conversation.channelId) {
     return { status: "SKIPPED", reason: "CONVERSATION_NOT_FOUND" };
@@ -132,8 +136,11 @@ export async function runCustomerIntelExtraction(
     where: { id: conversation.channelId },
     select: { sendMode: true },
   });
-  if (channel?.sendMode !== "COLLECTION_ONLY") {
-    return { status: "SKIPPED", reason: "NOT_COLLECTION_MODE" };
+  // تعمل في وضع الردّ (AUTO_REPLY) ووضع التجميع (COLLECTION_ONLY) على حد سواء:
+  // الاستخراج لا يُرسل شيئًا أبدًا، فلا معنى لمنعه في وضع الردّ. الوضع المجهول
+  // = رفض (فشل آمن) كما في بقية المسارات.
+  if (channel?.sendMode !== "AUTO_REPLY" && channel?.sendMode !== "COLLECTION_ONLY") {
+    return { status: "SKIPPED", reason: "SEND_MODE_NOT_ELIGIBLE" };
   }
 
   // ── Idempotency: مفتاح واحد لكل رسالة ──
@@ -262,6 +269,16 @@ export async function runCustomerIntelExtraction(
       },
     });
 
+    // P13 — نقل الحقول المدعومة (اسم/هاتف/مدينة/عنوان) إلى ملف العميل بأمان:
+    // تملأ الفراغ فقط، والمؤكد من موظف يتقدّم، والتعارض لا يُحسم. فشلها لا
+    // يؤثر على نتيجة الاستخراج أصلًا (sync لا يرمي).
+    if (conversation.customerId) {
+      await syncIntelToCustomer(db, {
+        workspaceId: params.workspaceId,
+        customerId: conversation.customerId,
+      });
+    }
+
     log.info(
       { conversationId: conversation.id, messageId: message.id, latencyMs, dropped: grounded.dropped, needsReview },
       "customer_intel_extracted"
@@ -323,19 +340,85 @@ export async function confirmIntelField(
 ): Promise<{ ok: boolean; reason?: string }> {
   const settings = await getCollectionFields(db, params.workspaceId);
   const defs = settings.map((f) => ({ key: f.key, label: f.label, kind: f.kind, required: f.required }));
-  const intel = await db.customerIntel.findUnique({ where: { conversationId: params.conversationId } });
-  if (!intel || intel.workspaceId !== params.workspaceId) return { ok: false, reason: "NOT_FOUND" };
-  const knownKey = isKnownFieldKey(params.key, defs) || Object.prototype.hasOwnProperty.call(intel.data ?? {}, params.key);
-  if (!knownKey) return { ok: false, reason: "UNKNOWN_FIELD" };
-  const snapshot: IntelSnapshotShape = {
-    data: { ...EMPTY_INTEL_FIELDS, ...(intel.data as IntelFields) },
-    meta: { ...emptyMeta(defs), ...(intel.fieldMeta as IntelSnapshotShape["meta"]) },
-    confidence: Number(intel.confidence ?? 0),
-  };
-  const next = applyConfirm(snapshot, params.key, params.value, params.userId, defs);
-  await db.customerIntel.update({
-    where: { id: intel.id },
-    data: { data: next.data, fieldMeta: next.meta, reviewedAt: new Date(), reviewedBy: params.userId },
+
+  // P15 — لقطة الاستخراج + صف العميل + سجل «قبل/بعد» داخل معاملة واحدة.
+  // فشل تسجيل الأثر يلغي التصحيح كله (لا قيمة مؤكدة بلا تاريخ).
+  return atomically(db as never, async (tx) => {
+    const trx = tx as unknown as AnyDb;
+    const intel = await trx.customerIntel.findUnique({ where: { conversationId: params.conversationId } });
+    if (!intel || intel.workspaceId !== params.workspaceId) return { ok: false, reason: "NOT_FOUND" };
+    const knownKey = isKnownFieldKey(params.key, defs) || Object.prototype.hasOwnProperty.call(intel.data ?? {}, params.key);
+    if (!knownKey) return { ok: false, reason: "UNKNOWN_FIELD" };
+    const snapshot: IntelSnapshotShape = {
+      data: { ...EMPTY_INTEL_FIELDS, ...(intel.data as IntelFields) },
+      meta: { ...emptyMeta(defs), ...(intel.fieldMeta as IntelSnapshotShape["meta"]) },
+      confidence: Number(intel.confidence ?? 0),
+    };
+    const beforeValue = snapshot.data[params.key] ?? null;
+    const next = applyConfirm(snapshot, params.key, params.value, params.userId, defs);
+    const afterValue = next.data[params.key] ?? null;
+
+    await trx.customerIntel.update({
+      where: { id: intel.id },
+      data: { data: next.data, fieldMeta: next.meta, reviewedAt: new Date(), reviewedBy: params.userId },
+    });
+
+    // P13 — تأكيد الموظف يصير ذا سلطة على ملف العميل (سلطة الموظف تتقدّم على
+    // المستخرج). نطبّقه فورًا على صف العميل عبر نفس قواعد الدمج الآمنة.
+    const conv = await trx.conversation.findUnique({
+      where: { id: params.conversationId },
+      select: { customerId: true },
+    });
+    const customerField = customerFieldForIntelKey(params.key);
+    let customerBefore: unknown = null;
+    let customerAfter: unknown = null;
+    if (conv?.customerId) {
+      if (customerField) {
+        const row = await trx.customer.findUnique({
+          where: { id: conv.customerId },
+          select: { [customerField]: true },
+        });
+        customerBefore = row?.[customerField] ?? null;
+      }
+      await syncIntelToCustomer(trx, {
+        workspaceId: params.workspaceId,
+        customerId: conv.customerId,
+        actorUserId: params.userId,
+        strict: true,
+      });
+      if (customerField) {
+        const row = await trx.customer.findUnique({
+          where: { id: conv.customerId },
+          select: { [customerField]: true },
+        });
+        customerAfter = row?.[customerField] ?? null;
+      }
+    }
+
+    // سجل واحد لكل حقل صحّحه الموظف، وفقط إذا تغيّرت قيمته فعلًا.
+    // محادثة بلا عميل مرتبط: يُنسب السجل للمحادثة (لا نكتب Customer بمعرّف
+    // محادثة — كان بيطلّع سطرًا بملف عميل ثاني بنفس المعرّف).
+    await recordFieldChanges(trx as never, {
+      workspaceId: params.workspaceId,
+      userId: params.userId,
+      entityType: conv?.customerId ? "Customer" : "Conversation",
+      entityId: conv?.customerId ?? params.conversationId,
+      changes: [
+        {
+          fieldName: params.key,
+          beforeValue,
+          afterValue,
+          extra: {
+            scope: "intel",
+            conversationId: params.conversationId,
+            customerField,
+            customerBefore,
+            customerAfter,
+          },
+        },
+      ],
+    });
+
+    return { ok: true };
   });
-  return { ok: true };
 }

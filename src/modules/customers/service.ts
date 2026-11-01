@@ -1,7 +1,8 @@
 ﻿import type { Prisma, ChannelType, CustomerStatus } from "@prisma/client";
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
-import { recordAudit } from "@/modules/audit/service";
+import { recordAudit, recordFieldChanges } from "@/modules/audit/service";
+import { atomically } from "@/modules/channels/webhook-tx";
 
 export type Db = Prisma.TransactionClient;
 
@@ -196,10 +197,50 @@ export async function getCustomerDetail(db: Db, ctx: ActorContext, customerId: s
       select: { id: true, status: true, aiState: true, summary: true, updatedAt: true },
     }),
   ]);
-  return { ...customer, orders, conversations, aiSummary: customer.notes ?? null };
+  // P14 — لقطات «معلومات العميل المستخرجة» لكل محادثة مرتبطة: القيمة + حالتها
+  // (EXTRACTED/CONFIRMED/CONFLICT) + مصدرها (معرّفات الرسائل). الواجهة بتعرضها
+  // وتسمح بتأكيد/تصحيح عبر نقطة المختبر القائمة (لا نظام موازي).
+  const conversationIds = conversations.map((c) => c.id);
+  const intel = conversationIds.length
+    ? await db.customerIntel.findMany({
+        where: { workspaceId: ctx.workspaceId, conversationId: { in: conversationIds } },
+        select: {
+          conversationId: true, status: true, data: true, fieldMeta: true, confidence: true,
+          lastMessageId: true, extractedAt: true, reviewedAt: true,
+        },
+      })
+    : [];
+  const fieldHistory = await db.auditLog.findMany({
+    // P15 — سجل تعديلات الحقول: نفس المساحة فقط + نفس العميل. الصلاحية
+    // (customers.read) مفروضة على مسار الـ API قبل الوصول لهذه الدالة.
+    where: {
+      workspaceId: ctx.workspaceId,
+      entityType: "Customer",
+      entityId: customerId,
+      action: "customer.field_changed",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: { id: true, userId: true, metadata: true, createdAt: true },
+  });
+  return { ...customer, orders, conversations, intel, fieldHistory, aiSummary: customer.notes ?? null };
 }
 
 const MAX_TAGS = 30;
+
+/** الحقول القابلة للتعديل من نموذج ملف العميل — كل واحد يُدقّق لحاله (P15). */
+const CUSTOMER_FIELD_NAMES = [
+  "name",
+  "phone",
+  "email",
+  "address",
+  "province",
+  "city",
+  "language",
+  "notes",
+  "status",
+  "tags",
+] as const;
 
 export async function updateCustomer(
   db: Db,
@@ -211,56 +252,79 @@ export async function updateCustomer(
     email?: string | null;
     address?: string | null;
     province?: string | null;
+    city?: string | null;
     language?: string | null;
     notes?: string | null;
     status?: CustomerStatus;
     tags?: string[];
   }
 ) {
-  const existing = await getOwnedCustomer(db, ctx.workspaceId, customerId);
-
-  if (data.phone !== undefined && data.phone !== null) {
-    const clash = await db.customer.findFirst({
-      where: { workspaceId: ctx.workspaceId, phone: data.phone, id: { not: customerId } },
-      select: { id: true },
-    });
-    if (clash) throw new ConflictError("Another customer already uses this phone number");
-  }
-
   if (data.tags && data.tags.length > MAX_TAGS) {
     throw new AppError(`At most ${MAX_TAGS} tags allowed`, 422, "VALIDATION_ERROR");
   }
 
-  const updated = await db.customer.update({
-    where: { id: customerId },
-    data: {
-      ...(data.name !== undefined ? { name: data.name } : {}),
-      ...(data.phone !== undefined ? { phone: data.phone } : {}),
-      ...(data.email !== undefined ? { email: data.email } : {}),
-      ...(data.address !== undefined ? { address: data.address } : {}),
-      ...(data.province !== undefined ? { province: data.province } : {}),
-      ...(data.language !== undefined ? { language: data.language } : {}),
-      ...(data.notes !== undefined ? { notes: data.notes } : {}),
-      ...(data.status !== undefined ? { status: data.status } : {}),
-      ...(data.tags !== undefined ? { tags: data.tags } : {}),
-    },
-  });
+  // P15 — التحديث + سجل القيم قبل/بعد في معاملة واحدة: فشل التدقيق يلغي
+  // تحديث العميل (لا صف محدّث بلا أثر)، وكل حقل تغيّر = سجل مستقل.
+  const updated = await atomically(db, async (tx) => {
+    const existing = await getOwnedCustomer(tx, ctx.workspaceId, customerId);
 
-  await recordAudit(db, {
-    workspaceId: ctx.workspaceId,
-    userId: ctx.userId,
-    action: "customer.updated",
-    entityType: "Customer",
-    entityId: customerId,
-    ip: ctx.ip,
-    metadata: { fields: Object.keys(data) },
+    if (data.phone !== undefined && data.phone !== null) {
+      const clash = await tx.customer.findFirst({
+        where: { workspaceId: ctx.workspaceId, phone: data.phone, id: { not: customerId } },
+        select: { id: true },
+      });
+      if (clash) throw new ConflictError("Another customer already uses this phone number");
+    }
+
+    const row = await tx.customer.update({
+      where: { id: customerId },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.phone !== undefined ? { phone: data.phone } : {}),
+        ...(data.email !== undefined ? { email: data.email } : {}),
+        ...(data.address !== undefined ? { address: data.address } : {}),
+        ...(data.province !== undefined ? { province: data.province } : {}),
+        ...(data.city !== undefined ? { city: data.city } : {}),
+        ...(data.language !== undefined ? { language: data.language } : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.tags !== undefined ? { tags: data.tags } : {}),
+      },
+    });
+
+    const source = data as Record<string, unknown>;
+    const before = existing as unknown as Record<string, unknown>;
+    await recordFieldChanges(tx, {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      entityType: "Customer",
+      entityId: customerId,
+      ip: ctx.ip,
+      changes: CUSTOMER_FIELD_NAMES.filter((field) => source[field] !== undefined).map((field) => ({
+        fieldName: field,
+        beforeValue: before[field],
+        afterValue: source[field],
+        extra: { scope: "customer" },
+      })),
+    });
+
+    await recordAudit(tx, {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "customer.updated",
+      entityType: "Customer",
+      entityId: customerId,
+      ip: ctx.ip,
+      metadata: { fields: Object.keys(data) },
+    });
+
+    return row;
   });
 
   await eventBus.publish(
     makeEvent("CustomerUpdated", ctx.workspaceId, { customerId, fields: Object.keys(data) })
   );
 
-  void existing;
   return updated;
 }
 

@@ -327,38 +327,50 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
   const sendMode: "AUTO_REPLY" | "COLLECTION_ONLY" | "UNKNOWN" =
     pageSendMode === "COLLECTION_ONLY" || pageSendMode === "AUTO_REPLY" ? pageSendMode : "UNKNOWN";
 
-  if (sendMode === "COLLECTION_ONLY") {
+  // ── مهمة استخراج بيانات العميل = مستقلة تمامًا عن مسار الرد ──
+  // تُصفّ في وضع الردّ (AUTO_REPLY) ووضع التجميع (COLLECTION_ONLY): لا تُرسل
+  // شيئًا للعميل أبدًا، وفشلها لا يؤخّر الرد ولا يفقد الرسالة.
+  const enqueueCustomerIntel = async () => {
     try {
       const { enqueueJob } = await import("@/modules/jobs/service");
       await enqueueJob(db, {
         workspaceId: input.workspaceId,
         type: "extract_customer_intel",
         payload: { conversationId: conversation.id, messageId: message.id },
-        // معرّف واحد لكل رسالة: تكرار الـ Webhook ما بيحلّل مرتين.
+        // معرّف واحد لكل رسالة: تكرار الـ Webhook أو إعادة التشغيل ما بيحلّل مرتين.
         idempotencyKey: `intel:${message.id}`,
       });
     } catch (err) {
       // الرسالة محفوظة دائمًا — إعادة التحليل متاحة لاحقًا من المختبر.
       childLogger("pipeline").error({ err, messageId: message.id }, "intel_job_enqueue_failed");
     }
-  } else if (sendMode === "AUTO_REPLY" && conversation.aiState === "AI_ACTIVE" && conversation.aiEnabled) {
-    // Enqueue AI processing (Phase 4) — the webhook never waits for the AI.
-    // Gating: conversation must be AI_ACTIVE; a failed enqueue never loses the
-    // message (persisted above and retryable via /api/jobs/run scanning).
-    try {
-      const { enqueueJob } = await import("@/modules/jobs/service");
-      await enqueueJob(db, {
-        workspaceId: input.workspaceId,
-        type: "process_ai_message",
-        payload: { conversationId: conversation.id, messageId: message.id },
-        // Deterministic active-job idempotency (partial unique index):
-        // webhook redelivery or a sweeper race can never create two ACTIVE
-        // AI jobs for the same inbound message.
-        idempotencyKey: `ai:${message.id}`,
-      });
-    } catch (err) {
-      childLogger("pipeline").error({ err }, "ai_job_enqueue_failed");
+  };
+
+  if (sendMode === "COLLECTION_ONLY") {
+    await enqueueCustomerIntel();
+  } else if (sendMode === "AUTO_REPLY") {
+    // ١) الرد أولًا إن كانت المحادثة للذكاء — لا ينتظر استخراج بيانات العميل.
+    if (conversation.aiState === "AI_ACTIVE" && conversation.aiEnabled) {
+      // Enqueue AI processing (Phase 4) — the webhook never waits for the AI.
+      // Gating: conversation must be AI_ACTIVE; a failed enqueue never loses the
+      // message (persisted above and retryable via /api/jobs/run scanning).
+      try {
+        const { enqueueJob } = await import("@/modules/jobs/service");
+        await enqueueJob(db, {
+          workspaceId: input.workspaceId,
+          type: "process_ai_message",
+          payload: { conversationId: conversation.id, messageId: message.id },
+          // Deterministic active-job idempotency (partial unique index):
+          // webhook redelivery or a sweeper race can never create two ACTIVE
+          // AI jobs for the same inbound message.
+          idempotencyKey: `ai:${message.id}`,
+        });
+      } catch (err) {
+        childLogger("pipeline").error({ err }, "ai_job_enqueue_failed");
+      }
     }
+    // ٢) استخراج بيانات العميل بالخلفية (مهمة منفصلة، بلا إرسال).
+    await enqueueCustomerIntel();
   }
 
   return {

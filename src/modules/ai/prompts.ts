@@ -128,14 +128,16 @@ export function trustedDataPrompt(data: {
     objection: string | null;
     noOfferReason: string | null;
   };
-  customer?: { name: string | null; page: string | null };
+  customer?: { name: string | null; page: string | null; city?: string | null; province?: string | null };
 }): string {
   const blocks: string[] = [];
-  if (data.customer && (data.customer.name || data.customer.page)) {
+  if (data.customer && (data.customer.name || data.customer.page || data.customer.city || data.customer.province)) {
     blocks.push(
       [
         "العميل الحالي (بيانات رسمية — خاطبه باسمه إن وُجد):",
         data.customer.name ? `اسم العميل: ${data.customer.name}` : null,
+        data.customer.city ? `مدينة العميل: ${data.customer.city}` : null,
+        data.customer.province ? `محافظة العميل: ${data.customer.province}` : null,
         data.customer.page ? `صفحة فيسبوك: ${data.customer.page}` : null,
       ]
         .filter(Boolean)

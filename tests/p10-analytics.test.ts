@@ -249,11 +249,15 @@ describe("P10-7 sales analytics (offers ≠ sales)", () => {
 
 describe("P10-8 agent analytics (documented attribution)", () => {
   it("attribution via assignedAgentId only; AI replies never count as agent replies", async () => {
-    const c1 = await seedConv({ assignedAgentId: "agent-1" });
+    // P13: anchor the conversations a couple of hours in the past so the
+    // +10/+20/+40-minute seeded messages can never cross the range boundary
+    // (pre-existing time-of-day flake right before UTC midnight).
+    const anchor = new Date(Date.now() - 2 * 3600_000);
+    const c1 = await seedConv({ assignedAgentId: "agent-1", createdAt: anchor });
     await seedMsg(c1, "INBOUND", 0);
     await seedMsg(c1, "OUTBOUND", 20, { senderType: "AI", senderId: "ai-bot" }); // رد AI — ليس موظفًا
     await seedMsg(c1, "OUTBOUND", 40, { senderType: "HUMAN", senderId: "agent-1" });
-    const c2 = await seedConv({ assignedAgentId: "agent-2" });
+    const c2 = await seedConv({ assignedAgentId: "agent-2", createdAt: anchor });
     await seedMsg(c2, "INBOUND", 0);
     await seedMsg(c2, "OUTBOUND", 10, { senderType: "HUMAN", senderId: "agent-2" });
     const r = await getAgentAnalytics(db as Db, WS, q());

@@ -1,6 +1,6 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
-import { runJobs } from "@/modules/jobs/handlers";
+import { runWorkerTick } from "@/modules/jobs/handlers";
 import { registerAutomationBridge } from "@/modules/automation/engine";
 import { timingSafeEqual } from "@/core/crypto";
 
@@ -29,7 +29,7 @@ export const POST = createHandler(
     }
     // Durable automation bridge: trusted domain events → evaluation jobs.
     registerAutomationBridge(prisma);
-    const result = await runJobs(prisma, { limit: 10 });
+    const result = await runWorkerTick(prisma, { limit: 10 });
     return ok(result);
   }
 );

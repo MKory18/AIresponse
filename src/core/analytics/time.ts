@@ -119,3 +119,15 @@ export function avg(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((s, v) => s + v, 0) / values.length;
 }
+
+/**
+ * P13 — النسبة المئوية (p بين 0 و1) بطريقة «أقرب رتبة» (nearest-rank)، بلا
+ * استيفاء ومحافظة على القيم الفعلية. دالة نقية.
+ */
+export function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const clamped = Math.min(1, Math.max(0, p));
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.ceil(clamped * sorted.length) - 1);
+  return sorted[Math.max(0, idx)];
+}

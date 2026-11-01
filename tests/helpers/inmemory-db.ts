@@ -845,6 +845,29 @@ export function createFakeDb() {
     return result;
   };
 
+  // P15 — معاملة تفاعلية مثل Prisma: لقطة من كل المخازن، واسترجاعها عند أي
+  // خطأ. تُستخدم لاختبار «فشل التدقيق يلغي تحديث العميل». المعاملة لا تُعرّض
+  // $transaction نفسها (مثل عميل Prisma داخل معاملة) حتى لا تتشعّب المعاملات.
+  (db as any).$transaction = async (fn: (tx: typeof db) => Promise<unknown>) => {
+    const snapshot = Object.entries(db._stores).map(
+      ([key, store]) => [key, (store as Row[]).map((row) => ({ ...row }))] as const
+    );
+    const saved = (db as any).$transaction;
+    delete (db as any).$transaction;
+    try {
+      return await fn(db);
+    } catch (err) {
+      for (const [key, rows] of snapshot) {
+        const store = (db._stores as Record<string, Row[]>)[key];
+        store.length = 0;
+        store.push(...rows);
+      }
+      throw err;
+    } finally {
+      (db as any).$transaction = saved;
+    }
+  };
+
   allStores = db._stores;
   return db;
 }

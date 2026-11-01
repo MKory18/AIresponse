@@ -19,6 +19,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "worker": "tsx scripts/worker.ts",
+    "bench:queue": "tsx tests/p16-benchmark-reply-queue.ts",
     "scan:secrets": "node scripts/scan-secrets.mjs"
   },
   "prisma": {

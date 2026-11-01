@@ -227,6 +227,9 @@ model Customer {
   email             String?
   address           String?
   province          String?
+  // P13 — المدينة كما ذكرها العميل (منفصلة عن المحافظة التي تحكم التوصيل).
+  // إضافي وقابل للفراغ: صفوف قديمة = null. تُملأ من الاستخراج/التأكيد فقط.
+  city              String?
   channelCustomerId String?
   avatarUrl         String?
   language          String?
@@ -1550,6 +1553,10 @@ model AIUsageLog {
   // P6 fix (F-004): NULL when no pricing is configured — never fake $0.
   costUsd          Float?
   latencyMs        Int      @default(0)
+  // P13 — تفصيل زمن كل مرحلة بالميلي ثانية (مفاتيح مراحل فقط: messageLoad ·
+  // gating · ordering · config · extraction · context · responseGen …). إضافي
+  // وقابل للفراغ: يُكتب فقط على سجل الرد النهائي، وصفوفه القديمة NULL.
+  stageTimings     Json?
   success          Boolean  @default(true)
   status           String   @default("SUCCESS")
   error            String?

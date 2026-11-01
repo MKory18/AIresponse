@@ -29,6 +29,8 @@ export const updateCustomerSchema = z
     email: z.string().trim().toLowerCase().email().nullable().optional(),
     address: z.string().trim().max(500).nullable().optional(),
     province: z.string().trim().max(100).nullable().optional(),
+    // P14 — المدينة (منفصلة عن المحافظة التي تحكم التوصيل).
+    city: z.string().trim().max(100).nullable().optional(),
     language: z.string().trim().max(10).nullable().optional(),
     notes: z.string().trim().max(5000).nullable().optional(),
     status: z
