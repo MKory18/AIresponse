@@ -21,6 +21,14 @@ describe("Facebook OAuth authorize URL", () => {
     }
   });
 
+  it("does not request invalid/removed scopes (pages_user_profile)", () => {
+    // P21 hotfix — Meta rejects the whole authorize call with "Invalid Scope"
+    // when this non-existent scope is present. Names need the Business Asset
+    // User Profile Access *feature*, not an OAuth scope.
+    const scopes = scopesOf(buildAuthorizeUrl("state-token", "https://staging.example.com/cb"));
+    expect(scopes).not.toContain("pages_user_profile");
+  });
+
   it("targets the Meta OAuth dialog with code response_type and state", () => {
     const url = buildAuthorizeUrl("state-token", "https://staging.example.com/api/channels/facebook/callback");
     expect(url).toMatch(/^https:\/\/www\.facebook\.com\/v\d+\.\d+\/dialog\/oauth\?/);

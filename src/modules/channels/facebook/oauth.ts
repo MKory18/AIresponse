@@ -70,10 +70,11 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
     response_type: "code",
     // pages_read_engagement: required by GET /{page-id} (connection smoke test);
     // without it Graph returns error #100 "Page Public Content Access".
-    // pages_user_profile (P21): required for the sender's REAL name/picture
-    // (GET /{psid}?fields=name,profile_pic) — without it Graph returns empty.
-    scope:
-      "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,pages_user_profile",
+    // NOTE (P21): there is NO `pages_user_profile` OAuth scope — Meta rejects the
+    // whole authorize call with "Invalid Scope". Sender names/pictures require
+    // Advanced Access to the "Business Asset User Profile Access" feature in
+    // App Review (not a scope), plus pages_messaging/pages_read_engagement.
+    scope: "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement",
   });
   return `https://www.facebook.com/${process.env.META_GRAPH_VERSION ?? "v21.0"}/dialog/oauth?${params}`;
 }
