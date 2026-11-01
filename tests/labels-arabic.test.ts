@@ -30,6 +30,8 @@ const DISPLAYED = [
   "KnowledgeCategory",
   "KnowledgeStatus",
   "FollowUpStatus",
+  // P18 — حالات مسودة الطلب كانت تطلع خام (COLLECTING …) بالبطاقة.
+  "OrderDraftState",
 ];
 
 describe("أسماء عربية لكل حالة معروضة", () => {

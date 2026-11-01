@@ -4,7 +4,7 @@ import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertDraftTransition } from "./state-machine";
-import { normalizePhone } from "./primitives";
+import { inferProvince, normalizePhone } from "./primitives";
 import { resolveProduct, type ResolvableProduct } from "./primitives";
 
 export const REQUIRED_DRAFT_FIELDS = ["product", "quantity", "phone", "address"] as const;
@@ -24,12 +24,51 @@ export interface DraftExtractionInput {
 
 export async function getOrCreateDraft(db: Db, workspaceId: string, conversationId: string, customerId: string) {
   let draft = await db.orderDraft.findUnique({ where: { conversationId } });
-  if (!draft) {
+  if (draft) return draft;
+
+  // P18 — زبون قديم عنده هاتف/عنوان بملفه: نبدأ المسودة ببياناته المعروفة
+  // بدل ما نطلبها منه من جديد كل طلب. الحقول الناقصة تبقى ناقصة (لا اختراع).
+  const customer = await db.customer.findFirst({
+    where: { id: customerId, workspaceId },
+    select: { name: true, phone: true, address: true, province: true },
+  });
+  const rawAddress = customer?.address ?? null;
+  const province = customer?.province ?? (rawAddress ? inferProvince(rawAddress) : null);
+  // هاتف الملف ممكن يكون قديمًا بصيغة غير قانونية — لا نمرّره للمسودة إلا صالحًا.
+  const profilePhone = customer?.phone ? normalizePhone(customer.phone) : null;
+  const seed = {
+    customerName: customer?.name ?? null,
+    phone: profilePhone?.valid ? profilePhone.canonical : null,
+    rawAddress,
+    province,
+  };
+
+  try {
     draft = await db.orderDraft.create({
-      data: { workspaceId, conversationId, customerId, state: "COLLECTING" },
+      data: {
+        workspaceId,
+        conversationId,
+        customerId,
+        state: "COLLECTING",
+        ...seed,
+        missingFields: computeMissingFields({
+          productId: null,
+          quantity: null,
+          phone: seed.phone,
+          rawAddress: seed.rawAddress,
+          province: seed.province,
+        }),
+      },
     });
-    await eventBus.publish(makeEvent("OrderDraftCreated", workspaceId, { draftId: draft.id, conversationId }));
+  } catch (err) {
+    // سباق رسالتين متزامنتين على نفس المحادثة: القيد الفريد (conversationId)
+    // يحسم، ونكمل على المسودة الفائزة بدل ما نفشل الرد.
+    if ((err as { code?: string }).code !== "P2002") throw err;
+    const winner = await db.orderDraft.findUnique({ where: { conversationId } });
+    if (!winner) throw err;
+    return winner;
   }
+  await eventBus.publish(makeEvent("OrderDraftCreated", workspaceId, { draftId: draft.id, conversationId }));
   return draft;
 }
 
@@ -65,13 +104,28 @@ export async function updateDraftFromExtraction(
 
   // Product resolution (deterministic, DB-backed).
   let resolvedProductId = draft.productId;
+  let resolvedProductName: string | null = null;
   if (params.extraction.productName || params.extraction.productId) {
     if (params.extraction.productId) {
       // Page-catalog gate (same allowlist the reply path uses): an id
       // outside the catalog is treated as never sighted, not an error.
       const allow = params.allowedProductIds;
       if (!allow || allow.includes(params.extraction.productId)) {
-        resolvedProductId = params.extraction.productId;
+        // P18 — لا نثق بمعرّف جاي من الموديل: لازم يكون منتجًا نشطًا في نفس
+        // المساحة. معرّف مساحة أخرى/محذوف = كأنه ما انذكر.
+        const owned = (await db.product.findFirst({
+          where: {
+            id: params.extraction.productId,
+            workspaceId: params.workspaceId,
+            isActive: true,
+            isArchived: false,
+          },
+          select: { id: true, name: true },
+        })) as { id: string; name: string } | null;
+        if (owned) {
+          resolvedProductId = owned.id;
+          resolvedProductName = owned.name;
+        }
       }
     } else {
       const products = (await db.product.findMany({
@@ -87,8 +141,10 @@ export async function updateDraftFromExtraction(
         aliases: [p.name, ...(((p as unknown as { tags?: string[] }).tags ?? []).filter((t) => t.length > 2))],
       }));
       const resolution = resolveProduct(params.extraction.productName!, withAliases);
-      if (resolution.status === "RESOLVED") resolvedProductId = resolution.product!.id;
-      else if (resolution.status === "AMBIGUOUS") {
+      if (resolution.status === "RESOLVED") {
+        resolvedProductId = resolution.product!.id;
+        resolvedProductName = resolution.product!.name;
+      } else if (resolution.status === "AMBIGUOUS") {
         // Ambiguity → ask, never guess.
         await eventBus.publish(makeEvent("OrderDraftUpdated", params.workspaceId, { draftId: draft.id, ambiguous: true }));
         return { draft, ambiguousCandidates: resolution.candidates!.map((c) => c.name) };
@@ -96,7 +152,15 @@ export async function updateDraftFromExtraction(
       // NOT_FOUND keeps the previous product (contextual continuation).
     }
   }
-  if (resolvedProductId && resolvedProductId !== draft.productId) data.productId = resolvedProductId;
+  if (
+    resolvedProductId &&
+    (resolvedProductId !== draft.productId ||
+      (resolvedProductName !== null && resolvedProductName !== draft.productName))
+  ) {
+    data.productId = resolvedProductId;
+    // اسم المنتج للعرض في بطاقة المسودة — من قاعدة البيانات، لا من الموديل.
+    if (resolvedProductName) data.productName = resolvedProductName;
+  }
 
   if (params.extraction.quantity && params.extraction.quantity > 0) {
     data.quantity = params.extraction.quantity;
@@ -126,7 +190,35 @@ export async function updateDraftFromExtraction(
   const updated = await db.orderDraft.update({ where: { id: draft.id }, data });
 
   // Deterministic missing-field computation.
-  const refreshed = await db.orderDraft.findUniqueOrThrow({ where: { id: draft.id } }) as typeof draft;
+  let refreshed = (await db.orderDraft.findUniqueOrThrow({ where: { id: draft.id } })) as typeof draft;
+
+  // P18 — زبون قديم بملفه هاتف/عنوان/اسم: نكمل الناقص تلقائيًا بدل ما نطلب
+  // منه نفس المعلومات كل طلب. لا نستبدل قيمة موجودة بالمسودة، ولا نخترع قيمة.
+  if (!refreshed.phone || !refreshed.rawAddress || !refreshed.province || !refreshed.customerName) {
+    const customer = await db.customer.findFirst({
+      where: { id: params.customerId, workspaceId: params.workspaceId },
+      select: { name: true, phone: true, address: true, province: true },
+    });
+    if (customer) {
+      const backfill: Prisma.OrderDraftUncheckedUpdateInput = {};
+      if (!refreshed.phone && customer.phone) {
+        const normalized = normalizePhone(customer.phone);
+        if (normalized.valid && normalized.canonical) backfill.phone = normalized.canonical;
+      }
+      if (!refreshed.rawAddress && customer.address) backfill.rawAddress = customer.address;
+      if (!refreshed.province) {
+        const source = refreshed.rawAddress ?? customer.address ?? null;
+        const province = customer.province ?? (source ? inferProvince(source) : null);
+        if (province) backfill.province = province;
+      }
+      if (!refreshed.customerName && customer.name) backfill.customerName = customer.name;
+      if (Object.keys(backfill).length > 0) {
+        await db.orderDraft.update({ where: { id: draft.id }, data: backfill });
+        refreshed = (await db.orderDraft.findUniqueOrThrow({ where: { id: draft.id } })) as typeof draft;
+      }
+    }
+  }
+
   const missing = computeMissingFields(refreshed);
   const final = await db.orderDraft.update({
     where: { id: draft.id },

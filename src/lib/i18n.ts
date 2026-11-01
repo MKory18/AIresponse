@@ -436,6 +436,11 @@ export const LABELS: Record<string, string> = {
   // الحملات والمستلمون
   VALIDATING: "قيد الفحص",
   READY: "جاهزة",
+  // P18 — حالات مسودة الطلب كانت تطلع خام بالإنجليزي (COLLECTING …).
+  EMPTY: "فارغة",
+  COLLECTING: "قيد الجمع",
+  CONFIRMING: "قيد التأكيد",
+  CONVERTED: "تحوّلت لطلب",
   QUEUED: "بالدور",
   EXCLUDED: "مستبعد",
   CREATED: "انعملت",

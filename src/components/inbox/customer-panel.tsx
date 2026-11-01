@@ -154,6 +154,17 @@ export function CustomerPanel({
   );
 }
 
+function draftMissingLabel(key: string): string {
+  switch (key) {
+    case "product": return t.customer.product;
+    case "quantity": return t.customer.quantity;
+    case "phone": return t.customer.phone;
+    case "address": return t.customer.address;
+    case "name": return t.customer.name;
+    default: return key;
+  }
+}
+
 function OrderDraftCard({ draft }: { draft: DraftInfo }) {
   const complete = draft.missingFields.length === 0;
   const pct = complete ? 100 : Math.round(((4 - draft.missingFields.length) / 4) * 100);
@@ -188,7 +199,7 @@ function OrderDraftCard({ draft }: { draft: DraftInfo }) {
       </div>
       {draft.missingFields.length > 0 ? (
         <p className="mt-1.5 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400">
-          {t.inbox.draftMissing}: {draft.missingFields.join("، ")}
+          {t.inbox.draftMissing}: {draft.missingFields.map(draftMissingLabel).join("، ")}
         </p>
       ) : (
         <p className="mt-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400">{t.inbox.draftReady}</p>
