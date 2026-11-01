@@ -60,6 +60,7 @@ export async function runResponse(
     responseModelCfg,
     plan,
     extractionUser,
+    catalogBoundary,
   } = ext;
 
   // P1.1: trusted non-contact numbers that may legitimately appear in the
@@ -100,6 +101,7 @@ export async function runResponse(
   // instructions travel inside the request via this standard builder.
   const system = [
     coreSystemRules(),
+    ...(catalogBoundary ? [catalogBoundary] : []),
     personaPrompt(persona),
     trustedDataPrompt({
       product: context.product

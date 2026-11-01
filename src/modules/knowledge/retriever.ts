@@ -22,6 +22,8 @@ export async function retrieveKnowledge(
     productId?: string;
     category?: KnowledgeCategory;
     limit?: number;
+    /** P18 — حدود كتالوج الصفحة: أسئلة المنتجات خارجها ما بترجع. */
+    allowedProductIds?: string[] | null;
   }
 ): Promise<RetrievedKnowledge> {
   const [faqs, chunks] = await Promise.all([
@@ -29,6 +31,7 @@ export async function retrieveKnowledge(
       workspaceId: params.workspaceId,
       query: params.query,
       productId: params.productId,
+      allowedProductIds: params.allowedProductIds,
       limit: 3,
     }),
     (async () => {

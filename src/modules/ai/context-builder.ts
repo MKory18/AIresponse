@@ -129,7 +129,15 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
 export async function buildKnowledgeContext(
   db: Db,
   vectorStore: VectorStore,
-  params: { workspaceId: string; query: string; productId?: string; category?: KnowledgeCategory; limit?: number }
+  params: {
+    workspaceId: string;
+    query: string;
+    productId?: string;
+    category?: KnowledgeCategory;
+    limit?: number;
+    /** P18 — حدود كتالوج الصفحة على الأسئلة الجاهزة/المعرفة. */
+    allowedProductIds?: string[] | null;
+  }
 ) {
   const result = await retrieveKnowledge(db, vectorStore, params);
   return {
@@ -200,6 +208,8 @@ export async function buildAIContext(
     query: string;
     productId?: string;
     knowledgeLimit?: number;
+    /** P18 — undefined = ما في كتالوجات (بلا تقييد) · [] = لا منتجات متاحة. */
+    allowedProductIds?: string[] | null;
   }
 ): Promise<AIContext> {
   const [productCtx, knowledgeCtx, feedbackCtx, mediaCtx] = await Promise.all([
@@ -211,6 +221,7 @@ export async function buildAIContext(
       query: params.query,
       productId: params.productId,
       limit: params.knowledgeLimit ?? 4,
+      allowedProductIds: params.allowedProductIds,
     }),
     params.productId
       ? buildFeedbackContext(db, params.workspaceId, params.productId)
