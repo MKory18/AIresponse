@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  NAV_ALIASES,
   NAV_GROUPS,
+  NAV_REDIRECTS,
   groupLanding,
   pageForPath,
   visibleGroups,
@@ -27,7 +27,11 @@ import { GroupTabs } from "@/components/group-tabs";
  * ⚠️ قبل: ٢٢ بند بصف واحد، ونفس الشغلة بأكتر من مكان، وأيقونات مكرّرة.
  * 🔧 هلأ: ٧ مجموعات. هالاختبارات بتحرس إن ولا صفحة بتضيع من القائمة وإن
  * ولا رابط قديم بينكسر — لأن إعادة التجميع بتغيّر شكل القائمة بس، مش المسارات.
+ * الصفحة المدموجة بغيرها بتضل رابط شغّال بيحوّل لمكانها الجديد (`NAV_REDIRECTS`).
  */
+
+/** صفحات التحويل: كل وحدة بتنادي `redirectToMerged` بمسارها. */
+const REDIRECT_ROUTES = Object.keys(NAV_REDIRECTS);
 
 /** كل `page.tsx` تحت (dashboard) كمسار — `[id]` بيصير `x`. */
 function dashboardRoutes(): string[] {
@@ -71,13 +75,27 @@ describe("هيكل القائمة", () => {
     expect(orphans, `صفحات بلا مجموعة: ${orphans.join(" ")}`).toEqual([]);
   });
 
-  it("ولا رابط قديم بينكسر: الـ٢٢ رابط الأصلية كلها لسا صفحات فعلية بالقائمة", () => {
+  it("ولا رابط قديم بينكسر: الـ٢٢ رابط الأصلية كلها لسا صفحات — بالقائمة أو بتحوّل لصفحة بالقائمة", () => {
     const routes = new Set(dashboardRoutes());
     const inNav = new Set(NAV_GROUPS.flatMap((g) => g.pages.map((p) => p.href)));
     for (const href of OLD_NAV_HREFS) {
       expect(routes.has(href), `الصفحة انشالت: ${href}`).toBe(true);
-      expect(inNav.has(href), `الرابط اختفى من القائمة: ${href}`).toBe(true);
+      const target = NAV_REDIRECTS[href]?.split("?")[0];
+      expect(inNav.has(href) || (!!target && inNav.has(target)), `الرابط ضاع: ${href}`).toBe(true);
     }
+  });
+
+  it("صفحات التحويل: ما بتظهر بالقائمة، وكل وحدة ملفها بيحوّل بمسارها", () => {
+    const inNav = new Set(NAV_GROUPS.flatMap((g) => g.pages.map((p) => p.href)));
+    for (const href of REDIRECT_ROUTES) {
+      expect(inNav.has(href), `${href} بالقائمة وكمان بيحوّل`).toBe(false);
+      const file = join(process.cwd(), "src", "app", "(dashboard)", ...href.slice(1).split("/"), "page.tsx");
+      expect(readFileSync(file, "utf8"), file).toContain(`redirectToMerged("${href}")`);
+    }
+  });
+
+  it("ولا تكرار: الـ٢٦ تبويب صاروا ٢١ (الصفحات الي كانت نسخة من غيرها اندمجت)", () => {
+    expect(NAV_GROUPS.flatMap((g) => g.pages)).toHaveLength(21);
   });
 
   it("كل صفحة بالقائمة موجودة فعلًا (ولا تبويب بيودّي لـ ٤٠٤)", () => {
@@ -101,10 +119,10 @@ describe("هيكل القائمة", () => {
     }
   });
 
-  it("الأسماء المستعارة بتأشّر لصفحة موجودة بالقائمة", () => {
-    for (const [alias, target] of Object.entries(NAV_ALIASES)) {
-      expect(dashboardRoutes()).toContain(alias);
-      expect(pageForPath(target, NAV_GROUPS), `${alias} → ${target}`).not.toBeNull();
+  it("كل تحويل بيأشّر لصفحة موجودة بالقائمة", () => {
+    for (const [from, target] of Object.entries(NAV_REDIRECTS)) {
+      expect(dashboardRoutes()).toContain(from);
+      expect(pageForPath(target, NAV_GROUPS), `${from} → ${target}`).not.toBeNull();
     }
   });
 });
@@ -112,13 +130,19 @@ describe("هيكل القائمة", () => {
 describe("مطابقة المسار بالصفحة", () => {
   const hit = (p: string) => pageForPath(p, NAV_GROUPS);
 
-  it("أطول رابط بيفوز: /settings/ai بتتبع «الضبط» مش «عام»", () => {
-    expect(hit("/settings/ai")?.page.label).toBe("الضبط");
+  it("/settings/ai بتتبع «التشغيل» بمجموعة الذكاء، والرابط المدموج بيتبع مكانه الجديد", () => {
+    expect(hit("/settings/ai")?.page.label).toBe("التشغيل");
     expect(hit("/settings/ai")?.group.key).toBe("ai");
-    expect(hit("/settings")?.page.label).toBe("عام");
-    expect(hit("/settings")?.group.key).toBe("settings");
+    expect(hit("/settings")?.page.href).toBe("/settings/account");
+    expect(hit("/ai/studio")?.page.href).toBe("/settings/ai");
+    expect(hit("/workflows")?.page.href).toBe("/automation");
     expect(hit("/analytics/ai")?.group.key).toBe("reports");
-    expect(hit("/analytics")?.page.label).toBe("نظرة عامة");
+    expect(hit("/analytics/products")?.page.href).toBe("/analytics");
+  });
+
+  it("التحويل حرفي: /settings بتحوّل، بس /settings/team صفحة حقيقية", () => {
+    expect(hit("/settings/team")?.page.href).toBe("/settings/team");
+    expect(hit("/settings/account")?.page.href).toBe("/settings/account");
   });
 
   it("صفحات التفاصيل بتتبع صفحة القائمة", () => {
@@ -127,7 +151,7 @@ describe("مطابقة المسار بالصفحة", () => {
     expect(hit("/catalogs/c9")?.page.label).toBe("الكتالوجات");
   });
 
-  it("الاسم المستعار /order-warehouse بيتبع مجموعة الطلبات", () => {
+  it("الرابط القديم /order-warehouse بيتبع مجموعة الطلبات", () => {
     expect(hit("/order-warehouse")?.page.href).toBe("/orders");
     expect(hit("/order-warehouse")?.group.key).toBe("sales");
   });

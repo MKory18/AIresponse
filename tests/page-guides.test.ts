@@ -67,8 +67,8 @@ describe("«الخطوة الجاية» بتودّي لمكان حقيقي", () 
     }
   });
 
-  it("الدليل وبطاقة «ابدأ من هون» بيحكوا نفس القصة: قنوات ← منتجات ← شخصية ← تجربة ← ضبط", () => {
-    const chain = ["/channels", "/products", "/personas", "/ai/playground", "/settings/ai"];
+  it("الدليل وبطاقة «ابدأ من هون» بيحكوا نفس القصة: قناة ← منتجات ← شخصية ← معرفة ← تجربة ← تشغيل", () => {
+    const chain = ["/channels", "/products", "/personas", "/knowledge", "/ai/playground", "/settings/ai"];
     for (let i = 0; i < chain.length - 1; i++) {
       expect(PAGE_GUIDES[chain[i]!]!.next.href, `${chain[i]} ← ؟`).toBe(chain[i + 1]);
     }
@@ -81,7 +81,11 @@ describe("مطابقة المسار بالشرح", () => {
     expect(guideForPath("/products/p9")?.href).toBe("/products");
     expect(guideForPath("/order-warehouse")?.href).toBe("/orders");
     expect(guideForPath("/settings/ai")?.href).toBe("/settings/ai");
-    expect(guideForPath("/settings")?.href).toBe("/settings");
+    // الروابط المدموجة بتاخد شرح مكانها الجديد.
+    expect(guideForPath("/settings")?.href).toBe("/settings/account");
+    expect(guideForPath("/ai/studio")?.href).toBe("/settings/ai");
+    expect(guideForPath("/workflows")?.href).toBe("/automation");
+    expect(guideForPath("/analytics/ai")?.href).toBe("/analytics");
   });
 
   it("مسار مجهول = ولا شرح (مش شرح غلط)", () => {

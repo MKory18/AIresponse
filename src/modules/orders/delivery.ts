@@ -28,8 +28,12 @@ export async function quoteDelivery(
     where: { workspaceId: params.workspaceId, province: params.province },
   });
   if (!rule) {
-    // Unconfigured province: available with default fee rather than a hard
-    // reject — the workspace can tighten this by adding rules.
+    // Phase 1.5 — distinguish "this workspace manages no delivery rules at all"
+    // (keep a permissive default for backward compatibility) from "rules exist,
+    // but this province is missing" — which is a real gap and is NEVER silently
+    // treated as free delivery.
+    const anyRule = await db.deliveryRule.count({ where: { workspaceId: params.workspaceId } });
+    if (anyRule > 0) return { available: false, fee: 0, reason: "NO_DELIVERY_RULE" };
     return { available: true, fee: params.defaultFee ?? 0, reason: "NO_RULE_DEFAULT_FEE" };
   }
   if (!rule.isAvailable) {

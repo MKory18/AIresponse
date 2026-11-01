@@ -20,6 +20,7 @@ function NavLink({
   active,
   collapsed,
   onNavigate,
+  tour,
 }: {
   href: string;
   label: string;
@@ -29,6 +30,8 @@ function NavLink({
   active: boolean;
   collapsed?: boolean;
   onNavigate?: () => void;
+  /** علامة الجولة السريعة (`lib/guided-tour.ts`). */
+  tour?: string;
 }) {
   const Icon = NAV_ICONS[icon] ?? MessageSquare;
   return (
@@ -36,6 +39,7 @@ function NavLink({
       key={href}
       href={href}
       onClick={onNavigate}
+      data-tour={tour}
       aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
       className={cn(
@@ -114,6 +118,7 @@ export function Sidebar({
         active={g.key === activeKey}
         collapsed={coll}
         onNavigate={onNavigate}
+        tour={`group-${g.key}`}
       />
     );
     const main = groups.filter((g) => g.placement === "main");

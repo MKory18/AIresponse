@@ -1,59 +1,91 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Power, Trash2, Workflow, Zap } from "lucide-react";
+import Link from "next/link";
+import { Eye, GitBranch, PauseCircle, PlayCircle, Plus, Power, Square, Trash2, Zap } from "lucide-react";
 import { t, label as enumLabel } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { Dialog } from "@/components/ui/dialog";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { QuickRuleDialog } from "./quick-rule-dialog";
+import { STEP_TYPES, WorkflowBuilderDialog } from "./workflow-builder-dialog";
 
-type Automation = {
+/**
+ * القواعد التلقائية — صفحة وحدة.
+ *
+ * ⚠️ قبل: «القواعد» و«سير العمل» صفحتين بيقروا **نفس الجدول** (`automation`):
+ * كل قاعدة بتطلع بالقائمتين، والمسودة بتطلع بـ«القواعد» كـ«معطّلة» وزر «تفعيل»
+ * كان بيشغّلها بلا نشر، وخطوات سير العمل كانت تطلع «—».
+ * 🔧 قائمة وحدة بزرّين إنشاء: «قاعدة سريعة» (رسالة متابعة) و«قاعدة بخطوات».
+ * كل صف بأزراره الصح حسب نوعه — والرابط القديم `/workflows` بيحوّل لهون.
+ */
+
+type Execution = { id: string; status: string; error: string | null; version?: number; stepIndex?: number; startedAt: string };
+
+type Rule = {
   id: string;
   name: string;
   description: string | null;
   trigger: string;
-  conditions: { all?: { field: string; operator: string; value?: string | number }[] };
-  actions: { type: string; template?: string; delayHours?: number; tag?: string; title?: string }[];
-  priority: number;
+  status: string;
+  version: number;
   isEnabled: boolean;
-  executions: { id: string; status: string; startedAt: string }[];
+  actions: unknown[];
+  executions?: Execution[];
+  _count?: { executions: number };
 };
 
-const TRIGGERS = [
-  "ORDER_CREATED", "ORDER_CONFIRMED", "ORDER_CANCELLED", "ORDER_DELIVERED",
-  "CONVERSATION_CREATED", "CUSTOMER_CREATED",
-];
+type PreviewStep = { stepId: string; type: string; outcome: string; reason?: string };
 
-const EMPTY_FORM = {
-  name: "", trigger: "ORDER_CONFIRMED", province: "", minTotal: "",
-  followUpTemplate: "مرحبًا {{customer.name}}، نود التأكد من أن كل شيء على ما يرام مع طلبك.", delayHours: 24,
-};
+const STEP_LABEL: Record<string, string> = Object.fromEntries(STEP_TYPES.map((s) => [s.value, s.label]));
+
+/**
+ * قاعدة بخطوات = كل عنصر بـ`actions` شكله `{ id, action }`. القاعدة السريعة
+ * (القديمة) عناصرها `{ type, … }` مباشرة — وإلها مفتاح تشغيل/إيقاف بس، لأن
+ * «النشر» بيتحقق من شكل الخطوات وبيرفضها.
+ */
+function isStepRule(actions: unknown[]): boolean {
+  return actions.length > 0 && actions.every((a) => !!a && typeof a === "object" && "action" in (a as object));
+}
+
+function stepTypes(rule: Rule): string[] {
+  return rule.actions.map((a) => {
+    const o = a as { type?: string; action?: { type?: string } };
+    return o.action?.type ?? o.type ?? "";
+  });
+}
+
+/** حالة القاعدة بكلمة وحدة بيفهمها صاحب المتجر. */
+function ruleState(rule: Rule): { text: string; tone: string } {
+  if (rule.status === "DRAFT") return { text: "مسودة — ما بتشتغل", tone: "NORMAL" };
+  if (rule.isEnabled && rule.status === "PUBLISHED") return { text: "شغّالة", tone: "CONNECTED" };
+  return { text: "موقوفة", tone: "PENDING" };
+}
 
 export default function AutomationPage() {
-  const [items, setItems] = useState<Automation[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<Rule[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deleteTarget, setDeleteTarget] = useState<Automation | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [create, setCreate] = useState<"quick" | "steps" | null>(null);
+  const [detail, setDetail] = useState<(Rule & { executions: Execution[] }) | null>(null);
+  const [preview, setPreview] = useState<{ conditionsMet: boolean; steps: PreviewStep[]; note?: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Rule | null>(null);
   const toast = useToast();
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/automations");
+      const res = await fetch("/api/workflows");
       if (!res.ok) throw new Error();
       setItems((await res.json()).items);
       setError(null);
     } catch {
-      setError("تعذّر تحميل الأتمتة");
+      setError("تعذّر تحميل القواعد");
     } finally {
       setLoading(false);
     }
@@ -63,46 +95,28 @@ export default function AutomationPage() {
     load();
   }, [load]);
 
-  async function create(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setCreating(true);
-    setError(null);
-    const conditions: Automation["conditions"] = {};
-    const all: { field: string; operator: "EQ" | "GTE"; value?: string | number }[] = [];
-    if (form.province) all.push({ field: "customer.province", operator: "EQ", value: form.province });
-    if (form.minTotal) all.push({ field: "order.total", operator: "GTE", value: Number(form.minTotal) });
-    if (all.length) conditions.all = all;
-
-    const res = await fetch("/api/automations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: form.name,
-        trigger: form.trigger,
-        conditions,
-        actions: [{ type: "CREATE_FOLLOW_UP", template: form.followUpTemplate, delayHours: Number(form.delayHours), followUpType: "CHECK_IN" }],
-        priority: 0,
-        isEnabled: true,
-      }),
-    });
-    setCreating(false);
-    if (res.ok) {
-      setShowForm(false);
-      setForm(EMPTY_FORM);
-      load();
-    } else {
-      const data = await res.json().catch(() => ({}));
-      setError(data.message ?? "فشل الإنشاء");
+  async function openDetail(id: string) {
+    setBusy(`detail:${id}`);
+    try {
+      const res = await fetch(`/api/workflows/${id}`);
+      if (!res.ok) throw new Error();
+      setDetail(await res.json());
+      setPreview(null);
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
     }
   }
 
-  async function toggle(automation: Automation) {
-    setBusy(`toggle:${automation.id}`);
+  /** قاعدة سريعة: تشغيل/إيقاف بس. */
+  async function toggleQuick(rule: Rule) {
+    setBusy(`toggle:${rule.id}`);
     try {
-      const res = await fetch(`/api/automations/${automation.id}`, {
+      const res = await fetch(`/api/automations/${rule.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: automation.isEnabled ? "disable" : "enable" }),
+        body: JSON.stringify({ action: rule.isEnabled ? "disable" : "enable" }),
       });
       if (!res.ok) throw new Error();
     } catch {
@@ -110,6 +124,49 @@ export default function AutomationPage() {
     } finally {
       setBusy(null);
       load();
+    }
+  }
+
+  /** قاعدة بخطوات: تشغيل (نشر) · إيقاف مؤقت · إيقاف وإلغاء الجاري. */
+  async function lifecycle(rule: Rule, act: "publish" | "pause" | "stop") {
+    setBusy(`${act}:${rule.id}`);
+    try {
+      const res = await fetch(`/api/workflows/${rule.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: act }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.show(data.message ?? "فشل تنفيذ الإجراء", "error");
+      }
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
+      load();
+    }
+  }
+
+  async function previewRun(rule: Rule) {
+    setBusy(`preview:${rule.id}`);
+    try {
+      const res = await fetch(`/api/workflows/${rule.id}/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sample: {} }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.show(data.message ?? "فشلت المحاكاة", "error");
+        return;
+      }
+      setPreview(await res.json());
+      setDetail(null);
+    } catch {
+      toast.show(t.inbox.actionFailed, "error");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -127,20 +184,27 @@ export default function AutomationPage() {
     }
   }
 
+  const created = () => {
+    setCreate(null);
+    load();
+  };
+
   return (
     <div className="page-wrap">
       <PageHeader
-        title={t.pages.automationTitle}
-        description={t.pages.automationDesc}
+        title="القواعد التلقائية"
+        description="لما يصير شي (طلب جديد، رسالة، تأكيد…) النظام بيعمل خطوة لحاله: يبعت رسالة، يجدول متابعة، يحط وسم أو يسند لموظف."
         actions={
-          <Button size="sm" onClick={() => setShowForm(true)}>
-            <Plus size={14} /> أتمتة جديدة
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => setCreate("quick")}>
+              <Zap size={14} /> قاعدة سريعة
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setCreate("steps")}>
+              <GitBranch size={14} /> قاعدة بخطوات
+            </Button>
+          </div>
         }
       />
-      {error && (
-        <GlassCard level="glass-subtle" className="border-red-500/20 px-4 py-2.5 text-sm text-red-600 dark:text-red-400">{error}</GlassCard>
-      )}
 
       {loading && (
         <div className="space-y-2.5">
@@ -148,97 +212,143 @@ export default function AutomationPage() {
         </div>
       )}
 
-      {!loading && error && items.length === 0 && (
+      {!loading && error && (
         <GlassCard>
           <ErrorState onRetry={load} />
         </GlassCard>
       )}
 
-      {!loading && !error && (
+      {!loading && !error && items.length > 0 && (
         <div className="space-y-2.5">
-          {items.map((a) => {
-            const last = a.executions[0];
+          {items.map((rule) => {
+            const steps = isStepRule(rule.actions);
+            const state = ruleState(rule);
+            const last = rule.executions?.[0];
+            const running = rule.isEnabled && rule.status === "PUBLISHED";
             return (
-              <GlassCard key={a.id} className="p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700">
+              <GlassCard key={rule.id} className="p-4 transition-colors hover:border-brand-300/80 dark:hover:border-brand-700">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-2.5">
-                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${a.isEnabled ? "bg-primary-soft text-primary" : "bg-surface-3 text-ink-subtle"}`}>
-                      <Workflow size={17} />
+                  <button type="button" className="flex min-w-0 items-start gap-2.5 text-start" onClick={() => openDetail(rule.id)} title="سجل التنفيذ">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${running ? "bg-primary-soft text-primary" : "bg-surface-3 text-ink-subtle"}`}>
+                      {steps ? <GitBranch size={17} /> : <Zap size={17} />}
                     </span>
-                    <div className="min-w-0">
-                      <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ink">
-                        {a.name}
-                        <Badge tone="AI_ACTIVE">{enumLabel(a.trigger)}</Badge>
-                        {!a.isEnabled && <Badge tone="CLOSED">معطلة</Badge>}
-                      </p>
-                      <p className="num mt-1 text-xs text-ink-muted">
-                        {a.actions.map((ac) => enumLabel(ac.type)).join("، ")} · أولوية {a.priority}
-                        {last && <> · آخر تنفيذ: {enumLabel(last.status)}</>}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Button size="sm" variant="secondary" onClick={() => toggle(a)} disabled={busy !== null} loading={busy === `toggle:${a.id}`}>
-                      <Power size={13} />
-                      {a.isEnabled ? "تعطيل" : "تفعيل"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(a)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
-                      <Trash2 size={13} />
-                      {t.common.delete}
-                    </Button>
+                    <span className="block min-w-0">
+                      <span className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ink">
+                        {rule.name}
+                        <Badge tone={state.tone} dot>{state.text}</Badge>
+                      </span>
+                      <span className="mt-1 block text-xs text-ink-muted">
+                        {enumLabel(rule.trigger)} ←{" "}
+                        {stepTypes(rule).map((type) => STEP_LABEL[type] ?? enumLabel(type)).join(" ثم ")}
+                        {rule._count?.executions ? <> · <span className="num">{rule._count.executions}</span> تنفيذ</> : null}
+                        {last && <> · آخر مرة: {enumLabel(last.status)}</>}
+                      </span>
+                      {rule.description && <span className="mt-0.5 block text-xs text-ink-subtle">{rule.description}</span>}
+                    </span>
+                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    {steps ? (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => previewRun(rule)} loading={busy === `preview:${rule.id}`}>
+                          <Eye size={13} /> محاكاة
+                        </Button>
+                        {!running && (
+                          <Button size="sm" variant="secondary" onClick={() => lifecycle(rule, "publish")} loading={busy === `publish:${rule.id}`}>
+                            <PlayCircle size={13} /> تشغيل
+                          </Button>
+                        )}
+                        {running && (
+                          <>
+                            <Button size="sm" variant="secondary" onClick={() => lifecycle(rule, "pause")} loading={busy === `pause:${rule.id}`}>
+                              <PauseCircle size={13} /> إيقاف مؤقت
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => lifecycle(rule, "stop")} loading={busy === `stop:${rule.id}`} title="بيوقفها وبيلغي أي تنفيذ لسا شغّال">
+                              <Square size={13} /> إيقاف وإلغاء الجاري
+                            </Button>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <Button size="sm" variant="secondary" onClick={() => toggleQuick(rule)} disabled={busy !== null} loading={busy === `toggle:${rule.id}`}>
+                        <Power size={13} />
+                        {rule.isEnabled ? "إيقاف" : "تشغيل"}
+                      </Button>
+                    )}
+                    {!running && (
+                      <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(rule)} className="text-red-600 hover:bg-red-500/10 dark:text-red-400">
+                        <Trash2 size={13} /> {t.common.delete}
+                      </Button>
+                    )}
                   </div>
                 </div>
               </GlassCard>
             );
           })}
+          <p className="text-xs text-ink-muted">
+            الرسائل المجدولة الي بتعملها القواعد بتلاقيها بـ{" "}
+            <Link href="/follow-ups" className="font-bold text-primary hover:underline">المتابعات</Link>.
+          </p>
         </div>
       )}
+
       {!loading && !error && items.length === 0 && (
         <GlassCard>
           <EmptyState
             icon={<Zap size={28} strokeWidth={1.5} />}
-            title="لا توجد أتمتة بعد"
-            description="أنشئ أول قاعدة تلقائية لمتابعة الطلبات والعملاء."
-            action={<Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} /> أتمتة جديدة</Button>}
+            title="ولا قاعدة لسا"
+            description="ابدأ بقاعدة سريعة: مثلًا رسالة «كيف كان طلبك؟» بعد ٢٤ ساعة من التأكيد."
+            action={<Button size="sm" onClick={() => setCreate("quick")}><Plus size={14} /> قاعدة سريعة</Button>}
           />
         </GlassCard>
       )}
 
-      <Dialog open={showForm} onClose={() => setShowForm(false)} title="أتمتة جديدة">
-        <form onSubmit={create} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="اسم الأتمتة">
-            <Input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="مثال: متابعة بعد التأكيد" />
-          </Field>
-          <Field label="الحدث المشغّل">
-            <Select value={form.trigger} onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value }))}>
-              {TRIGGERS.map((trigger) => <option key={trigger} value={trigger}>{enumLabel(trigger)}</option>)}
-            </Select>
-          </Field>
-          <Field label="شرط المحافظة" hint="اتركه فارغًا لتجاهل الشرط.">
-            <Input value={form.province} onChange={(e) => setForm((f) => ({ ...f, province: e.target.value }))} placeholder="مثال: دمشق" />
-          </Field>
-          <Field label="شرط إجمالي الطلب">
-            <Input type="number" value={form.minTotal} onChange={(e) => setForm((f) => ({ ...f, minTotal: e.target.value }))} placeholder="≥" dir="ltr" className="num" />
-          </Field>
-          <Field label="نص رسالة المتابعة" className="sm:col-span-2">
-            <Textarea value={form.followUpTemplate} onChange={(e) => setForm((f) => ({ ...f, followUpTemplate: e.target.value }))} rows={2} />
-          </Field>
-          <Field label="الإرسال بعد (ساعات)">
-            <Input type="number" min="0" value={form.delayHours} onChange={(e) => setForm((f) => ({ ...f, delayHours: Number(e.target.value) }))} dir="ltr" className="num" />
-          </Field>
-          <div className="flex items-end justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>{t.common.cancel}</Button>
-            <Button type="submit" loading={creating}>إنشاء</Button>
-          </div>
-        </form>
+      <QuickRuleDialog open={create === "quick"} onClose={() => setCreate(null)} onCreated={created} />
+      <WorkflowBuilderDialog open={create === "steps"} onClose={() => setCreate(null)} onCreated={created} />
+
+      {/* سجل التنفيذ */}
+      <Dialog open={!!detail} onClose={() => setDetail(null)} title={`سجل التنفيذ — ${detail?.name ?? ""}`}>
+        <div className="space-y-2">
+          {(detail?.executions ?? []).map((ex) => (
+            <div key={ex.id} className="rounded-xl border border-line p-3">
+              <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-ink">
+                <Badge tone={ex.status}>{enumLabel(ex.status)}</Badge>
+                {ex.stepIndex !== undefined && <span className="num text-ink-muted">خطوة {ex.stepIndex}</span>}
+              </p>
+              {ex.error && <p className="num mt-1 text-xs text-red-600 dark:text-red-400" dir="ltr">{ex.error}</p>}
+              <p className="num mt-1 text-[11px] text-ink-subtle">{new Date(ex.startedAt).toLocaleString("ar")}</p>
+            </div>
+          ))}
+          {(detail?.executions ?? []).length === 0 && (
+            <p className="py-6 text-center text-sm text-ink-muted">ما اشتغلت ولا مرة لسا.</p>
+          )}
+        </div>
+      </Dialog>
+
+      {/* محاكاة */}
+      <Dialog open={!!preview} onClose={() => setPreview(null)} title="محاكاة — بدون ما يتبعت أو يتغيّر شي">
+        <div className="space-y-2">
+          <p className="flex items-center gap-2 text-sm">
+            <PlayCircle size={16} className="text-brand-500" />
+            الشروط متحققة: <b>{preview?.conditionsMet ? "نعم" : "لا"}</b>
+          </p>
+          {(preview?.steps ?? []).map((s, i) => (
+            <div key={i} className="flex items-center justify-between rounded-xl border border-line px-3 py-2">
+              <span className="text-xs text-ink-muted">{i + 1}. {STEP_LABEL[s.type] ?? enumLabel(s.type)}</span>
+              <Badge tone={s.outcome === "WOULD_RUN" || s.outcome === "BRANCH_TAKEN" ? "CONNECTED" : s.outcome === "WOULD_WAIT" ? "PENDING" : "NORMAL"}>
+                {enumLabel(s.outcome)}
+              </Badge>
+            </div>
+          ))}
+          {preview?.note && <p className="text-[11px] text-ink-subtle">{preview.note}</p>}
+        </div>
       </Dialog>
 
       <ConfirmDialog
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => deleteTarget && void remove(deleteTarget.id)}
-        title={`حذف الأتمتة "${deleteTarget?.name ?? ""}"؟`}
-        body="لن تُنفَّذ هذه القاعدة التلقائية بعد الآن. سجل التنفيذ السابق يبقى محفوظًا."
+        title={`حذف القاعدة "${deleteTarget?.name ?? ""}"؟`}
+        body="ما رح تشتغل بعد هيك. سجل التنفيذ السابق بيضل محفوظ."
         confirmLabel="حذف نهائي"
         busy={busy === `delete:${deleteTarget?.id}`}
         danger

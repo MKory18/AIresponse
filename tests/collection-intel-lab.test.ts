@@ -197,14 +197,20 @@ describe("COLLECTION_ONLY — لا رد آلي إطلاقًا", () => {
     expect((db._stores.message as Array<Record<string, any>>)).toHaveLength(0);
   });
 
-  it("AUTO_REPLY لا يتغيّر سلوكه: process_ai_message يُصفّ والإرسال غير محجوب", async () => {
+  it("AUTO_REPLY: الرد يُصفّ أولًا، وتحليل بيانات العميل مهمة مستقلة بالخلفية", async () => {
     const db = createFakeDb() as FakeDb;
     seedPage(db, { sendMode: "AUTO_REPLY" });
     const { conversationId } = await inbound(db);
 
-    const jobs = (db._stores.backgroundJob as Array<Record<string, any>>).map((j) => j.type);
-    expect(jobs).toContain("process_ai_message");
-    expect(jobs).not.toContain("extract_customer_intel");
+    const jobs = (db._stores.backgroundJob as Array<Record<string, any>>);
+    const types = jobs.map((j) => j.type);
+    // الرد والاستخراج مهمتان منفصلتان — الاستخراج ما بيأخّر الرد ولا بيمنعه.
+    expect(types).toContain("process_ai_message");
+    expect(types).toContain("extract_customer_intel");
+    const intel = jobs.find((j) => j.type === "extract_customer_intel");
+    expect(intel?.idempotencyKey).toMatch(/^intel:/);
+    // مجرد صفّ المهمة ما بينشئ أي رسالة صادرة.
+    expect((db._stores.message as Array<Record<string, any>>).filter((m) => m.direction === "OUTBOUND")).toHaveLength(0);
 
     const policy = await assertAutomatedSendAllowed(db as never, { workspaceId: "ws1", conversationId, senderType: "AI" });
     expect(policy.allowed).toBe(true);
@@ -330,12 +336,16 @@ describe("العزل بين المساحات والصلاحيات", () => {
     expect(confirm.ok).toBe(false);
   });
 
-  it("لا تحليل لصفحة في وضع AUTO_REPLY", async () => {
+  it("تحليل معلومات العميل يعمل في وضع AUTO_REPLY أيضًا (بلا إرسال ولا رد)", async () => {
     const db = createFakeDb() as FakeDb;
     seedPage(db, { sendMode: "AUTO_REPLY" });
     const { messageId } = await inbound(db);
+    global.fetch = vi.fn(async () => completion(fieldsFor(messageId))) as never;
     const res = await runCustomerIntelExtraction(db as never, { workspaceId: "ws1", messageId });
-    expect(res.status).toBe("SKIPPED");
+    // P13 — الاستخراج مهمة خلفية مستقلة عن الرد، وتعمل في وضع الردّ.
+    expect(res.status).toBe("DONE");
+    // ولا رسالة صادرة إطلاقًا من الاستخراج.
+    expect((db._stores.message as Array<Record<string, any>>).filter((m) => m.direction === "OUTBOUND")).toHaveLength(0);
   });
 });
 

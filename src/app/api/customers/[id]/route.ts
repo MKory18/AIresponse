@@ -2,6 +2,7 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { updateCustomerSchema } from "@/modules/conversations/schemas";
 import { getCustomerDetail, updateCustomer } from "@/modules/customers/service";
+import { hasPermission } from "@/modules/rbac/permissions";
 
 type Params = { id: string };
 
@@ -10,7 +11,12 @@ export const GET = createHandler(
   async ({ auth, params }) => {
     const { id } = params as Params;
     const customer = await getCustomerDetail(prisma, auth!, id);
-    return ok(customer);
+    // P14 — الواجهة تخفي أزرار التعديل/التأكيد إلا عن المخوّل (والخادم الحارس).
+    return ok({
+      ...customer,
+      canWrite: hasPermission(auth!.role, [], "customers.write"),
+      canConfirm: hasPermission(auth!.role, [], "conversations.reply"),
+    });
   }
 );
 

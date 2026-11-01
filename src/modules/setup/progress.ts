@@ -15,7 +15,7 @@ type Db = Prisma.TransactionClient;
  * ولا كتابة، ومحصورة بمساحتك.
  */
 
-export type SetupStepKey = "channel" | "products" | "persona" | "playground" | "go-live";
+export type SetupStepKey = "channel" | "products" | "persona" | "knowledge" | "playground" | "go-live";
 
 export interface SetupStep {
   key: SetupStepKey;
@@ -58,10 +58,13 @@ function providerReady(settings: Record<string, unknown> | null): boolean {
 }
 
 export async function getSetupProgress(db: Db, workspaceId: string): Promise<SetupProgress> {
-  const [channels, products, personas, sessions, settings] = await Promise.all([
+  const [channels, products, personas, faqs, docs, sessions, settings] = await Promise.all([
     db.channel.count({ where: { workspaceId, status: "CONNECTED" } }),
     db.product.count({ where: { workspaceId, isActive: true, isArchived: false } }),
     db.persona.count({ where: { workspaceId, isActive: true } }),
+    // المعرفة: سؤال شائع فعّال أو مستند جاهز للبحث (الي لسا بيتجهّز ما بيفيد الوكيل).
+    db.faq.count({ where: { workspaceId, isActive: true } }),
+    db.knowledgeDocument.count({ where: { workspaceId, isActive: true, status: "READY" } }),
     db.playgroundSession.count({ where: { workspaceId } }),
     // قراءة بس — الاستوديو بيعمل upsert، وهون ما بنكتب شي.
     db.aISettings.findUnique({ where: { workspaceId } }),
@@ -93,6 +96,14 @@ export async function getSetupProgress(db: Db, workspaceId: string): Promise<Set
       hint: "اللهجة والنبرة وأسلوب البيع. اختياري — في شخصية عامة جاهزة.",
       href: "/personas",
       done: personas > 0,
+      required: false,
+    },
+    {
+      key: "knowledge",
+      label: "علّمه أجوبة أسئلتك",
+      hint: "التوصيل والإرجاع والضمان… أسئلة شائعة بيجاوب منها بدل ما يخمّن.",
+      href: "/knowledge",
+      done: faqs + docs > 0,
       required: false,
     },
     {

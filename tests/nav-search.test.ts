@@ -63,8 +63,14 @@ describe("searchPages", () => {
   });
 
   it("النتيجة فيها اسم المجموعة (للتمييز بين صفحتين متشابهتين)", () => {
-    const hit = searchPages("المنتجات", all).find((h) => h.href === "/analytics/products");
-    expect(hit?.groupLabel).toBe("التقارير");
+    const hit = searchPages("المنتجات", all).find((h) => h.href === "/products");
+    expect(hit?.groupLabel).toBe("المبيعات");
+  });
+
+  it("كلمات الصفحات المدموجة بتلاقي مكانها الجديد", () => {
+    expect(searchPages("استوديو", all)[0]?.href).toBe("/settings/ai");
+    expect(searchPages("سير عمل", all)[0]?.href).toBe("/automation");
+    expect(searchPages("تكلفة", all)[0]?.href).toBe("/analytics");
   });
 });
 

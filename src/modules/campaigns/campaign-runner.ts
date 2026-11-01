@@ -3,6 +3,7 @@ import { AppError, NotFoundError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { enqueueJob } from "@/modules/jobs/service";
 import { dispatchOutbound } from "@/modules/channels/outbound";
+import { CAMPAIGN_CONVERSATION_PREFIX } from "@/modules/channels/send-policy";
 import { evaluateSegment, frequencyCapDays } from "./segment-service";
 import { segmentDefinitionSchema } from "./segment-schemas";
 import { campaignRequiresTemplate, checkRecipientEligibility } from "./eligibility";
@@ -229,7 +230,7 @@ export async function campaignTick(db: Db, campaignId: string, seq: number): Pro
           workspaceId: ws,
           customerId: r.customerId,
           channelId: ch.id,
-          channelConversationId: `camp-${campaignId}-${r.customerId}`,
+          channelConversationId: `${CAMPAIGN_CONVERSATION_PREFIX}${campaignId}-${r.customerId}`,
           status: "OPEN",
           aiState: "HUMAN_ACTIVE", // حملة تسويقية = موظف/نظام، بلا AI تلقائي
           aiEnabled: false,
@@ -265,7 +266,8 @@ export async function campaignTick(db: Db, campaignId: string, seq: number): Pro
       conversationId,
       sourceMessageId: `campaign:${campaignId}:${r.id}`,
       text: String(version.text ?? ""),
-      senderType: "HUMAN",
+      senderType: "SYSTEM",
+      automationSource: "CAMPAIGN",
       senderId: "campaign-system",
       ...(requireTemplate
         ? {

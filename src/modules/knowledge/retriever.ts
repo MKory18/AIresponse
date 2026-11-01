@@ -32,6 +32,10 @@ export async function retrieveKnowledge(
       limit: 3,
     }),
     (async () => {
+      // PERF — empty store: embedding the query can never match anything, so
+      // skip the provider call + search entirely. FAQ lookup above still runs;
+      // structured answers keep working exactly as before.
+      if (vectorStore.size === 0) return [];
       const provider = getEmbeddingProvider();
       const embedding = await provider.embed(params.query);
       return vectorStore.search({

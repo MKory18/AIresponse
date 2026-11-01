@@ -383,10 +383,14 @@ describe("orphan sweeper (never silent)", () => {
     fbSuccess();
     mockAI();
     const r = await seedInbound("psid-ws-ctx", "شو المواصفات؟", ch.id, "wsctx");
-    // Simulate the enqueue loss: drop the auto-created job → the message is a
-    // sweeper orphan with NO job row.
-    const autoJob = aiJobs()[0];
-    await db.backgroundJob.delete({ where: { id: autoJob.id } } as never);
+    // Simulate the enqueue loss: drop ALL auto-created jobs for this message
+    // (reply + customer-intel) → the message is a sweeper orphan with NO job.
+    const autoJobs = (db._stores.backgroundJob as any[]).filter(
+      (j) => (j.payload as any)?.messageId === r.messageId
+    );
+    for (const j of autoJobs) {
+      await db.backgroundJob.delete({ where: { id: j.id } } as never);
+    }
     // One worker cycle = recovery sweep (creates the job NOW) + processing.
     // Before the fix, the freshly-created job was not in the pre-claimed
     // workspace snapshot → handler received workspaceId="" → gating returned

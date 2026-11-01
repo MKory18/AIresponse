@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowLeftRight, Bot, Hand, MessagesSquare, Receipt, Sparkles, TrendingUp, Users, Workflow } from "lucide-react";
 import { formatNumber, t } from "@/lib/i18n";
+import { TIMEZONE_OPTIONS } from "@/lib/timezones";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
@@ -93,8 +94,8 @@ export default function DashboardPage() {
   }, [load]);
 
   const conversion =
-    data && data.messages.inbound > 0
-      ? Math.round((data.orders.confirmed / data.conversations.total) * 1000) / 10
+    data && data.messages.inbound > 0 && data.conversations.total > 0
+      ? Math.round((data.orders.confirmed / Math.max(data.conversations.total, 1)) * 1000) / 10
       : null;
 
   return (
@@ -119,8 +120,8 @@ export default function DashboardPage() {
               {RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </Select>
             <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="المنطقة الزمنية" className="w-auto">
-              {["UTC", "Asia/Damascus", "Asia/Riyadh", "Asia/Dubai", "Africa/Cairo"].map((tz) => (
-                <option key={tz} value={tz}>{tz}</option>
+              {TIMEZONE_OPTIONS.map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
               ))}
             </Select>
           </div>
@@ -170,23 +171,22 @@ export default function DashboardPage() {
           </Section>
 
           <Section title="المحادثات" icon={<MessagesSquare size={15} />} link="/conversations">
-            <MiniStat label="محادثات جديدة" value={formatNumber(data.conversations.total)} tone="brand" />
             <MiniStat label="نشطة" value={formatNumber(data.conversations.active)} tone="sky" />
             <MiniStat label="رسائل واردة" value={formatNumber(data.messages.inbound)} tone="sky" />
             <MiniStat label="رسائل صادرة" value={formatNumber(data.messages.outbound)} tone="emerald" />
           </Section>
 
-          <Section title="الذكاء الاصطناعي" icon={<Bot size={15} />} link="/ai/playground">
-            <MiniStat label="استدعاءات AI" value={formatNumber(data.ai.calls)} tone="sky" />
+          {/* ⚠️ كانت «التفاصيل» هون بتودّي للتجربة، و٣ أرقام بتتكرر من البطاقات الي فوق.
+              🔧 التفاصيل ← تبويب الوكيل بالتقارير، وكل رقم مرة وحدة. */}
+          <Section title="الوكيل الذكي" icon={<Bot size={15} />} link="/analytics?tab=ai">
             <MiniStat label="استدعاءات فاشلة" value={formatNumber(data.ai.failed)} tone="red" />
-            <MiniStat label="Tokens" value={formatNumber(data.ai.tokens)} tone="brand" />
+            <MiniStat label="توكنز مستهلكة" value={formatNumber(data.ai.tokens)} tone="brand" />
             {/* null = لا تسعير معروف — تُعرض "غير متاح" لا صفر */}
             <MiniStat label="التكلفة التقديرية" value={data.ai.estimatedCost === null ? "غير متاح" : formatNumber(data.ai.estimatedCost)} tone="amber" />
           </Section>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Section title="الدعم البشري" icon={<ArrowLeftRight size={15} />} link="/handoffs">
-              <MiniStat label="تحويلات مفتوحة" value={formatNumber(data.handoffs.open)} tone="amber" />
               <MiniStat label="إجمالي التحويلات" value={formatNumber(data.handoffs.total)} tone="brand" />
               <MiniStat label="متوسط زمن الحل (دقيقة)" value={formatNumber(data.handoffs.avgResolutionMinutes)} tone="sky" />
             </Section>

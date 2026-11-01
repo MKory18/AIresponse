@@ -115,7 +115,7 @@ export default function HandoffsPage() {
                   <span className="num">{new Date(h.createdAt).toLocaleString("ar")}</span>
                   {h.assignedTo ? ` · ${h.assignedTo}` : ""}
                   {" · "}
-                  <Link href={`/conversations`} className="font-semibold text-brand-600 hover:underline dark:text-brand-400">فتح المحادثة</Link>
+                  <Link href={`/conversations?id=${h.conversationId}`} className="font-semibold text-brand-600 hover:underline dark:text-brand-400">فتح المحادثة</Link>
                 </p>
               </div>
               <div className="flex items-center gap-1.5">

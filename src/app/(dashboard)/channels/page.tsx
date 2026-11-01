@@ -282,8 +282,16 @@ export default function ChannelsPage() {
         <GlassCard>
           <EmptyState
             icon={<Facebook size={28} strokeWidth={1.5} />}
-            title="لا توجد قنوات مربوطة"
-            description="اربط صفحة فيسبوك لبدء استقبال رسائل العملاء."
+            title="ما في صفحة فيسبوك مربوطة"
+            description="اربطها من زر «ربط صفحة Facebook» فوق — أو اربط واتساب أو تيليغرام أو إنستغرام من «قنوات إضافية»."
+            action={
+              oauthConfigured ? (
+                // <a> مش Link: مسار ربط (توجيه لفيسبوك) مش صفحة.
+                <a href="/api/channels/facebook/connect" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-semibold text-white transition hover:bg-primary-hover">
+                  <PlugZap size={14} /> ربط صفحة Facebook
+                </a>
+              ) : null
+            }
           />
         </GlassCard>
       )}

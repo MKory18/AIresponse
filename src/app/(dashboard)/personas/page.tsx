@@ -1,8 +1,9 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, Play, Plus, Power, UserRound } from "lucide-react";
-import { t } from "@/lib/i18n";
+import Link from "next/link";
+import { FlaskConical, Pencil, Plus, Power, UserRound } from "lucide-react";
+import { label as enumLabel, t } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
@@ -38,6 +39,19 @@ type PersonaVersionRow = {
   createdAt: string;
 };
 
+/**
+ * ملخص الشخصية بالعربي — كان «ar · friendly · short · helpful» خام.
+ * ⚠️ «المعاينة» القديمة كانت تنادي مسار متقاعد (٤١٠) فتفشل دايمًا.
+ * 🔧 كل شخصية إلها «جرّبها» بتفتح التجربة عليها مباشرة (`?persona=`).
+ */
+const VALUE_AR: Record<string, string> = {
+  ar: "عربي", en: "إنجليزي",
+  friendly: "ودودة", professional: "احترافية", playful: "مرحة",
+  informal: "غير رسمية", formal: "رسمية",
+  short: "رد قصير", medium: "رد متوسط", long: "رد طويل",
+};
+const ar = (v: string | null | undefined) => (v ? VALUE_AR[v] ?? v : "");
+
 const EMPTY = {
   name: "", language: "ar", dialect: "", tone: "friendly", formality: "informal",
   responseLength: "short", emojiLevel: 1, salesStyle: "helpful",
@@ -50,8 +64,6 @@ export default function PersonasPage() {
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
   const [showForm, setShowForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [versions, setVersions] = useState<Record<string, PersonaVersionRow[]>>({});
   const [versionsError, setVersionsError] = useState<string | null>(null);
@@ -182,32 +194,6 @@ export default function PersonasPage() {
     }
   }
 
-  async function runPreview() {
-    // Preview: runs the orchestrator in dry-run against the active persona and
-    // the demo conversation — nothing is ever sent to Facebook.
-    setPreviewing(true);
-    setPreview(null);
-    const convs = await fetch("/api/conversations?limit=1").then(async (r) => (r.ok ? r.json() : null));
-    const conversationId = convs?.items?.[0]?.id;
-    if (!conversationId) {
-      setPreview("لا توجد محادثة للمعاينة — أنشئ محادثة من الـ seed أولًا.");
-      setPreviewing(false);
-      return;
-    }
-    const res = await fetch("/api/ai/playground", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, simulateText: "بكم المنتج؟" }),
-    });
-    setPreviewing(false);
-    if (res.ok) {
-      const data = await res.json();
-      setPreview(data.response ?? data.status);
-    } else {
-      setPreview("فشلت المعاينة");
-    }
-  }
-
   return (
     <div className="page-wrap">
       <PageHeader
@@ -248,7 +234,7 @@ export default function PersonasPage() {
                     <span className="num text-[11px] font-medium text-ink-muted">v{p.version ?? 1}</span>
                   </p>
                   <p className="num mt-1 text-xs text-ink-muted">
-                    {p.language}{p.dialect ? ` — ${p.dialect}` : ""} · {p.tone} · {p.responseLength} · إيموجي {p.emojiLevel}/5 · {p.salesStyle}
+                    {ar(p.language)}{p.dialect ? ` — ${p.dialect}` : ""} · {ar(p.tone)} · {ar(p.responseLength)} · إيموجي {p.emojiLevel}/5{p.salesStyle ? ` · ${p.salesStyle}` : ""}
                   </p>
                 </div>
               </div>
@@ -258,6 +244,11 @@ export default function PersonasPage() {
                     <Power size={13} /> تعيين كافتراضية
                   </Button>
                 )}
+                <Link href={`/ai/playground?persona=${p.id}`}>
+                  <Button size="sm" variant="secondary">
+                    <FlaskConical size={13} /> جرّبها
+                  </Button>
+                </Link>
                 <Button size="sm" variant="secondary" onClick={() => startEdit(p)}>
                   <Pencil size={13} /> {t.common.edit}
                 </Button>
@@ -271,12 +262,12 @@ export default function PersonasPage() {
             </GlassCard>
             {versions[p.id] && (
               <GlassCard className="p-4">
-                <h3 className="text-xs font-bold text-ink">إصدارات {p.name} — النشر صريح والرجوع متاح (اختبر المسودة في Playground قبل النشر)</h3>
+                <h3 className="text-xs font-bold text-ink">إصدارات {p.name} — النشر صريح والرجوع متاح (جرّبها بـ«التجربة» قبل النشر)</h3>
                 {versionsError && <p className="mt-1 text-xs text-red-600">{versionsError}</p>}
                 <div className="mt-2 space-y-1.5">
                   {(versions[p.id] ?? []).map((v) => (
                     <div key={v.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-2/60 px-3 py-2 text-xs">
-                      <span className="text-ink">v{v.version} · {v.status} · {v.name}</span>
+                      <span className="text-ink">v{v.version} · {enumLabel(v.status)} · {v.name}</span>
                       <span className="flex gap-1.5">
                         {v.status === "DRAFT" && <Button size="sm" variant="secondary" disabled={versionBusy !== null} loading={versionBusy === `publish:${p.id}:${v.version}`} onClick={() => publish(p.id, v.version)}>نشر</Button>}
                         {(v.status === "PUBLISHED" || v.status === "ROLLED_BACK") && <Button size="sm" variant="ghost" disabled={versionBusy !== null} onClick={() => setRollbackTarget({ personaId: p.id, version: v.version, name: p.name })}>رجوع لهذا</Button>}
@@ -301,20 +292,6 @@ export default function PersonasPage() {
           />
         </GlassCard>
       )}
-
-      <GlassCard className="border-sky-500/20 p-4 sm:p-5">
-        <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
-            <Play size={14} />
-          </span>
-          معاينة الرد (تجربة آمنة — لا يُرسل أي شيء للفيسبوك)
-        </h2>
-        <Button size="sm" variant="secondary" onClick={runPreview} loading={previewing} disabled={previewing} className="mt-3">
-          {!previewing && <Play size={13} />}
-          {previewing ? "جارٍ التوليد…" : "تشغيل المعاينة على سؤال «بكم المنتج؟»"}
-        </Button>
-        {preview && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-sky-500/10 p-3.5 text-sm leading-relaxed text-sky-900 ring-1 ring-inset ring-sky-500/20 dark:text-sky-200">{preview}</p>}
-      </GlassCard>
 
       <Dialog open={showForm} onClose={() => setShowForm(false)} title={editing ? t.common.edit : "شخصية جديدة"}>
         <form onSubmit={save} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -354,7 +331,7 @@ export default function PersonasPage() {
             <Input name="emojiLevel" type="number" min="0" max="5" defaultValue={form.emojiLevel} dir="ltr" className="num" />
           </Field>
           <Field label="أسلوب البيع">
-            <Input name="salesStyle" defaultValue={form.salesStyle} placeholder="مثال: helpful" />
+            <Input name="salesStyle" defaultValue={form.salesStyle} placeholder="مثال: بيساعد بلا ضغط، وبيقترح منتج مكمّل" />
           </Field>
           <Field label="تعليمات خاصة (حتى 20000 حرف)" className="sm:col-span-2">
             <Textarea

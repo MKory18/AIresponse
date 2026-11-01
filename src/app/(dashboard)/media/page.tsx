@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileUp, LayoutGrid, List, Search, Trash2, Upload } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { label, t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -158,7 +158,7 @@ export default function MediaPage() {
     xhr.onerror = () => {
       // No HTTP response at all — network error, proxy reset (e.g. body-size
       // 413 reset), or server crash. Show a developer-readable hint.
-      setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, status: "error", error: `${t.media.uploadFailed}: NO_RESPONSE (network/proxy rejected the request — check reverse-proxy body size limit)` } : j)));
+      setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, status: "error", error: `${t.media.uploadFailed}: ما وصل رد من الخادم — غالبًا الملف أكبر من الحد المسموح بالسيرفر (NO_RESPONSE)` } : j)));
     };
     xhr.send(form);
   }
@@ -319,7 +319,7 @@ export default function MediaPage() {
         <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="التصنيف" className="w-40">
           <option value="">كل التصنيفات</option>
           {CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c} value={c}>{label(c)}</option>
           ))}
         </Select>
         <div className="flex items-center gap-1 overflow-x-auto" role="tablist" aria-label="النوع">
@@ -449,7 +449,12 @@ export default function MediaPage() {
 
       {!loading && items.length === 0 && !error && (
         <GlassCard>
-          <EmptyState illustration="/brand/empty-media.webp" title={t.media.emptyTitle} description={t.media.emptyDesc} />
+          <EmptyState
+            illustration="/brand/empty-media.webp"
+            title={t.media.emptyTitle}
+            description={t.media.emptyDesc}
+            action={<Button size="sm" onClick={() => fileRef.current?.click()}>رفع صور منتجاتك</Button>}
+          />
         </GlassCard>
       )}
 

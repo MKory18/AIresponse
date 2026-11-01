@@ -31,18 +31,18 @@ describe("أسماء المزوّدين المعروضة (ولا «Hermes» با
     expect(publicText("x HERMES y")).toBe(`x ${AGENT_LABEL} y`);
   });
 
-  it("الصفحتين (الاستوديو والإعدادات) بتستعملوا الخريطة المشتركة — ما في خريطة محلية بتتعارض", () => {
-    for (const file of ["src/app/(dashboard)/ai/studio/page.tsx", "src/app/(dashboard)/settings/ai/page.tsx"]) {
+  it("الإعدادات وبطاقة الحالة (كانت الاستوديو) بيستعملوا الخريطة المشتركة — ما في خريطة محلية بتتعارض", () => {
+    for (const file of ["src/app/(dashboard)/settings/ai/ai-status-card.tsx", "src/app/(dashboard)/settings/ai/page.tsx"]) {
       const src = read(file);
       expect(src, file).toContain('from "@/lib/provider-labels"');
       expect(src, file).not.toMatch(/const PROVIDER_AR\b/);
     }
   });
 
-  it("الاستوديو بيعرض تفصيل الفحص بعد التنظيف مش خام", () => {
-    const studio = read("src/app/(dashboard)/ai/studio/page.tsx");
-    expect(studio).toContain("publicDetail(r.detail)");
-    expect(studio).not.toMatch(/\{r\.detail\}/);
+  it("بطاقة الحالة بتعرض سبب عدم التوافق بعد التنظيف مش خام", () => {
+    const card = read("src/app/(dashboard)/settings/ai/ai-status-card.tsx");
+    expect(card).toContain("publicDetail(t.compatibilityReason)");
+    expect(card).not.toMatch(/\{t\.compatibilityReason\}/);
   });
 
   it("كل خيارات المزوّد بالإعدادات إلها اسم عرض", () => {

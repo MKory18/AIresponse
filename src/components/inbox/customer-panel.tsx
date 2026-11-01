@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Facebook, MapPin, Package, Phone, Sparkles } from "lucide-react";
 import { formatNumber, label, t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
@@ -106,11 +107,11 @@ export function CustomerPanel({
         ) : (
           <div className="space-y-1">
             {customer.orders.map((o) => (
-              <div key={o.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-surface-3/70">
+              <Link key={o.id} href={`/orders/${o.id}`} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-[11px] transition hover:bg-surface-3/70">
                 <span className="num font-bold text-ink">{o.orderNumber}</span>
                 <StatusBadge value={o.status} />
                 <span className="num text-ink-muted">{formatNumber(o.total)}</span>
-              </div>
+              </Link>
             ))}
             {customer.orders.some((o) => o.adSource) && (
               <p className="px-2 pt-1 text-[10px] text-ink-subtle">

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, History, MapPin, Receipt, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, History, MapPin, MessageSquare, Receipt, Trash2, UserRound } from "lucide-react";
 import { label } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -32,6 +32,8 @@ type OrderDetail = {
   notes: string | null;
   createdAt: string;
   customer: { id: string; name: string | null; phone: string | null };
+  /** المحادثة الي انعمل منها الطلب (إذا في) — منها «افتح المحادثة». */
+  conversationId?: string | null;
   items: { id: string; productNameSnapshot: string; skuSnapshot: string; unitPrice: string; quantity: number; subtotal: string }[];
   timeline: { id: string; action: string; metadata: Record<string, unknown>; createdAt: string }[];
 };
@@ -123,6 +125,9 @@ export default function OrderDetailPage() {
 
   return (
     <div className="page-wrap">
+      <Link href="/orders" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted hover:text-ink">
+        <ArrowRight size={13} aria-hidden /> كل الطلبات
+      </Link>
       <PageHeader
         title={`طلب ${order.orderNumber}`}
         description={order.createdAt ? new Date(order.createdAt).toLocaleString("ar") : undefined}
@@ -177,10 +182,10 @@ export default function OrderDetailPage() {
               ))}
             </div>
             <div className="num mt-3 space-y-1.5 rounded-xl bg-surface-3/60 p-3.5 text-sm" dir="ltr">
-              <p className="flex justify-between text-ink-muted"><span>Subtotal</span><span>{Number(order.subtotal).toLocaleString()}</span></p>
-              <p className="flex justify-between text-ink-muted"><span>Discount</span><span>{Number(order.discount).toLocaleString()}</span></p>
-              <p className="flex justify-between text-ink-muted"><span>Delivery</span><span>{Number(order.deliveryFee).toLocaleString()}</span></p>
-              <p className="flex justify-between border-t border-line pt-1.5 text-base font-bold text-ink"><span>Total</span><span>{Number(order.total).toLocaleString()} {order.currency}</span></p>
+              <p className="flex justify-between text-ink-muted"><span>المجموع الفرعي</span><span>{Number(order.subtotal).toLocaleString()}</span></p>
+              <p className="flex justify-between text-ink-muted"><span>الخصم</span><span>{Number(order.discount).toLocaleString()}</span></p>
+              <p className="flex justify-between text-ink-muted"><span>التوصيل</span><span>{Number(order.deliveryFee).toLocaleString()}</span></p>
+              <p className="flex justify-between border-t border-line pt-1.5 text-base font-bold text-ink"><span>الإجمالي</span><span>{Number(order.total).toLocaleString()} {order.currency}</span></p>
             </div>
           </GlassCard>
 
@@ -214,6 +219,16 @@ export default function OrderDetailPage() {
             </h2>
             <p className="mt-2.5 font-bold text-ink">{order.customer.name ?? "—"}</p>
             <p className="num mt-0.5 text-xs text-ink-muted" dir="ltr">{order.customer.phone ?? ""}</p>
+            <Link
+              href={
+                order.conversationId
+                  ? `/conversations?id=${order.conversationId}`
+                  : `/conversations?q=${encodeURIComponent(order.customer.phone ?? order.customer.name ?? "")}`
+              }
+              className="mt-2.5 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+            >
+              <MessageSquare size={13} aria-hidden /> افتح المحادثة
+            </Link>
           </GlassCard>
           <GlassCard className="p-4 text-sm">
             <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
@@ -233,7 +248,6 @@ export default function OrderDetailPage() {
               </>
             )}
           </GlassCard>
-          {/* مصدر الطلب (إعلان · رمز نقرة) */}
           <GlassCard className="space-y-1.5 p-4 text-xs">
             <h2 className="mb-1 text-sm font-bold text-ink">الحالات</h2>
             <p className="flex items-center justify-between text-ink-muted">الطلب <StatusBadge value={order.status} dot /></p>

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Cpu, Link2, SlidersHorizontal } from "lucide-react";
+import { Check, Link2, Power } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/confirm";
@@ -12,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { providerLabel, publicDetail } from "@/lib/provider-labels";
 import { GLM_ZAKIAI_PRESET, aiConnectionMode } from "@/lib/ai-connection";
+import { AiStatusCard, TASK_AR, type TaskInfo } from "./ai-status-card";
 
 type Settings = {
   provider: string;
@@ -37,13 +39,14 @@ type ModelKey = "classificationModel" | "extractionModel" | "responseModel" | "v
 
 const PROVIDER_OPTIONS = ["custom", "hermes", "openai", "openrouter", "internal", "mock"];
 
-const MODEL_FIELDS: { key: ModelKey; label: string; placeholder: string }[] = [
-  { key: "classificationModel", label: "التصنيف", placeholder: "auto/cheap" },
-  { key: "extractionModel", label: "الاستخراج", placeholder: "auto/fast" },
-  { key: "responseModel", label: "الرد", placeholder: "auto/best-chat" },
-  { key: "visionModel", label: "الرؤية", placeholder: "auto/best-vision" },
-  { key: "summaryModel", label: "التلخيص", placeholder: "auto/cheap" },
-  { key: "embeddingModel", label: "التضمينات", placeholder: "اتركه فارغاً — محلي" },
+// الاسم نفسه ببطاقة الحالة وهون (`TASK_AR`) — كانوا اسمين لنفس المهمة («التصنيف» هون و«فهم النية» بالاستوديو).
+const MODEL_FIELDS: { key: ModelKey; task: string; placeholder: string }[] = [
+  { key: "classificationModel", task: "CLASSIFICATION", placeholder: "auto/cheap" },
+  { key: "extractionModel", task: "EXTRACTION", placeholder: "auto/fast" },
+  { key: "responseModel", task: "RESPONSE", placeholder: "auto/best-chat" },
+  { key: "visionModel", task: "VISION", placeholder: "auto/best-vision" },
+  { key: "summaryModel", task: "SUMMARY", placeholder: "auto/cheap" },
+  { key: "embeddingModel", task: "EMBEDDING", placeholder: "اتركه فارغاً — محلي" },
 ];
 
 const blank = (value: string | null | undefined) => {
@@ -141,6 +144,43 @@ function Section({
   );
 }
 
+/** مفتاح تشغيل بجملة بتشرح شو بيعمل — بدل مربّع صغير جنب كلمة وحدة. */
+function Toggle({
+  checked,
+  disabled,
+  onChange,
+  title,
+  hint,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+        checked ? "border-primary/40 bg-primary-soft" : "border-line bg-surface-3/40 hover:bg-surface-hover",
+        disabled && "cursor-not-allowed opacity-60"
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-1 h-4 w-4 shrink-0 accent-brand-500"
+      />
+      <span className="min-w-0">
+        <span className="block text-sm font-bold text-ink">{title}</span>
+        <span className="mt-0.5 block text-xs leading-5 text-ink-muted">{hint}</span>
+      </span>
+    </label>
+  );
+}
+
 export default function AISettingsPage() {
   const [form, setForm] = useState<Settings | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -148,6 +188,9 @@ export default function AISettingsPage() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // نتيجة التوافق لكل مهمة (من بطاقة الحالة) — بتعلّم النموذج الي ما بيناسب جنب حقله.
+  const [tasks, setTasks] = useState<TaskInfo[]>([]);
+  const [statusKey, setStatusKey] = useState(0);
 
   const loadSettings = useCallback(async () => {
     setLoadError(null);
@@ -247,6 +290,7 @@ export default function AISettingsPage() {
       setApiKey("");
       setTimeout(() => setSaved(false), 2000);
       loadSettings();
+      setStatusKey((k) => k + 1);
     } catch {
       setSaving(false);
       setSaveError("فشل الحفظ — تعذر الاتصال بالخادم");
@@ -283,6 +327,30 @@ export default function AISettingsPage() {
     <form onSubmit={save} className="page-wrap max-w-4xl space-y-4 pb-8">
       <PageHeader title={t.pages.aiSettingsTitle} description={t.pages.aiSettingsDesc} />
 
+      <AiStatusCard key={statusKey} onTasks={setTasks} />
+
+      <Section
+        icon={<Power size={15} />}
+        title="التشغيل"
+        description="قرارين بس: الذكاء شغّال؟ وبيرد على العميل لحاله ولا بيستنّى موظف؟"
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Toggle
+            checked={form.aiEnabled}
+            onChange={(v) => update("aiEnabled", v)}
+            title="تشغيل الذكاء"
+            hint="بيقرأ الرسائل، بيقترح ردود، وبيجمع بيانات الطلب."
+          />
+          <Toggle
+            checked={form.autoRespond}
+            disabled={!form.aiEnabled}
+            onChange={(v) => update("autoRespond", v)}
+            title="الرد الآلي"
+            hint="الوكيل بيبعت رده للعميل لحاله بلا ما يستنّى موظف. جرّبه بـ«التجربة» قبل."
+          />
+        </div>
+      </Section>
+
       <Section
         icon={<Link2 size={15} />}
         title="الاتصال"
@@ -306,7 +374,7 @@ export default function AISettingsPage() {
 
           {mode === "custom" && (
             <>
-              <Field label="عنوان الـAPI" hint="OpenAI-compatible — ينتهي بـ /v1.">
+              <Field label="عنوان الـAPI" hint="متوافق مع OpenAI — بينتهي بـ /v1.">
                 <Input
                   value={form.customBaseUrl ?? ""}
                   onChange={(e) => update("customBaseUrl", e.target.value)}
@@ -362,47 +430,38 @@ export default function AISettingsPage() {
         </div>
       </Section>
 
-      <Section icon={<Cpu size={15} />} title="النماذج" description="لكل مهمة نموذجها — الفارغ = الافتراضي.">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {MODEL_FIELDS.map((field) => (
-            <Field key={field.key} label={field.label}>
-              <Input
-                value={form[field.key] ?? ""}
-                onChange={(e) => updateModel(field.key, e.target.value)}
-                placeholder={field.placeholder}
-                dir="ltr"
-                className="num"
-              />
-            </Field>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px] text-ink-subtle">التضمينات محلية — اتركها فارغة إلا إذا عندك نموذج تضمينات.</p>
-      </Section>
+      <details className="rounded-2xl border border-line bg-surface-2 px-4 py-3">
+        <summary className="cursor-pointer select-none text-sm font-semibold text-ink">
+          متقدّم — النماذج وأسلوب التوليد والبديل
+        </summary>
+        <p className="mt-1 text-[11px] text-ink-subtle">الافتراضي بيكفي لأغلب المتاجر — غيّر هون بس إذا بتعرف شو بتعمل.</p>
 
-      <Section icon={<SlidersHorizontal size={15} />} title="السلوك" description="التوليد وعتبات الثقة — أرقام قليلة وواضحة.">
-        <div className="flex flex-wrap gap-4 rounded-xl bg-surface-3/40 px-3 py-2">
-          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-ink">
-            <input
-              type="checkbox"
-              checked={form.aiEnabled}
-              onChange={(e) => update("aiEnabled", e.target.checked)}
-              className="h-4 w-4 accent-brand-500"
-            />
-            تشغيل AI
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-ink">
-            <input
-              type="checkbox"
-              checked={form.autoRespond}
-              onChange={(e) => update("autoRespond", e.target.checked)}
-              className="h-4 w-4 accent-brand-500"
-            />
-            الرد الآلي
-          </label>
+        <p className="mt-4 text-xs font-bold text-ink">نموذج كل مهمة</p>
+        <p className="mt-0.5 text-[11px] text-ink-subtle">الفارغ = الافتراضي. فهرسة المعرفة محلية — اتركها فارغة إلا إذا عندك نموذج خاص.</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {MODEL_FIELDS.map((field) => {
+            const info = tasks.find((x) => x.task === field.task);
+            return (
+              <Field
+                key={field.key}
+                label={TASK_AR[field.task] ?? field.task}
+                hint={info && !info.compatible ? "⚠️ هالنموذج ما بيناسب المهمة" : undefined}
+              >
+                <Input
+                  value={form[field.key] ?? ""}
+                  onChange={(e) => updateModel(field.key, e.target.value)}
+                  placeholder={field.placeholder}
+                  dir="ltr"
+                  className="num"
+                />
+              </Field>
+            );
+          })}
         </div>
 
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Temperature" hint="0 = حتمي">
+        <p className="mt-4 text-xs font-bold text-ink">أسلوب التوليد</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <Field label="درجة الإبداع" hint="0 = نفس الرد كل مرة · 1 = متنوّع. المقترح 0.3–0.7">
             <Input
               type="number"
               step="0.1"
@@ -414,7 +473,7 @@ export default function AISettingsPage() {
               className="num"
             />
           </Field>
-          <Field label="أقصى توكنز" hint="حد الرد">
+          <Field label="أقصى طول للرد" hint="بالتوكنز — كل ١٠٠ ≈ ٧٠ كلمة">
             <Input
               type="number"
               min="50"
@@ -425,39 +484,14 @@ export default function AISettingsPage() {
               className="num"
             />
           </Field>
-          <Field label="حد التنفيذ" hint="0–1">
-            <Input
-              type="number"
-              step="0.05"
-              min="0"
-              max="1"
-              value={form.confidenceExecute}
-              onChange={(e) => update("confidenceExecute", Number(e.target.value))}
-              dir="ltr"
-              className="num"
-            />
-          </Field>
-          <Field label="حد الرد" hint="0–1">
-            <Input
-              type="number"
-              step="0.05"
-              min="0"
-              max="1"
-              value={form.confidenceRespond}
-              onChange={(e) => update("confidenceRespond", Number(e.target.value))}
-              dir="ltr"
-              className="num"
-            />
-          </Field>
         </div>
-      </Section>
+        {/* «حد التنفيذ» و«حد الرد» (confidenceExecute/Respond) انشالوا من الشاشة:
+            بينحفظوا بس ولا كود وقت التشغيل بيقرأهم — حقل بلا أثر بيضلّل. القيمة
+            المحفوظة بتضل زي ما هي (بتنبعت مع الحفظ بلا تغيير). */}
 
-      <details className="rounded-2xl border border-line bg-surface-2 px-4 py-3">
-        <summary className="cursor-pointer select-none text-sm font-semibold text-ink">
-          متقدّم — بديل عند الفشل
-        </summary>
-        <p className="mt-1 text-[11px] text-ink-subtle">بيستخدم فقط إذا فشل المزوّد الأساسي.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <p className="mt-4 text-xs font-bold text-ink">بديل عند الفشل</p>
+        <p className="mt-0.5 text-[11px] text-ink-subtle">بيستخدم فقط إذا فشل المزوّد الأساسي.</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
           <Field label="مزوّد البديل">
             <Select
               value={form.fallbackProvider ?? ""}

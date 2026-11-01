@@ -19,6 +19,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "worker": "tsx scripts/worker.ts",
+    "bench:queue": "tsx tests/p16-benchmark-reply-queue.ts",
     "scan:secrets": "node scripts/scan-secrets.mjs"
   },
   "prisma": {
@@ -28,6 +29,7 @@
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
+    "driver.js": "1.9.0",
     "exceljs": "^4.4.0",
     "jose": "^5.9.6",
     "lucide-react": "^0.454.0",

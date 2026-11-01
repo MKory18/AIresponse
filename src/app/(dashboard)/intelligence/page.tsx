@@ -731,7 +731,7 @@ export default function IntelligenceLabPage() {
                       آخر تحديث: {fmtDate(detail.intel?.extractedAt)} · الثقة: {Math.round((detail.intel?.confidence ?? 0) * 100)}%
                     </p>
                   </div>
-                  <Badge tone="AI_ACTIVE"><Database size={11} /> OpenRouter</Badge>
+                  <Badge tone="AI_ACTIVE"><Database size={11} /> مستخرجة بالذكاء</Badge>
                 </div>
 
                 <div className="border-b border-line px-4 py-3">
@@ -815,10 +815,11 @@ export default function IntelligenceLabPage() {
         </div>
       </div>
 
-      {/* قياسات الأداء الحقيقية من سجل التحليل */}
-      <GlassCard className="p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-ink">أداء التحليل (قياس فعلي)</h2>
+      {/* قياسات الأداء الحقيقية من سجل التحليل — تقنية، فمطوية افتراضيًا. */}
+      <details className="glass rounded-2xl p-4">
+        <summary className="cursor-pointer select-none text-sm font-bold text-ink">أداء التحليل (تفاصيل تقنية)</summary>
+        <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="sr-only">أداء التحليل</h2>
           <span className="text-[11px] text-ink-subtle">
             آخر {snapshot?.performance.totalMs.samples ?? 0} تحليل ناجح · زمن المزوّد منفصل عن زمن الطابور
           </span>
@@ -835,7 +836,8 @@ export default function IntelligenceLabPage() {
             <p className="mt-0.5 text-[10px] text-ink-subtle">عالقة بالطابور: {snapshot?.performance.stuckQueued ?? 0}</p>
           </div>
         </div>
-      </GlassCard>
+        <p className="mt-2 text-[11px] text-ink-subtle">P50 = الوقت المعتاد · P95 = أبطأ ٥٪ من المرات.</p>
+      </details>
     </div>
   );
 }

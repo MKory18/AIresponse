@@ -325,6 +325,7 @@ async function executeStep(
           conversationId: fresh.id,
           sourceMessageId: `wf:${runner.automation.id}:v${runner.automation.version}:${event.eventId}:${step.id}`,
           text,
+          automationSource: "AUTOMATION",
         });
         // Success only when the service confirms it — never assume.
         if (res.deliveryStatus !== "SENT") {

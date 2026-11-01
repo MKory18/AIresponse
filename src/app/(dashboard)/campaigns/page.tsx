@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Megaphone, Users } from "lucide-react";
+import { Megaphone, Plus, Users } from "lucide-react";
 import { label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { SegmentDialog } from "./segment-dialog";
 
 type Segment = { id: string; name: string; isActive: boolean };
 type Campaign = {
@@ -63,6 +64,7 @@ export default function CampaignsPage() {
   const [templateLanguage, setTemplateLanguage] = useState("ar");
   const [ratePerMinute, setRatePerMinute] = useState("30");
   const [formError, setFormError] = useState<string | null>(null);
+  const [segmentOpen, setSegmentOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -194,7 +196,15 @@ export default function CampaignsPage() {
 
   return (
     <div className="page-wrap">
-      <PageHeader title="الحملات التسويقية" description="شرائح الجمهور وحملات القنوات المسموحة رسميًا — بلا إرسال خارج السياسات." />
+      <PageHeader
+        title="الحملات التسويقية"
+        description="خطوتين: اختار مين بدك توصله (شريحة)، وبعدها اكتب الرسالة (حملة). ولا شي بينبعت قبل الفحص والاعتماد."
+        actions={
+          <Button size="sm" variant="secondary" onClick={() => setSegmentOpen(true)}>
+            <Plus size={14} /> شريحة جديدة
+          </Button>
+        }
+      />
 
       {error && (
         <GlassCard>
@@ -202,16 +212,40 @@ export default function CampaignsPage() {
         </GlassCard>
       )}
 
+      {/* شرائح محفوظة */}
+      {!error && (
+      <GlassCard level="glass-subtle" className="p-4">
+        <p className="flex items-center gap-2 text-sm font-bold text-ink">
+          <Users size={15} className="text-brand-500" /> ١. الشرائح — مين بدك توصله
+        </p>
+        {segments.length === 0 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <p className="text-[12px] text-ink-subtle">ما في ولا شريحة لسا — ابدأ هون، وبعدها بتقدر تعمل حملة.</p>
+            <Button size="sm" onClick={() => setSegmentOpen(true)}><Plus size={13} /> شريحة جديدة</Button>
+          </div>
+        ) : (
+          <ul className="mt-2 space-y-1.5">
+            {segments.map((s) => (
+              <li key={s.id} className="flex items-center justify-between rounded-xl border border-line/60 px-3 py-2 text-[12px]">
+                <span className="font-bold text-ink">{s.name}</span>
+                <StatusBadge value={s.isActive ? "ACTIVE" : "PAUSED"} dot />
+              </li>
+            ))}
+          </ul>
+        )}
+      </GlassCard>
+      )}
+
       {/* إنشاء حملة */}
       {!error && (
       <GlassCard level="glass-subtle" className="space-y-3 p-4">
         <p className="flex items-center gap-2 text-sm font-bold text-ink">
-          <Megaphone size={15} className="text-brand-500" /> حملة جديدة
+          <Megaphone size={15} className="text-brand-500" /> ٢. حملة جديدة
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحملة" aria-label="اسم الحملة" />
           <Select value={segmentId} onChange={(e) => setSegmentId(e.target.value)} aria-label="الشريحة المستهدفة">
-            <option value="">— اختر الشريحة —</option>
+            <option value="">{segments.length ? "— اختر الشريحة —" : "أنشئ شريحة أول ↑"}</option>
             {segments.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
@@ -247,26 +281,6 @@ export default function CampaignsPage() {
       </GlassCard>
       )}
 
-      {/* شرائح محفوظة */}
-      {!error && (
-      <GlassCard level="glass-subtle" className="p-4">
-        <p className="flex items-center gap-2 text-sm font-bold text-ink">
-          <Users size={15} className="text-brand-500" /> الشرائح المحفوظة
-        </p>
-        {segments.length === 0 ? (
-          <p className="mt-2 text-[12px] text-ink-subtle">لا شرائح محفوظة — أنشئها عبر واجهة الشرائح.</p>
-        ) : (
-          <ul className="mt-2 space-y-1.5">
-            {segments.map((s) => (
-              <li key={s.id} className="flex items-center justify-between rounded-xl border border-line/60 px-3 py-2 text-[12px]">
-                <span className="font-bold text-ink">{s.name}</span>
-                <StatusBadge value={s.isActive ? "ACTIVE" : "PAUSED"} dot />
-              </li>
-            ))}
-          </ul>
-        )}
-      </GlassCard>
-      )}
 
       {/* القائمة */}
       {loading && (
@@ -298,7 +312,7 @@ export default function CampaignsPage() {
                 إلغاء
               </Button>
             )}
-            <Button size="sm" variant="ghost" disabled={busy !== null} loading={busy === `dry:${c.id}`} onClick={() => dryRunNow(c.id)}>معاينة (Dry-Run)</Button>
+            <Button size="sm" variant="ghost" disabled={busy !== null} loading={busy === `dry:${c.id}`} onClick={() => dryRunNow(c.id)}>معاينة بلا إرسال</Button>
           </div>
 
           {selected === c.id && dryRunForId === c.id && dryRun && (
@@ -339,9 +353,24 @@ export default function CampaignsPage() {
             icon={<Megaphone size={28} strokeWidth={1.5} />}
             title="لا حملات بعد"
             description="أنشئ شريحة ثم حملة — لا يُرسل شيء قبل التحقق والاعتماد والجدولة."
+            action={
+              segments.length === 0 ? (
+                <Button size="sm" onClick={() => setSegmentOpen(true)}><Plus size={14} /> شريحة جديدة</Button>
+              ) : null
+            }
           />
         </GlassCard>
       )}
+      <SegmentDialog
+        open={segmentOpen}
+        onClose={() => setSegmentOpen(false)}
+        onCreated={(id) => {
+          setSegmentOpen(false);
+          setSegmentId(id);
+          load();
+          toast.show("الشريحة جاهزة — اكتب رسالة الحملة", "success");
+        }}
+      />
       <ConfirmDialog
         open={cancelTarget !== null}
         onClose={() => setCancelTarget(null)}

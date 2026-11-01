@@ -40,7 +40,14 @@ export interface DispatchOutboundParams {
   /** Inbound message this reply answers — part of the idempotency identity. */
   sourceMessageId: string;
   text: string;
-  senderType?: "AI" | "HUMAN";
+  senderType?: "AI" | "HUMAN" | "SYSTEM";
+  /**
+   * Phase 2 — the REAL automated source used by the final send guard. Never
+   * "HUMAN"; lets a campaign/automation/follow-up be classified honestly
+   * instead of masquerading as a human to bypass the human-takeover guard.
+   * Defaults to `senderType ?? "AI"`.
+   */
+  automationSource?: "AI" | "AUTOMATION" | "FOLLOWUP" | "CAMPAIGN" | "SYSTEM";
   senderId?: string;
   /** Optional media asset ID to attach (image/video/audio/file). */
   mediaId?: string | null;
@@ -177,7 +184,7 @@ export async function dispatchOutbound(
   const sendPolicy = await assertAutomatedSendAllowed(db as never, {
     workspaceId: params.workspaceId,
     conversationId: params.conversationId,
-    senderType: params.senderType ?? "AI",
+    senderType: params.automationSource ?? params.senderType ?? "AI",
   });
   if (!sendPolicy.allowed) {
     return {
@@ -186,7 +193,9 @@ export async function dispatchOutbound(
       error:
         sendPolicy.reason === "COLLECTION_ONLY"
           ? "COLLECTION_ONLY: الرد الآلي معطّل — الصفحة في وضع التجميع (جمع وتحليل فقط)"
-          : "SEND_MODE_UNKNOWN: تعذّر التحقق من وضع الصفحة — أُوقف الإرسال الآلي احتياطًا",
+          : sendPolicy.reason === "HUMAN_ACTIVE"
+            ? "HUMAN_ACTIVE: الموظف مسيطر على المحادثة — أُوقف الإرسال الآلي"
+            : "SEND_MODE_UNKNOWN: تعذّر التحقق من وضع الصفحة — أُوقف الإرسال الآلي احتياطًا",
     };
   }
 
@@ -224,6 +233,24 @@ export async function dispatchOutbound(
     ...(priorPart1ForClaim ? { part1MessageId: priorPart1ForClaim } : {}),
   };
   const hasClaimMetadata = Object.keys(claimMetadata).length > 0;
+  // Phase 3 — real reply latency: the wait between the customer's inbound and
+  // this outbound. Best-effort, recorded on the row; synthetic sources
+  // (campaign:… / followup:…) have no inbound row and stay null — never invented.
+  const respondedAt = new Date();
+  let replyLatencyMs: number | null = null;
+  if (!existing) {
+    try {
+      const source = await (db as any).message.findUnique({
+        where: { id: params.sourceMessageId },
+        select: { direction: true, createdAt: true },
+      });
+      if (source && source.direction === "INBOUND") {
+        replyLatencyMs = Math.max(0, respondedAt.getTime() - new Date(source.createdAt).getTime());
+      }
+    } catch {
+      // measurement never blocks the send.
+    }
+  }
   let message;
   try {
     if (existing) {
@@ -248,6 +275,8 @@ export async function dispatchOutbound(
           text: params.text,
           provider: "facebook",
           deliveryStatus: "PENDING",
+          respondedAt,
+          ...(replyLatencyMs != null ? { replyLatencyMs } : {}),
           outboundIdempotencyKey: outboundKey,
           ...(hasClaimMetadata ? { metadata: claimMetadata } : {}),
         },

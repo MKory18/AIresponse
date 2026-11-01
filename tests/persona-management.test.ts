@@ -174,7 +174,7 @@ describe("no internal brand string in user-visible site text (static)", () => {
     "src/app/(dashboard)/personas/page.tsx",
     "src/app/(dashboard)/channels/page.tsx",
     "src/app/(dashboard)/settings/ai/page.tsx",
-    "src/app/(dashboard)/ai/studio/page.tsx",
+    "src/app/(dashboard)/settings/ai/ai-status-card.tsx",
     "src/app/(dashboard)/ai/playground/page.tsx",
     "src/components/auth-form.tsx",
   ];

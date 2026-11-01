@@ -1,3 +1,6 @@
-"use client";
+import { redirectToMerged } from "@/lib/nav-redirect";
 
-export { default } from "../orders/page";
+/** نسخة حرفية قديمة من «الطلبات» — الرابط بيحوّل للأصل. */
+export default function OrderWarehousePage() {
+  redirectToMerged("/order-warehouse");
+}

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { resolveRange, median, avg, type RangeQuery } from "@/core/analytics/time";
+import { resolveRange, median, avg, percentile, type RangeQuery } from "@/core/analytics/time";
 import type { Db } from "@/modules/customers/service";
 
 /**
@@ -123,17 +123,20 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
         // OCR-2026-10-16: الملاحظات الداخلية ليست رسائل زبون — إلا هنا كانت
         // تعدّ messages واردة وتضخّم FRT (الملاحظة تُعدّ "أول رد").
         where: { workspaceId, conversationId: { in: conversationIds }, deletedAt: null, isNote: false },
-        select: { conversationId: true, direction: true, createdAt: true },
+        select: { conversationId: true, direction: true, senderType: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       })
     : [];
 
   // firstResponseTime per conversation (see definition above).
   const frtMinutes: number[] = [];
-  const byConversation = new Map<string, { direction: string; createdAt: Date }[]>();
+  // Phase 3 — split the first response by its real source so a slow AI is never
+  // confused with a slow human team (or a scheduled automation/campaign).
+  const frtBySource: Record<"ai" | "human" | "automation", number[]> = { ai: [], human: [], automation: [] };
+  const byConversation = new Map<string, { direction: string; senderType: string; createdAt: Date }[]>();
   for (const m of messages) {
     const list = byConversation.get(m.conversationId) ?? [];
-    list.push({ direction: m.direction, createdAt: new Date(m.createdAt) });
+    list.push({ direction: m.direction, senderType: m.senderType, createdAt: new Date(m.createdAt) });
     byConversation.set(m.conversationId, list);
   }
   for (const [convId, list] of byConversation) {
@@ -143,7 +146,10 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
       (m) => m.direction === "OUTBOUND" && new Date(m.createdAt).getTime() >= firstInbound.createdAt.getTime()
     );
     if (firstOutbound) {
-      frtMinutes.push((new Date(firstOutbound.createdAt).getTime() - firstInbound.createdAt.getTime()) / 60_000);
+      const gap = (new Date(firstOutbound.createdAt).getTime() - firstInbound.createdAt.getTime()) / 60_000;
+      frtMinutes.push(gap);
+      const source = firstOutbound.senderType === "HUMAN" ? "human" : firstOutbound.senderType === "AI" ? "ai" : "automation";
+      frtBySource[source].push(gap);
     }
     void convId;
   }
@@ -159,6 +165,12 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
       avgMinutes: avg(frtMinutes),
       medianMinutes: median(frtMinutes),
       count: frtMinutes.length,
+      // تفصيل حسب مصدر أول رد (Phase 3). `automation` = نظام/أتمتة/حملة.
+      bySource: {
+        ai: { avgMinutes: avg(frtBySource.ai), medianMinutes: median(frtBySource.ai), count: frtBySource.ai.length },
+        human: { avgMinutes: avg(frtBySource.human), medianMinutes: median(frtBySource.human), count: frtBySource.human.length },
+        automation: { avgMinutes: avg(frtBySource.automation), medianMinutes: median(frtBySource.automation), count: frtBySource.automation.length },
+      },
     },
     resolution: {
       avgMinutes: avg(resolutionMinutes),
@@ -174,7 +186,7 @@ export async function getOrderAnalytics(db: DbClient, workspaceId: string, q: Ra
   const { start, end } = resolveRange(q);
   const orders = await db.order.findMany({
     where: { workspaceId, createdAt: { gte: start, lt: end } },
-    select: { status: true, subtotal: true, discount: true, deliveryFee: true, total: true, province: true },
+    select: { status: true, subtotal: true, discount: true, deliveryFee: true, total: true, province: true, currency: true },
   });
   const sum = (pred: (o: (typeof orders)[number]) => boolean, field: "total" | "subtotal") =>
     orders.filter(pred).reduce((s, o) => s + Number(o[field]), 0);
@@ -202,6 +214,27 @@ export async function getOrderAnalytics(db: DbClient, workspaceId: string, q: Ra
         return acc;
       }, {})
     ).map(([province, count]) => ({ province, count })),
+    // Phase 3 — عملات مختلفة لا تُجمع ببعضها: كل عملة بند منفصل (٢٠$ + ١٥٠٬٠٠٠ ل.س
+    // = بندان، لا رقم واحد مضلّل). الجمع العام أعلاه يبقى كما هو للتوافق.
+    byCurrency: Object.entries(
+      orders.reduce<Record<string, { created: number; confirmed: number; createdGmv: number; confirmedGmv: number }>>(
+        (acc, o) => {
+          const key = o.currency ?? "UNKNOWN";
+          const entry = acc[key] ?? { created: 0, confirmed: 0, createdGmv: 0, confirmedGmv: 0 };
+          entry.created += 1;
+          entry.createdGmv += Number(o.total);
+          if (confirmedStatuses.includes(o.status)) {
+            entry.confirmed += 1;
+            entry.confirmedGmv += Number(o.total);
+          }
+          acc[key] = entry;
+          return acc;
+        },
+        {}
+      )
+    )
+      .map(([currency, v]) => ({ currency, ...v }))
+      .sort((a, b) => b.confirmedGmv - a.confirmedGmv),
   };
 }
 
@@ -484,5 +517,141 @@ export async function getQueueMetrics(db: DbClient, workspaceId: string | null) 
     completed: by("DONE"),
     failed: by("FAILED"),
     byType,
+  };
+}
+
+// ── AI pipeline stage latency (P50 / P95) ───────────────────────────────────
+
+/**
+ * P14 — تفصيل زمن خط أنابيب الذكاء + زمن أول رد حسب نوع المجيب.
+ *
+ * - **قياس المراحل**: من `AIUsageLog.stageTimings` لكل سجلات `RESPONSE` ضمن
+ *   النافذة — **نجحت أو فشلت** (لا استبعاد للبطيء ولا للفاشل)، مع تفصيل
+ *   `byStatus` لكل مرحلة حتى يظهر أثر الفشل بدل إخفائه.
+ * - **حسب المجيب**: زمن أول رد (بالدقائق) = فرق أول رسالة صادرة عن آخر رسالة
+ *   واردة قبلها بنفس المحادثة، مقسّم AI / HUMAN / AUTOMATION.
+ * - **لا اختلاق**: مرحلة/نوع بلا عينات يظهر `count=0` وقيمه `null`، و`unavailable`
+ *   بتبيّن غير المتاح وسببه. النافذة وعدد العينات وحدّ القراءة معروضين صراحة.
+ * - قراءة فقط، مقيّدة بالمساحة، وبلا أي نص رسالة أو بيانات عميل (أرقام فقط).
+ */
+const MAX_REPLY_SAMPLES = 5000;
+
+export async function getAiStageLatency(db: DbClient, workspaceId: string, q: RangeQuery) {
+  const { start, end, timezone } = resolveRange(q);
+  const where = { workspaceId, purpose: "RESPONSE", createdAt: { gte: start, lt: end } };
+
+  const [logs, outbound] = await Promise.all([
+    db.aIUsageLog.findMany({
+      where,
+      select: { stageTimings: true, status: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    db.message.findMany({
+      where: { workspaceId, direction: "OUTBOUND", isNote: false, createdAt: { gte: start, lt: end } },
+      select: { conversationId: true, senderType: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+      take: MAX_REPLY_SAMPLES + 1,
+    }),
+  ]);
+
+  const truncated = outbound.length > MAX_REPLY_SAMPLES;
+  const outboundSamples = truncated ? outbound.slice(0, MAX_REPLY_SAMPLES) : outbound;
+
+  // ── قياس المراحل (نجاح/فشل) ──
+  const byStatusCount: Record<string, number> = {};
+  const stageAll = new Map<string, number[]>();
+  const stageByStatus = new Map<string, Map<string, number[]>>();
+  let withTimings = 0;
+  for (const l of logs) {
+    const st = String(l.status ?? "UNKNOWN");
+    byStatusCount[st] = (byStatusCount[st] ?? 0) + 1;
+    const t = l.stageTimings as Record<string, unknown> | null | undefined;
+    if (!t || typeof t !== "object") continue;
+    withTimings += 1;
+    for (const [stage, value] of Object.entries(t)) {
+      const n = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(n) || n < 0) continue;
+      (stageAll.get(stage) ?? stageAll.set(stage, []).get(stage)!).push(n);
+      const per = stageByStatus.get(stage) ?? new Map<string, number[]>();
+      (per.get(st) ?? per.set(st, []).get(st)!).push(n);
+      stageByStatus.set(stage, per);
+    }
+  }
+
+  const statsOf = (values: number[]) => ({
+    count: values.length,
+    p50: percentile(values, 0.5),
+    p95: percentile(values, 0.95),
+    avg: avg(values),
+    max: values.length ? Math.max(...values) : null,
+  });
+
+  const stages = [...stageAll.entries()]
+    .map(([stage, values]) => {
+      const per = stageByStatus.get(stage) ?? new Map<string, number[]>();
+      const byStatus: Record<string, ReturnType<typeof statsOf>> = {};
+      for (const [st, vals] of per) byStatus[st] = statsOf(vals);
+      return { stage, ...statsOf(values), byStatus };
+    })
+    .sort((a, b) => (b.p95 ?? 0) - (a.p95 ?? 0));
+
+  // ── زمن أول رد حسب نوع المجيب ──
+  const byKind = new Map<string, number[]>();
+  const convIds = [...new Set(outboundSamples.map((m) => m.conversationId))];
+  const inbounds = convIds.length
+    ? await db.message.findMany({
+        where: { workspaceId, direction: "INBOUND", conversationId: { in: convIds }, createdAt: { lt: end } },
+        select: { conversationId: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  const inboundByConv = new Map<string, Date[]>();
+  for (const m of inbounds) {
+    const l = inboundByConv.get(m.conversationId) ?? [];
+    l.push(new Date(m.createdAt));
+    inboundByConv.set(m.conversationId, l);
+  }
+  const KIND: Record<string, string> = { AI: "AI", HUMAN: "HUMAN", AUTOMATION: "AUTOMATION" };
+  for (const out of outboundSamples) {
+    const kind = KIND[out.senderType];
+    if (!kind) continue;
+    const list = inboundByConv.get(out.conversationId) ?? [];
+    const at = new Date(out.createdAt).getTime();
+    // آخر وارد قبل أو عند هذا الرد.
+    let trigger: number | null = null;
+    for (const t of list) {
+      if (t.getTime() <= at) trigger = t.getTime();
+      else break;
+    }
+    if (trigger === null) continue;
+    const minutes = (at - trigger) / 60_000;
+    if (!Number.isFinite(minutes) || minutes < 0) continue;
+    (byKind.get(kind) ?? byKind.set(kind, []).get(kind)!).push(minutes);
+  }
+  const byResponder = ["AI", "HUMAN", "AUTOMATION"].map((kind) => ({
+    kind,
+    samples: byKind.get(kind)?.length ?? 0,
+    minutes: statsOf(byKind.get(kind) ?? []),
+  }));
+
+  const unavailable: string[] = [];
+  if (logs.length === 0) unavailable.push("STAGE_TIMINGS: لا سجلات رد في النافذة");
+  else if (withTimings === 0) unavailable.push("STAGE_TIMINGS: السجلات بلا تفصيل مراحل (قبل P13 أو فشل قبل التسجيل)");
+  for (const r of byResponder) {
+    if (r.samples === 0) unavailable.push(`REPLY_LATENCY_${r.kind}: لا ردود من هذا النوع في النافذة`);
+  }
+
+  return {
+    window: { start: start.toISOString(), end: end.toISOString(), timezone },
+    totals: {
+      responseLogs: logs.length,
+      withTimings,
+      byStatus: byStatusCount,
+      outboundSamples: outboundSamples.length,
+      truncated,
+    },
+    stages,
+    byResponder,
+    unavailable,
   };
 }

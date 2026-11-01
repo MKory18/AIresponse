@@ -436,11 +436,15 @@ export default function Inbox() {
   const isFiltered = Boolean(query) || filter !== "all" || Boolean(statusSel || pageSel || assigneeSel || channelSel);
   const aiMode = selected?.aiState !== "HUMAN_ACTIVE";
 
-  // Pick up ?q= from the topbar search.
+  // Pick up ?q= from the topbar search, and ?id= from links that point at one
+  // conversation (التحويلات · صفحة الطلب) — بتنفتح مباشرة بدل الوارد العام.
   useEffect(() => {
     try {
-      const q = new URLSearchParams(window.location.search).get("q");
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get("q");
       if (q) setQuery(q);
+      const id = params.get("id");
+      if (id) setSelectedId(id);
     } catch { /* ignore */ }
   }, []);
 

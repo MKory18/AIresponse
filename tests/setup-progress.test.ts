@@ -65,10 +65,10 @@ describe("حساب الخطوات من البيانات الحقيقية", () =>
   it("مساحة جديدة: ولا خطوة خلصت، والجاية «اربط قناة»", async () => {
     const p = await progress();
     expect(p.doneCount).toBe(0);
-    expect(p.total).toBe(5);
+    expect(p.total).toBe(6);
     expect(p.nextKey).toBe("channel");
     expect(p.complete).toBe(false);
-    expect(p.steps.map((s) => s.key)).toEqual(["channel", "products", "persona", "playground", "go-live"]);
+    expect(p.steps.map((s) => s.key)).toEqual(["channel", "products", "persona", "knowledge", "playground", "go-live"]);
   });
 
   it("قناة «متصلة» فعلًا بس هي الي بتعدّ — مش المنفصلة ولا الي فيها خطأ", async () => {
@@ -93,6 +93,17 @@ describe("حساب الخطوات من البيانات الحقيقية", () =>
     expect(done(await progress()).persona).toBe(false);
     await db.persona.create({ data: { workspaceId: WS, name: "ليلى", isActive: true } } as never);
     expect(done(await progress()).persona).toBe(true);
+  });
+
+  it("المعرفة: سؤال شائع فعّال أو مستند جاهز بيكفي — المعطّل والي لسا بيتجهّز لا", async () => {
+    await db.faq.create({ data: { workspaceId: WS, question: "التوصيل؟", answer: "يومين", isActive: false } } as never);
+    await db.knowledgeDocument.create({ data: { workspaceId: WS, title: "سياسة", sourceType: "TEXT", content: "x", status: "PROCESSING" } } as never);
+    expect(done(await progress()).knowledge).toBe(false);
+    await db.knowledgeDocument.create({ data: { workspaceId: WS, title: "إرجاع", sourceType: "TEXT", content: "x", status: "READY" } } as never);
+    expect(done(await progress()).knowledge).toBe(true);
+    db = createFakeDb();
+    await db.faq.create({ data: { workspaceId: WS, question: "التوصيل؟", answer: "يومين", isActive: true } } as never);
+    expect(done(await progress()).knowledge).toBe(true);
   });
 
   it("التجربة: جلسة ملعب وحدة بتكفي", async () => {
@@ -130,7 +141,7 @@ describe("تشغيل الرد الآلي — مزوّد حقيقي بمفتاح 
 });
 
 describe("الإكمال والترتيب", () => {
-  it("الشخصية والتجربة «موصى بها» — ما بيمنعوا إكمال الخطوات الإجبارية", async () => {
+  it("الشخصية والمعرفة والتجربة «موصى بها» — ما بيمنعوا إكمال الخطوات الإجبارية", async () => {
     process.env.OPENAI_API_KEY = "sk-test-key";
     await addChannel("CONNECTED");
     await addProduct();
@@ -138,7 +149,7 @@ describe("الإكمال والترتيب", () => {
     const p = await progress();
     expect(p.complete).toBe(true);
     expect(p.doneCount).toBe(3);
-    expect(p.steps.filter((s) => !s.required).map((s) => s.key)).toEqual(["persona", "playground"]);
+    expect(p.steps.filter((s) => !s.required).map((s) => s.key)).toEqual(["persona", "knowledge", "playground"]);
   });
 
   it("إجباري ناقص = مش مكتمل، حتى لو الموصى بها كلها خلصت", async () => {
@@ -160,10 +171,11 @@ describe("الإكمال والترتيب", () => {
     await addChannel("CONNECTED");
     await addProduct();
     await db.persona.create({ data: { workspaceId: WS, name: "سارة", isActive: true } } as never);
+    await db.faq.create({ data: { workspaceId: WS, question: "التوصيل؟", answer: "يومين", isActive: true } } as never);
     await db.playgroundSession.create({ data: { workspaceId: WS } } as never);
     await setAi({ provider: "openai", aiEnabled: true, autoRespond: true });
     const p = await progress();
-    expect(p.doneCount).toBe(5);
+    expect(p.doneCount).toBe(6);
     expect(p.nextKey).toBeNull();
     expect(p.complete).toBe(true);
   });
@@ -196,7 +208,7 @@ describe("الأمان والعزل", () => {
 
   it("المسارات الي بتأشّر عليها الخطوات كلها صفحات فعلية", async () => {
     const hrefs = (await progress()).steps.map((s) => s.href);
-    expect(hrefs).toEqual(["/channels", "/products", "/personas", "/ai/playground", "/settings/ai"]);
+    expect(hrefs).toEqual(["/channels", "/products", "/personas", "/knowledge", "/ai/playground", "/settings/ai"]);
   });
 });
 

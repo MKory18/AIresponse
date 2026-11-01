@@ -228,13 +228,20 @@ export async function handleOrderIntent(
           return {
             handled: true,
             action: "NONE",
-            summaryText: `الطلب رقم ${edit.orderNumber} وصل مرحلة ما بتنعدل هلق (${edit.statusLabel}).`,
+            summaryText: `الطلب رقم ${edit.orderNumber} وصل مرحلة ما بتنعدل هلق (${edit.statusLabel}). سجّلنا طلب التعديل وبيراجعه الفريق.`,
+          };
+        }
+        if (edit.reason === "EDIT_NEEDS_REVIEW") {
+          return {
+            handled: true,
+            action: "NONE",
+            summaryText: `الطلب رقم ${edit.orderNumber} فيه أكثر من منتج — رح يراجع الفريق التعديل المطلوب قبل تطبيقه.`,
           };
         }
         // NO_ORDER → fall through: open a fresh cart with the given fields.
       } else {
         // A bare confirmation on an empty new cart is chatter, not a new order.
-        if (!wantsNewProduct && !wantsEdit && parseConfirmation(params.customerText).signal !== "NONE") {
+        if (!wantsNewProduct && !wantsEdit && parseConfirmation(params.customerText).signal !== "UNKNOWN") {
           return { handled: false, action: "NONE" };
         }
         await recycleDraftForNewOrder(db, params.workspaceId, draft);

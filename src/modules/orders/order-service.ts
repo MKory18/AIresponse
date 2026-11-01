@@ -7,6 +7,7 @@ import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
 import { calculatePricing } from "./pricing";
+import { quoteDelivery } from "./delivery";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 export interface CreateOrderFromDraftResult {
@@ -128,43 +129,73 @@ export async function createOrderFromDraft(
 
   const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${randomId(3).toUpperCase()}`;
   const status = "CONFIRMED";
-  const order = await db.order.create({
-    data: {
-      workspaceId: ctx.workspaceId,
-      orderNumber,
-      customerId: draft.customerId,
-      conversationId: draft.conversationId,
-      draftId: draft.id,
-      status,
-      confirmationStatus: "CONFIRMED_BY_CUSTOMER",
-      deliveryAddress: draft.rawAddress,
-      province: draft.province,
-      notes: draft.notes ?? null,
-      subtotal: breakdown.subtotal,
-      discount: breakdown.discount,
-      deliveryFee: breakdown.deliveryFee,
-      total: breakdown.total,
-      currency: breakdown.currency,
-      source: params.source ?? "AI",
-      idempotencyKey,
-      items: {
-        create: {
-          productId: product.id,
-          variantId: draft.variantId,
-          productNameSnapshot: product.name,
-          skuSnapshot: product.sku,
-          unitPrice: breakdown.unitPrice,
-          quantity: draft.quantity!,
-          subtotal: breakdown.subtotal,
-        },
-      },
-    } as Prisma.OrderUncheckedCreateInput,
-  });
 
-  await db.orderDraft.update({
-    where: { id: draft.id },
-    data: { state: "CONVERTED", orderId: order.id, idempotencyKey },
-  });
+  // Phase 1.1 — order row + draft conversion happen together. When the host
+  // provides a real transaction (Prisma) they are atomic; the unique
+  // idempotencyKey makes a concurrent confirmation resolve to one order
+  // instead of a 500.
+  const writeOrder = async (tx: Db): Promise<Order> => {
+    const created = (await tx.order.create({
+      data: {
+        workspaceId: ctx.workspaceId,
+        orderNumber,
+        customerId: draft.customerId,
+        conversationId: draft.conversationId,
+        draftId: draft.id,
+        status,
+        confirmationStatus: "CONFIRMED_BY_CUSTOMER",
+        deliveryAddress: draft.rawAddress,
+        province: draft.province,
+        notes: draft.notes ?? null,
+        subtotal: breakdown.subtotal,
+        discount: breakdown.discount,
+        deliveryFee: breakdown.deliveryFee,
+        total: breakdown.total,
+        currency: breakdown.currency,
+        source: params.source ?? "AI",
+        idempotencyKey,
+        items: {
+          create: {
+            productId: product.id,
+            variantId: draft.variantId,
+            productNameSnapshot: product.name,
+            skuSnapshot: product.sku,
+            unitPrice: breakdown.unitPrice,
+            quantity: draft.quantity!,
+            subtotal: breakdown.subtotal,
+          },
+        },
+      } as Prisma.OrderUncheckedCreateInput,
+    })) as Order;
+    await tx.orderDraft.update({
+      where: { id: draft.id },
+      data: { state: "CONVERTED", orderId: created.id, idempotencyKey },
+    });
+    return created;
+  };
+
+  let order: Order;
+  try {
+    const anyDb = db as unknown as { $transaction?: <T>(fn: (tx: Db) => Promise<T>) => Promise<T> };
+    order = typeof anyDb.$transaction === "function" ? await anyDb.$transaction(writeOrder) : await writeOrder(db);
+  } catch (err) {
+    // A concurrent confirmation won the race on the unique idempotencyKey.
+    if ((err as { code?: string })?.code === "P2002") {
+      const existing = await db.order.findUnique({ where: { idempotencyKey } });
+      if (existing) {
+        return {
+          orderId: existing.id,
+          orderNumber: existing.orderNumber,
+          status: existing.status,
+          total: Number(existing.total),
+          currency: existing.currency,
+          created: false,
+          rules,
+        };
+      }
+    }
+    throw err;
+  }
 
   // P8 — مصدر الإعلان: الطلب يرث مصدر العميل الموثوق (لمسة أولى) إن وُجد،
   // ولا يُخترع أبدًا. كما تُسجَّل نتيجة عروض البيع: قبول العرض (كمية الطلب
@@ -284,14 +315,20 @@ export async function createOrderFromDraft(
     }
     if (token && chatId) {
       const { getTelegramClient } = await import("@/modules/channels/telegram/client");
+      const { orderNotificationText, telegramOrderPiiEnabled } = await import("./notify");
       const client = getTelegramClient();
-      const text =
-        `📦 طلب جديد\n` +
-        `رقم: ${orderNumber}\n` +
-        `العميل: ${customer?.name ?? customer?.phone ?? "-"}\n` +
-        `المنتج: ${product.name} × ${draft.quantity}\n` +
-        `المجموع: ${breakdown.total} ${breakdown.currency}\n` +
-        `الحالة: ${status}`;
+      // سيستم 1 — بلا بيانات زبون افتراضيًا؛ المالك يفعّلها صريحًا.
+      const text = orderNotificationText({
+        orderNumber,
+        productName: product.name,
+        quantity: draft.quantity,
+        total: breakdown.total,
+        currency: breakdown.currency,
+        status,
+        customerName: customer?.name,
+        customerPhone: customer?.phone,
+        includePii: telegramOrderPiiEnabled(),
+      });
       await client.sendMessage(token, chatId, { text });
     }
   } catch {
@@ -330,13 +367,22 @@ export async function transitionOrder(db: Db, ctx: ActorContext, orderId: string
     metadata: { from: order.status, to },
   });
   await eventBus.publish(
-    makeEvent("ConversationUpdated", ctx.workspaceId, {
-      type: to === "CANCELLED" ? "OrderCancelled" : "OrderStateChanged",
+    makeEvent(to === "CANCELLED" ? "OrderCancelled" : "OrderStateChanged", ctx.workspaceId, {
       orderId,
+      conversationId: order.conversationId ?? undefined,
       from: order.status,
       to,
     })
   );
+  // Phase 1.6 — a cancelled order must not receive scheduled follow-ups.
+  if (to === "CANCELLED") {
+    try {
+      const { cancelFollowUpsFor } = await import("@/modules/automation/followup-service");
+      await cancelFollowUpsFor(db, ctx.workspaceId, order.customerId, null);
+    } catch {
+      // follow-up cleanup is best-effort — the cancellation itself stands.
+    }
+  }
   return updated;
 }
 
@@ -361,7 +407,13 @@ export async function getOwnedOrder(db: Db, workspaceId: string, orderId: string
 export type ChatOrderEdit =
   | { ok: true; order: Order; changed: string[] }
   | { ok: false; reason: "NO_ORDER" }
+  | { ok: false; reason: "EDIT_NEEDS_REVIEW"; orderNumber: string }
   | { ok: false; reason: "NOT_EDITABLE"; orderNumber: string; statusLabel: string };
+
+/** Orders a chat message may still mutate. Anything CONFIRMED or later is
+ *  final: a single message can never rewrite a placed order — it is logged as
+ *  an edit request and must go through an explicit staff path. */
+const CHAT_EDITABLE_STATUSES: OrderStatus[] = ["NEW", "CONFIRMATION_PENDING"];
 
 export async function updateOrderFromChat(
   db: Db,
@@ -383,9 +435,28 @@ export async function updateOrderFromChat(
   const order = latest[0];
   if (!order) return { ok: false, reason: "NO_ORDER" };
 
-  // Editability = the state machine can still cancel it: NEW,
-  // CONFIRMATION_PENDING, CONFIRMED, PROCESSING. Everything else is final.
-  if (!canTransitionOrder(order.status, "CANCELLED")) {
+  // Phase 0.3 — a confirmed/processing/shipped order is never mutated from
+  // chat. The request is recorded (history preserved) and surfaced to staff.
+  if (!CHAT_EDITABLE_STATUSES.includes(order.status)) {
+    await recordAudit(db, {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      action: "order.edit_requested",
+      entityType: "Order",
+      entityId: order.id,
+      ip: ctx.ip,
+      metadata: {
+        orderNumber: order.orderNumber,
+        status: order.status,
+        requested: {
+          quantity: params.quantity ?? null,
+          province: params.province ?? null,
+          address: params.rawAddress ?? null,
+          notes: params.notes ?? null,
+          phone: params.phone ?? null,
+        },
+      },
+    });
     return { ok: false, reason: "NOT_EDITABLE", orderNumber: order.orderNumber, statusLabel: order.status };
   }
 
@@ -407,48 +478,50 @@ export async function updateOrderFromChat(
 
   if (params.quantity && params.quantity > 0) {
     const items = (await db.orderItem.findMany({ where: { orderId: order.id } })) as OrderItem[];
-    const item = items[0];
-    if (item) {
-      // Price snapshot stays locked (item.unitPrice — never a live Product
-      // price); totals are recomputed through the same pricing engine as
-      // creation so offers and delivery stay consistent.
-      const breakdown = await calculatePricing(db, {
-        workspaceId: ctx.workspaceId,
-        product: { price: Number(item.unitPrice), currency: order.currency },
-        quantity: params.quantity,
-        province: newProvince,
-      });
-      if (!breakdown.deliveryAvailable) {
-        throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
-      }
-      await db.orderItem.updateMany({
-        where: { orderId: order.id },
-        data: { quantity: params.quantity, subtotal: breakdown.subtotal },
-      });
-      data.subtotal = breakdown.subtotal;
-      data.discount = breakdown.discount;
-      data.deliveryFee = breakdown.deliveryFee;
-      data.total = breakdown.total;
-      data.currency = breakdown.currency;
-      changed.push("quantity");
+    // A multi-item order has no unambiguous "which item" from a chat message —
+    // never guess: hand it to a human instead of mangling other items.
+    if (items.length !== 1) {
+      return { ok: false, reason: "EDIT_NEEDS_REVIEW", orderNumber: order.orderNumber };
     }
+    const item = items[0];
+    // Price snapshot stays locked (item.unitPrice — never a live Product
+    // price); totals are recomputed through the same pricing engine as
+    // creation, and the existing discount is carried over (it is only lost
+    // when the new subtotal makes it invalid — the engine caps it).
+    const breakdown = await calculatePricing(db, {
+      workspaceId: ctx.workspaceId,
+      product: { price: Number(item.unitPrice), currency: order.currency },
+      quantity: params.quantity,
+      province: newProvince,
+      discount: Number(order.discount),
+    });
+    if (!breakdown.deliveryAvailable) {
+      throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
+    }
+    await db.orderItem.updateMany({
+      where: { orderId: order.id },
+      data: { quantity: params.quantity, subtotal: breakdown.subtotal },
+    });
+    data.subtotal = breakdown.subtotal;
+    data.discount = breakdown.discount;
+    data.deliveryFee = breakdown.deliveryFee;
+    data.total = breakdown.total;
+    data.currency = breakdown.currency;
+    changed.push("quantity");
   } else if (data.province) {
-    // Province moved without a quantity change — delivery fee must follow.
-    const items = (await db.orderItem.findMany({ where: { orderId: order.id } })) as OrderItem[];
-    const item = items[0];
-    if (item) {
-      const breakdown = await calculatePricing(db, {
-        workspaceId: ctx.workspaceId,
-        product: { price: Number(item.unitPrice), currency: order.currency },
-        quantity: item.quantity,
-        province: newProvince,
-      });
-      if (!breakdown.deliveryAvailable) {
-        throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
-      }
-      data.deliveryFee = breakdown.deliveryFee;
-      data.total = Number(item.subtotal) + breakdown.deliveryFee;
+    // Province moved without a quantity change: recompute ONLY the delivery
+    // fee from the stored subtotal. Never drop the discount and never sum just
+    // the first item — the total stays subtotal − discount + delivery.
+    const delivery = await quoteDelivery(db, {
+      workspaceId: ctx.workspaceId,
+      province: newProvince,
+      subtotal: Number(order.subtotal),
+    });
+    if (!delivery.available) {
+      throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
     }
+    data.deliveryFee = delivery.fee;
+    data.total = Number(order.subtotal) - Number(order.discount) + delivery.fee;
   }
 
   const updated = Object.keys(data).length

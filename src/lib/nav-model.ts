@@ -7,12 +7,15 @@ import type { Permission } from "@/modules/rbac/permissions";
  * الشغلة موزّعة على أكتر من مكان (إعداد الذكاء بـ٤ أماكن · التقارير بـ٤ ·
  * الأتمتة بـ٣) — والمستخدم الجديد ما كان يعرف من وين يبلّش.
  *
- * 🔧 هلأ: ٧ مجموعات حسب الشغلة. القائمة الجانبية بتعرض المجموعات، وشريط
+ * 🔧 ٧ مجموعات حسب الشغلة. القائمة الجانبية بتعرض المجموعات، وشريط
  * تبويبات بأعلى الصفحة بيتنقّل بين صفحات المجموعة.
  *
- * **ولا مسار بيتغيّر.** كل صفحة بتضل على رابطها الحالي — الي بيتغيّر بس كيف
- * بتتجمّع بالقائمة. يعني الروابط بالإشعارات والمفضلة وباب الوكلاء كلها
- * بتضل شغّالة بلا تحويلات.
+ * ⚠️ بعدها ضل ٢٦ تبويب، منها ٥ صفحات بتكرّر غيرها: «الاستوديو» نسخة للقراءة
+ * من «الضبط» · «سير العمل» و«القواعد» نفس الجدول بقائمتين · تقريرَي الذكاء
+ * والمنتجات نفس تبويبات «التحليلات» · «عام» بطاقات روابط بس · مخزن الطلبات
+ * نسخة حرفية من «الطلبات».
+ * 🔧 كل وحدة اندمجت بأصلها (٢١ تبويب) — والرابط القديم **ما بينكسر**: بيحوّل
+ * لمكانه الجديد (`NAV_REDIRECTS`)، فالإشعارات والمفضلة وباب الوكلاء بيضلوا شغّالين.
  */
 
 export interface NavPage {
@@ -74,9 +77,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/knowledge", label: "المعرفة", permission: "knowledge.read" },
       { href: "/media", label: "الوسائط", permission: "media.read" },
       { href: "/feedback", label: "آراء العملاء", permission: "feedback.read" },
-      { href: "/settings/ai", label: "الضبط", permission: "ai.configure" },
-      { href: "/ai/studio", label: "الاستوديو", permission: "ai.configure" },
+      // الترتيب = طريق الإعداد: علّمه ← جرّبه ← شغّله.
       { href: "/ai/playground", label: "التجربة", permission: "ai.configure" },
+      { href: "/settings/ai", label: "التشغيل", permission: "ai.configure" },
     ],
   },
   {
@@ -86,7 +89,6 @@ export const NAV_GROUPS: NavGroup[] = [
     placement: "main",
     pages: [
       { href: "/automation", label: "القواعد", permission: "automation.read" },
-      { href: "/workflows", label: "سير العمل", permission: "automation.read" },
       { href: "/follow-ups", label: "المتابعات", permission: "followups.read" },
     ],
   },
@@ -96,9 +98,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: "ChartNoAxesCombined",
     placement: "main",
     pages: [
-      { href: "/analytics", label: "نظرة عامة", permission: "analytics.read" },
-      { href: "/analytics/ai", label: "الذكاء", permission: "analytics.read" },
-      { href: "/analytics/products", label: "المنتجات", permission: "analytics.read" },
+      { href: "/analytics", label: "التقارير", permission: "analytics.read" },
     ],
   },
   {
@@ -108,7 +108,6 @@ export const NAV_GROUPS: NavGroup[] = [
     placement: "bottom",
     pages: [
       { href: "/channels", label: "القنوات", permission: "channels.read" },
-      { href: "/settings", label: "عام", permission: "settings.manage" },
       { href: "/settings/team", label: "الفريق", permission: "users.manage" },
       { href: "/settings/account", label: "حسابي", permission: null },
     ],
@@ -116,11 +115,17 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 /**
- * أسماء مستعارة: مسارات بتعرض صفحة غيرها (re-export). بتتبع مجموعة الأصل
- * وما بتظهر كتبويب لحالها.
+ * روابط قديمة اندمجت صفحتها بغيرها: الرابط بيضل شغّال وبيحوّل لمكانه الجديد
+ * (صفحة `page.tsx` صغيرة بتنادي `redirectToMerged`). مطابقة **حرفية** للمسار —
+ * `/settings` بتحوّل، بس `/settings/ai` و`/settings/team` صفحات حقيقية.
  */
-export const NAV_ALIASES: Record<string, string> = {
+export const NAV_REDIRECTS: Record<string, string> = {
   "/order-warehouse": "/orders",
+  "/ai/studio": "/settings/ai",
+  "/workflows": "/automation",
+  "/analytics/ai": "/analytics?tab=ai",
+  "/analytics/products": "/analytics?tab=products",
+  "/settings": "/settings/account",
 };
 
 /** شكل خفيف بيمرّ من الخادم للعميل — بلا صلاحيات. */
@@ -132,22 +137,20 @@ export interface NavGroupView {
   pages: { href: string; label: string }[];
 }
 
-function applyAlias(pathname: string): string {
-  for (const [alias, target] of Object.entries(NAV_ALIASES)) {
-    if (pathname === alias || pathname.startsWith(alias + "/")) return target + pathname.slice(alias.length);
-  }
-  return pathname;
+function applyRedirect(pathname: string): string {
+  const target = NAV_REDIRECTS[pathname];
+  return target ? target.split("?")[0]! : pathname;
 }
 
 /**
- * الصفحة الي بتخدم هالمسار: أطول رابط مطابق (بحيث `/settings/ai` يتبع
- * «الضبط» مش «عام»، و`/orders/abc` يتبع «الطلبات»). `null` لمسار مجهول.
+ * الصفحة الي بتخدم هالمسار: أطول رابط مطابق (بحيث `/orders/abc` يتبع
+ * «الطلبات»)، والرابط المدموج بيتبع مكانه الجديد. `null` لمسار مجهول.
  */
 export function pageForPath<G extends { pages: readonly { href: string }[] }>(
   pathname: string,
   groups: readonly G[]
 ): { group: G; page: G["pages"][number] } | null {
-  const path = applyAlias(pathname.split("?")[0]!.replace(/\/+$/, "") || "/");
+  const path = applyRedirect(pathname.split("?")[0]!.replace(/\/+$/, "") || "/");
   let best: { group: G; page: G["pages"][number] } | null = null;
   for (const group of groups) {
     for (const page of group.pages) {

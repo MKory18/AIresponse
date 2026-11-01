@@ -24,6 +24,12 @@ export interface VectorQuery {
 }
 
 export interface VectorStore {
+  /**
+   * Number of vectors the store holds, when the implementation can answer it
+   * cheaply. `0` means semantic search cannot return anything, so callers may
+   * skip the embedding call entirely. `undefined` = unknown (must search).
+   */
+  readonly size?: number;
   search(query: VectorQuery): Promise<VectorMatch[]>;
 }
 
@@ -50,6 +56,10 @@ export class InMemoryVectorStore implements VectorStore {
     private vectors: Map<string, number[]>,
     private rows: Map<string, Omit<VectorMatch, "chunkId" | "score"> & { workspaceId: string; metadata: Record<string, unknown>; isActive: boolean; embeddingProvider?: string; embeddingModel?: string; embeddingDimensions?: number }>
   ) {}
+
+  get size(): number {
+    return this.vectors.size;
+  }
 
   async search(query: VectorQuery): Promise<VectorMatch[]> {
     const limit = query.limit ?? 5;

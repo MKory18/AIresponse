@@ -424,9 +424,12 @@ describe("Phase 4 — queue integration & cost logging", () => {
   it("inbound message enqueues AI job and the worker responds", async () => {
     // seedWorld's inbound enqueued a process_ai_message job
     const jobs = db._stores.backgroundJob as any[];
-    expect(jobs.some((j) => j.type === "process_ai_message")).toBe(true);
+    expect(jobs.filter((j) => j.type === "process_ai_message")).toHaveLength(1);
+    // P13 — الوارد بيصفّ كذلك مهمة استخراج بيانات العميل المستقلة (بلا إرسال).
+    expect(jobs.filter((j) => j.type === "extract_customer_intel")).toHaveLength(1);
     const result = await runJobs(db as Db);
-    expect(result.processed).toBe(1);
+    // المهمتان تُعالجان بنفس الدورة (رد + استخراج) — ولا رد مكرر.
+    expect(result.processed).toBe(2);
     const aiMsgs = (db._stores.message as any[]).filter((m) => m.senderType === "AI");
     expect(aiMsgs).toHaveLength(1);
   });

@@ -162,19 +162,19 @@ export function MultiChannelSection() {
                   >
                     {meta.fields === "ig" && (
                       <>
-                        <Field label="Instagram ID"><Input name="igId" required dir="ltr" placeholder="123456789" /></Field>
-                        <Field label="Page Access Token"><PasswordInput kind="secret" name="token" required dir="ltr" placeholder="EAA…" /></Field>
+                        <Field label="معرّف حساب إنستغرام (Instagram ID)"><Input name="igId" required dir="ltr" placeholder="123456789" /></Field>
+                        <Field label="توكن الصفحة (Page Access Token)"><PasswordInput kind="secret" name="token" required dir="ltr" placeholder="EAA…" /></Field>
                       </>
                     )}
                     {meta.fields === "bot" && (
-                      <Field label="Bot Token (من BotFather)">
+                      <Field label="توكن البوت (Bot Token من BotFather)">
                         <PasswordInput kind="secret" name="botToken" required dir="ltr" placeholder="123456:ABC-DEF…" />
                       </Field>
                     )}
                     {meta.fields === "wa" && (
                       <>
-                        <Field label="Phone Number ID"><Input name="phoneNumberId" required dir="ltr" placeholder="123456789012345" /></Field>
-                        <Field label="System User Token"><PasswordInput kind="secret" name="token" required dir="ltr" placeholder="EAA…" /></Field>
+                        <Field label="معرّف رقم واتساب (Phone Number ID)"><Input name="phoneNumberId" required dir="ltr" placeholder="123456789012345" /></Field>
+                        <Field label="توكن مستخدم النظام (System User Token)"><PasswordInput kind="secret" name="token" required dir="ltr" placeholder="EAA…" /></Field>
                       </>
                     )}
                     <div className="flex items-end">

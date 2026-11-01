@@ -81,7 +81,15 @@ export default function AIPlaygroundPage() {
       fetch("/api/products?limit=100"),
       fetch("/api/ai/playground/sessions"),
     ]);
-    if (pRes.ok) setPersonas((await pRes.json()).items ?? []);
+    if (pRes.ok) {
+      const list: PersonaOption[] = (await pRes.json()).items ?? [];
+      setPersonas(list);
+      // جاي من «جرّبها» بصفحة الشخصيات (`?persona=`) — بنختارها جاهزة.
+      try {
+        const fromUrl = new URLSearchParams(window.location.search).get("persona");
+        if (fromUrl && list.some((p) => p.id === fromUrl)) setPersonaId(fromUrl);
+      } catch { /* ignore */ }
+    }
     if (cRes.ok) setChannels((await cRes.json()).connections ?? []);
     if (prRes.ok) setProducts((await prRes.json()).items ?? []);
     if (sRes.ok) setSessions((await sRes.json()).items ?? []);

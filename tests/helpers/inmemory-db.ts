@@ -229,6 +229,11 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         campaign: (r, w) => w.externalIdempotencyKey != null && r.workspaceId === w.workspaceId && r.externalIdempotencyKey === w.externalIdempotencyKey,
         // Page catalogs — mirrors the real @@unique constraints.
         catalog: (r, w) => r.workspaceId === w.workspaceId && r.name === w.name,
+        // Orders mirror the real unique keys: idempotencyKey (@unique,
+        // nullable) and orderNumber (@unique).
+        order: (r, w) =>
+          (w.idempotencyKey != null && r.idempotencyKey === w.idempotencyKey) ||
+          (w.orderNumber != null && r.orderNumber === w.orderNumber),
       };
       const uniq = uniqMap[name];
       if (uniq) {
@@ -838,6 +843,29 @@ export function createFakeDb() {
       });
     }
     return result;
+  };
+
+  // P15 — معاملة تفاعلية مثل Prisma: لقطة من كل المخازن، واسترجاعها عند أي
+  // خطأ. تُستخدم لاختبار «فشل التدقيق يلغي تحديث العميل». المعاملة لا تُعرّض
+  // $transaction نفسها (مثل عميل Prisma داخل معاملة) حتى لا تتشعّب المعاملات.
+  (db as any).$transaction = async (fn: (tx: typeof db) => Promise<unknown>) => {
+    const snapshot = Object.entries(db._stores).map(
+      ([key, store]) => [key, (store as Row[]).map((row) => ({ ...row }))] as const
+    );
+    const saved = (db as any).$transaction;
+    delete (db as any).$transaction;
+    try {
+      return await fn(db);
+    } catch (err) {
+      for (const [key, rows] of snapshot) {
+        const store = (db._stores as Record<string, Row[]>)[key];
+        store.length = 0;
+        store.push(...rows);
+      }
+      throw err;
+    } finally {
+      (db as any).$transaction = saved;
+    }
   };
 
   allStores = db._stores;

@@ -145,6 +145,8 @@ export async function runResponse(
       customer: {
         name: (customer as { name?: string | null }).name ?? null,
         page: channelRow?.displayName ?? null,
+        city: (customer as { city?: string | null }).city ?? null,
+        province: (customer as { province?: string | null }).province ?? null,
       },
     }),
   ].join("\n\n");
@@ -287,6 +289,8 @@ export async function runResponse(
       success: false,
       status: "AI_FAILED",
       error: categorized,
+      // P14 — فشل التوليد يُقاس بالمراحل المنجزة حتى لحظة الفشل.
+      stageTimings: { ...fx.stageMs, total: Date.now() - pipelineStarted },
     });
     if (!params.dryRun) {
       // State machine: alert only — the thread stays AI_ACTIVE so the next
@@ -353,6 +357,8 @@ export async function runResponse(
       success: false,
       status: "AI_FAILED",
       error: `${sent.deliveryStatus === "QUEUED" ? "TRANSIENT" : "PERMANENT"}: Outbound delivery ${sent.deliveryStatus}`,
+      // P14 — حتى الفشل يُقاس: نفس تفصيل المراحل كي لا تُخفى الطلبات الفاشلة.
+      stageTimings: { ...fx.stageMs, send: sendMs, total: Date.now() - pipelineStarted },
     });
     logTimings("AI_FAILED", { reason: `Outbound delivery ${sent.deliveryStatus}` });
     return {
@@ -404,6 +410,8 @@ export async function runResponse(
       completionTokens: responseTokens.completionTokens,
       latencyMs: responseTokens.latencyMs,
       success: true,
+      // P13 — تفصيل المراحل (مفاتيح + أرقام فقط) لحساب P50/P95 لاحقًا.
+      stageTimings: { ...fx.stageMs, send: sendMs, total: Date.now() - pipelineStarted },
     })
   );
 

@@ -227,6 +227,9 @@ model Customer {
   email             String?
   address           String?
   province          String?
+  // P13 — المدينة كما ذكرها العميل (منفصلة عن المحافظة التي تحكم التوصيل).
+  // إضافي وقابل للفراغ: صفوف قديمة = null. تُملأ من الاستخراج/التأكيد فقط.
+  city              String?
   channelCustomerId String?
   avatarUrl         String?
   language          String?
@@ -428,6 +431,10 @@ model Message {
   isNote                 Boolean          @default(false)
   // Outbound idempotency: one Facebook send per AI execution (unique).
   outboundIdempotencyKey String?          @unique
+  // Phase 3 — real reply latency: when our outbound went out and how long the
+  // customer waited from their inbound. Additive + nullable (old rows = null).
+  respondedAt            DateTime?
+  replyLatencyMs         Int?
   createdAt              DateTime         @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -435,6 +442,7 @@ model Message {
   @@unique([conversationId, externalEventId])
   @@unique([conversationId, externalMessageId])
   @@index([workspaceId, conversationId, createdAt])
+  @@index([workspaceId, respondedAt])
 }
 
 // ─────────────────────────── Products ───────────────────────────
@@ -783,6 +791,21 @@ model BackgroundJob {
   @@index([idempotencyKey])
 }
 
+// المرحلة ٣ (تشغيلي) — نبضة العامل: صف لكل عامل يثبت أن الحلقة حيّة وتفرّغ
+// العمل. غياب نبضة حديثة = العامل متوقف (فحص الصحة /health ينبّه).
+model WorkerHeartbeat {
+  id          String   @id @default(cuid())
+  workerId    String   @unique
+  lastCycleAt DateTime
+  cycles      Int      @default(0)
+  processed   Int      @default(0)
+  failed      Int      @default(0)
+  startedAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([lastCycleAt])
+}
+
 /// أحدث لقطة مستخرجة من محادثة في وضع التجميع.
 /// `data` = القيم، `fieldMeta` = حالة كل حقل + مصادره + التعارضات.
 enum IntelStatus {
@@ -1103,6 +1126,7 @@ model Order {
 
   @@unique([workspaceId, orderNumber])
   @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
   @@index([workspaceId, customerId, createdAt])
   @@index([workspaceId, omsOrderNumber])
   @@index([workspaceId, refCode])
@@ -1529,6 +1553,10 @@ model AIUsageLog {
   // P6 fix (F-004): NULL when no pricing is configured — never fake $0.
   costUsd          Float?
   latencyMs        Int      @default(0)
+  // P13 — تفصيل زمن كل مرحلة بالميلي ثانية (مفاتيح مراحل فقط: messageLoad ·
+  // gating · ordering · config · extraction · context · responseGen …). إضافي
+  // وقابل للفراغ: يُكتب فقط على سجل الرد النهائي، وصفوفه القديمة NULL.
+  stageTimings     Json?
   success          Boolean  @default(true)
   status           String   @default("SUCCESS")
   error            String?

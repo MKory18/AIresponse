@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { MessageCircle, Package, Plus, Star } from "lucide-react";
-import { t, formatNumber } from "@/lib/i18n";
+import { t, formatNumber, label } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -144,7 +144,7 @@ export default function FeedbackPage() {
         <Select value={filterSentiment} onChange={(e) => setFilterSentiment(e.target.value)} aria-label="المشاعر" className="w-36">
           <option value="">كل المشاعر</option>
           {["positive", "negative", "neutral"].map((s) => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>{label(s)}</option>
           ))}
         </Select>
         <Select value={approvedFilter} onChange={(e) => setApprovedFilter(e.target.value)} aria-label="الاعتماد" className="w-36">
@@ -180,7 +180,7 @@ export default function FeedbackPage() {
                   </Badge>
                   {f.sentiment && (
                     <Badge tone={f.sentiment === "positive" ? "DELIVERED" : f.sentiment === "negative" ? "FAILED" : "NORMAL"}>
-                      {f.sentiment}
+                      {label(f.sentiment)}
                     </Badge>
                   )}
                   {f.rating != null && (

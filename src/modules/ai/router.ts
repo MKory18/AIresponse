@@ -147,6 +147,8 @@ export interface UsageRecord {
   success: boolean;
   status?: string;
   error?: string | null;
+  /** P13 — تفصيل زمن مراحل خط الأنابيب (مفاتيح مراحل فقط، بلا محتوى). */
+  stageTimings?: Record<string, number> | null;
 }
 
 /** Persists an AI usage/execution log row. Never throws. */
@@ -174,6 +176,7 @@ export async function logUsage(db: any, rec: UsageRecord): Promise<void> {
         success: rec.success,
         status: rec.status ?? (rec.success ? "SUCCESS" : "FAILED"),
         error: rec.error ?? null,
+        ...(rec.stageTimings ? { stageTimings: rec.stageTimings } : {}),
       },
     });
   } catch {

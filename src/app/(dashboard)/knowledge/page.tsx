@@ -296,7 +296,7 @@ export default function KnowledgePage() {
           <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="التصنيف" className="w-40">
             <option value="">كل التصنيفات</option>
             {CATEGORIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
+              <option key={c} value={c}>{label(c)}</option>
             ))}
           </Select>
         </div>
@@ -335,7 +335,16 @@ export default function KnowledgePage() {
           ))}
         </div>
         {!loading && docs.length === 0 && (
-          <EmptyState icon={<BookOpen size={26} strokeWidth={1.5} />} title={t.knowledge.emptyTitle} description={t.knowledge.emptyDesc} />
+          <EmptyState
+            icon={<BookOpen size={26} strokeWidth={1.5} />}
+            title={t.knowledge.emptyTitle}
+            description={t.knowledge.emptyDesc}
+            action={
+              <Button size="sm" variant="secondary" onClick={() => document.getElementById("faqs")?.scrollIntoView({ behavior: "smooth" })}>
+                أسرع بداية: سؤال شائع
+              </Button>
+            }
+          />
         )}
       </GlassCard>
 
@@ -388,7 +397,7 @@ export default function KnowledgePage() {
       </GlassCard>
 
       {/* FAQs */}
-      <GlassCard className="space-y-3 p-4 sm:p-5">
+      <GlassCard id="faqs" className="space-y-3 p-4 sm:p-5">
         <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300">
             <MessageCircleQuestion size={15} />
@@ -407,7 +416,7 @@ export default function KnowledgePage() {
               <div className="min-w-0">
                 <p className="text-sm font-bold text-ink">{f.question}</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{f.answer}</p>
-                {f.category && <Badge className="mt-1.5">{f.category}</Badge>}
+                {f.category && <Badge className="mt-1.5">{label(f.category)}</Badge>}
               </div>
               <button onClick={() => toggleFaq(f)} className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset transition ${f.isActive ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300" : "bg-slate-500/10 text-slate-500 ring-slate-500/20"}`}>
                 {f.isActive ? "نشط" : "معطل"}
@@ -426,7 +435,7 @@ export default function KnowledgePage() {
           <Field label="التصنيف">
             <Select value={editForm.category} onChange={(e) => setEditForm((s) => ({ ...s, category: e.target.value }))}>
               {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c} value={c}>{label(c)}</option>
               ))}
             </Select>
           </Field>

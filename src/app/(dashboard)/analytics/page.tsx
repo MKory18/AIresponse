@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Bot, Download, Gauge, Megaphone, MessagesSquare, RefreshCw, Receipt, TrendingUp, Users, Workflow } from "lucide-react";
+import { Bot, Download, Gauge, Megaphone, MessagesSquare, Package, RefreshCw, Receipt, TrendingUp, Trophy, Users, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { formatNumber } from "@/lib/i18n";
+import { TIMEZONE_OPTIONS } from "@/lib/timezones";
 
 /**
  * P10 — مركز التحليلات الموحد: تبويبات فوق طبقة API القائمة (نفس الخادم،
@@ -19,6 +20,11 @@ import { formatNumber } from "@/lib/i18n";
  * - المقارنة بين فترتين: نفس النافذة مزاحة للخلف — لا مقارنة إذا اختلفت
  *   مدة الفترتين (لا نمو وهمي).
  * - التصدير CSV عبر /api/analytics/export (نفس الفلاتر — أرقام متطابقة).
+ *
+ * ⚠️ كانت التقارير ٣ صفحات: هاي + «تحليلات الذكاء» + «تحليلات المنتجات» —
+ * والتانيات نفس تبويبات هون بفترة ثابتة (٣٠ يوم) وبلا تصدير.
+ * 🔧 صفحة وحدة: تبويب «المنتجات» (الجدول القابل للترتيب) انضاف هون، والروابط
+ * القديمة بتحوّل لـ`?tab=ai` و`?tab=products`. التبويب بيضل بالرابط (تحديث = نفس المكان).
  */
 
 type Json = Record<string, unknown>;
@@ -40,6 +46,7 @@ const TABS: [string, string, React.ReactNode][] = [
   ["exec", "نظرة عامة", <Gauge key="a" size={15} />],
   ["conversations", "المحادثات", <MessagesSquare key="b" size={15} />],
   ["sales", "المبيعات", <Receipt key="c" size={15} />],
+  ["products", "المنتجات", <Package key="p" size={15} />],
   ["agents", "الموظفون", <Users key="d" size={15} />],
   ["ai", "الذكاء", <Bot key="e" size={15} />],
   ["campaigns", "الحملات", <Megaphone key="f" size={15} />],
@@ -90,6 +97,78 @@ function Buckets({ title, entries }: { title: string; entries: Array<{ key: stri
   );
 }
 
+type ProductRow = {
+  productId: string;
+  productName: string;
+  units: number;
+  confirmedOrders: number;
+  deliveredOrders: number;
+  confirmedRevenue: number;
+  deliveredRevenue: number;
+};
+type ProductSort = "units" | "confirmedRevenue" | "confirmedOrders";
+
+/** أداء كل منتج — كانت صفحة «تحليلات المنتجات» لحالها. الأسعار من لقطة الطلب وقت البيع. */
+function ProductsTable({ rows }: { rows: ProductRow[] }) {
+  const [sort, setSort] = useState<ProductSort>("units");
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<Package size={28} strokeWidth={1.5} />}
+        title="لا بيانات منتجات بهالفترة"
+        description="أداء كل منتج بيظهر هون بعد أول طلب مؤكد."
+        action={<EmptyNext href="/orders">شوف الطلبات</EmptyNext>}
+      />
+    );
+  }
+  const sorted = [...rows].sort((a, b) => b[sort] - a[sort]);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-ink-muted">الأسعار من الطلب وقت البيع، مش سعر المنتج الحالي.</p>
+        <Select value={sort} onChange={(e) => setSort(e.target.value as ProductSort)} aria-label="ترتيب" className="w-56">
+          <option value="units">ترتيب حسب: الكميات</option>
+          <option value="confirmedRevenue">ترتيب حسب: الإيرادات المؤكدة</option>
+          <option value="confirmedOrders">ترتيب حسب: الطلبات المؤكدة</option>
+        </Select>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>المنتج</th>
+              <th>الكميات</th>
+              <th>طلبات مؤكدة</th>
+              <th>إيرادات مؤكدة</th>
+              <th>طلبات مُسلّمة</th>
+              <th>إيرادات مُسلّمة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r, i) => (
+              <tr key={r.productId}>
+                <td>
+                  <Link href={`/products/${r.productId}`} className="flex items-center gap-2 font-bold hover:text-primary">
+                    {i === 0 && <Trophy size={14} className="shrink-0 text-amber-500" />}
+                    {r.productName}
+                  </Link>
+                </td>
+                <td className="num font-bold">{formatNumber(r.units)}</td>
+                <td className="num">{formatNumber(r.confirmedOrders)}</td>
+                <td className="num">{formatNumber(r.confirmedRevenue)}</td>
+                <td className="num">{formatNumber(r.deliveredOrders)}</td>
+                <td className="num">{formatNumber(r.deliveredRevenue)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const TAB_IDS = new Set(TABS.map(([id]) => id));
+
 /** مقارنة فترتين: نافذة مخصصة بنفس الطول مزاحة للخلف (لا مقارنة بطول مختلف). */
 function prevRangeParams(range: string, timezone: string): Record<string, string> | null {
   if (range === "today" || range === "yesterday") return { range: "yesterday", timezone };
@@ -100,22 +179,33 @@ function prevRangeParams(range: string, timezone: string): Record<string, string
   return { range: "custom", from: from.toISOString(), to: to.toISOString(), timezone };
 }
 
+/**
+ * نوع ملف التصدير لكل تبويب. ⚠️ كان «الأتمتة» بيصدّر محادثات و«الاتجاهات» طلبات —
+ * ملف غير الي على الشاشة. 🔧 التبويب الي ما إله تصدير مطابق ما بيظهر فيه الزر.
+ */
+const EXPORT_TYPE: Record<string, string> = {
+  exec: "sales", conversations: "conversations", sales: "orders", products: "products",
+  agents: "agents", ai: "ai", campaigns: "campaigns",
+};
+
 export default function AnalyticsPage() {
-  const [tab, setTab] = useState("exec");
+  const [tab, setTabState] = useState("exec");
+  // التبويب من الرابط (`?tab=ai`) قبل أول تحميل — الروابط القديمة بتحوّل لهون.
+  const [tabReady, setTabReady] = useState(false);
   const [range, setRange] = useState("last_7_days");
   const [timezone, setTimezone] = useState("UTC");
   const [compare, setCompare] = useState(false);
   const [data, setData] = useState<Record<string, Json | null> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [forbidden, setForbidden] = useState(false);
   const [exporting, setExporting] = useState(false);
   const toast = useToast();
 
   const endpoints: Record<string, string[]> = useMemo(() => ({
     exec: ["overview", "funnel", "sales"],
     conversations: ["conversations", "handoffs"],
-    sales: ["orders", "products", "sales"],
+    sales: ["orders", "sales"],
+    products: ["products"],
     agents: ["agents"],
     ai: ["ai"],
     campaigns: ["campaigns"],
@@ -123,10 +213,27 @@ export default function AnalyticsPage() {
     trends: ["trends"],
   }), []);
 
+  useEffect(() => {
+    try {
+      const fromUrl = new URLSearchParams(window.location.search).get("tab");
+      if (fromUrl && TAB_IDS.has(fromUrl)) setTabState(fromUrl);
+    } catch { /* ignore */ }
+    setTabReady(true);
+  }, []);
+
+  function setTab(id: string) {
+    setTabState(id);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", id);
+      window.history.replaceState(null, "", url.toString());
+    } catch { /* ignore */ }
+  }
+
   const load = useCallback(async () => {
+    if (!tabReady) return;
     setLoading(true);
     setError(null);
-    setForbidden(false);
     try {
       const params = new URLSearchParams({ range, timezone });
       const results: Record<string, Json | null> = {};
@@ -148,18 +255,14 @@ export default function AnalyticsPage() {
       setError("تعذّر تحميل التحليلات، حاول مجددًا.");
       setData(null);
     } finally {
-      setForbidden(false);
       setLoading(false);
     }
-  }, [tab, range, timezone, compare, endpoints]);
+  }, [tab, tabReady, range, timezone, compare, endpoints]);
 
   useEffect(() => { load(); }, [load]);
 
   const exportCsv = async () => {
-    const exportType: Record<string, string> = {
-      exec: "orders", conversations: "conversations", sales: "orders", agents: "agents",
-      ai: "ai", campaigns: "campaigns", automation: "conversations", trends: "orders",
-    };
+    const exportType = EXPORT_TYPE;
     setExporting(true);
     try {
       const params = new URLSearchParams({ type: exportType[tab] ?? "orders", range, timezone });
@@ -193,7 +296,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="page-wrap">
-      <PageHeader title="التحليلات" description="تقارير فعلية من قاعدة البيانات — بلا أرقام وهمية، والغياب يُعرض بوضوح." />
+      <PageHeader title="التقارير" description="أرقامك الفعلية حسب الفترة — والي ما انسجّل بيبيّن «غير متاح» مش صفر." />
 
       {/* الفلاتر */}
       <GlassCard className="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -201,7 +304,7 @@ export default function AnalyticsPage() {
           {RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </Select>
         <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="المنطقة الزمنية" className="w-auto">
-          {["UTC", "Asia/Damascus", "Asia/Riyadh", "Asia/Dubai", "Africa/Cairo"].map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+          {TIMEZONE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </Select>
         {tab === "exec" && (
           <label className="flex items-center gap-1.5 text-xs text-ink-muted">
@@ -213,9 +316,11 @@ export default function AnalyticsPage() {
         <Button size="sm" variant="secondary" onClick={load} disabled={loading}>
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> تحديث
         </Button>
-        <Button size="sm" onClick={exportCsv} disabled={exporting || loading}>
-          <Download size={14} /> تصدير CSV
-        </Button>
+        {EXPORT_TYPE[tab] && (
+          <Button size="sm" onClick={exportCsv} disabled={exporting || loading}>
+            <Download size={14} /> تصدير Excel (CSV)
+          </Button>
+        )}
       </GlassCard>
 
       {/* التبويبات */}
@@ -256,7 +361,7 @@ export default function AnalyticsPage() {
                   { k: "orders", label: "طلبات مؤكدة", sec: o.orders, f: "confirmed" },
                   { k: "revenue", label: "قيمة مؤكدة", sec: o.revenue, f: "confirmed" },
                   { k: "messages", label: "رسائل واردة", sec: o.messages, f: "inbound" },
-                  { k: "ai", label: "استدعاءات AI", sec: o.ai, f: "calls" },
+                  { k: "ai", label: "ردود الذكاء", sec: o.ai, f: "calls" },
                   { k: "handoffs", label: "تحويلات للموظف", sec: o.handoffs, f: "total" },
                   { k: "automation", label: "تنفيذات أتمتة", sec: o.automation, f: "executions" },
                 ] as const).map(({ k, label, sec, f }) => {
@@ -278,7 +383,7 @@ export default function AnalyticsPage() {
               </div>
               {/* قيمة القسم: لا تكلفة معروفة ≠ صفر */}
               {o.ai && o.ai.estimatedCost === null && (
-                <p className="text-xs text-ink-muted">تكلفة AI: غير متاحة (لا تسعير معروف في الفترة — لا تُعرض كصفر).</p>
+                <p className="text-xs text-ink-muted">تكلفة الذكاء: غير متاحة لهالفترة (ما في سعر معروف للنموذج).</p>
               )}
               {data?.funnel && (
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
@@ -292,7 +397,7 @@ export default function AnalyticsPage() {
                 </div>
               )}
               <p className="text-xs text-ink-muted">
-                القمع: مسودة طلب ≠ بيع — المؤكد فقط يُحسب مبيعًا مؤكدًا، والمسلَّم بعد القبول الفعلي.
+                المسودة مش بيع: البيع بينحسب لما يتأكد الطلب، والمسلَّم لما يستلمه الزبون فعلًا.
               </p>
             </GlassCard>
           )}
@@ -316,7 +421,7 @@ export default function AnalyticsPage() {
                 </>
               ) : null}
               {data?.handoffs && (
-                <Buckets title="تحويلات الموظفين حسب السبب (تحويل ≠ فشل AI تلقائيًا)" entries={(data.handoffs as Json).byReason as Json} />
+                <Buckets title="التحويلات للموظف حسب السبب" entries={(data.handoffs as Json).byReason as Json} />
               )}
             </GlassCard>
           )}
@@ -335,13 +440,13 @@ export default function AnalyticsPage() {
                     <KV k="متوسط قيمة الطلب المؤكد" v={Number(jget(data.orders, "confirmed") ?? 0) > 0 ? Number(jget(data.orders, "gmv", "confirmedGmv") ?? 0) / Number(jget(data.orders, "confirmed")) : null} />
                   </div>
                   <p className="text-xs text-ink-muted">
-                    مسودة الطلب (OrderDraft) لا تُحسب بيعًا؛ الطلب المؤكد ≠ تسليم ≠ تحصيل.
+                    المسودة مش بيع · المؤكد مش مُسلَّم · والمُسلَّم مش محصَّل — كل رقم لحاله.
                   </p>
                 </>
               ) : null}
               {data?.sales && (
                 <>
-                  <Buckets title="بيع إضافي/مكمل (أحداث فعلية: OFFER_SHOWN ≠ OFFER_ACCEPTED)" entries={{
+                  <Buckets title="العروض والمنتجات المكمّلة" entries={{
                     "عروض مؤهلة": (data.sales as Json).offersQualified,
                     "عروض ظهرت": (data.sales as Json).offersShown,
                     "مكمل ظهر": (data.sales as Json).crossSellShown,
@@ -349,7 +454,7 @@ export default function AnalyticsPage() {
                   } as Json} />
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <KV
-                      k="معدل قبول العروض (OFFER_ACCEPTED / OFFER_SHOWN)"
+                      k="نسبة قبول العروض (من الي ظهرت)"
                       v={
                         jget(data.sales, "offerAcceptRate") === undefined ||
                         jget(data.sales, "offerAcceptRate") === null
@@ -358,14 +463,21 @@ export default function AnalyticsPage() {
                       }
                     />
                     {jget(data.sales, "offerAcceptRate") === null && (
-                      <p className="self-center text-[11px] text-ink-muted">null = لم يظهر أي عرض في الفترة — لا قسمة على صفر.</p>
+                      <p className="self-center text-[11px] text-ink-muted">ما ظهر ولا عرض بهالفترة.</p>
                     )}
                   </div>
                 </>
               )}
-               {data?.products && Array.isArray(data.products) && (data.products as unknown as Array<Json>).length > 0 && (
-                 <Buckets title="توزيع الطلبات حسب المنتج (أسعار snapshot)" entries={Object.fromEntries((data.products as unknown as Array<Json>).map((p) => [String(p.productName), p.confirmedOrders]))} />
-              )}
+              <button type="button" onClick={() => setTab("products")} className="text-xs font-bold text-primary hover:underline">
+                أداء كل منتج ←
+              </button>
+            </GlassCard>
+          )}
+
+          {/* المنتجات */}
+          {tab === "products" && (
+            <GlassCard className="p-4">
+              <ProductsTable rows={Array.isArray(data?.products) ? (data!.products as unknown as ProductRow[]) : []} />
             </GlassCard>
           )}
 
@@ -373,7 +485,7 @@ export default function AnalyticsPage() {
           {tab === "agents" && (
             <GlassCard className="space-y-3 p-4">
               {data?.agents === null ? (
-                <EmptyState title="غير مصرح" description="تقارير أداء الموظفين حساسة — تتطلب صلاحية analytics.agents (المدير فما فوق)." />
+                <EmptyState title="مش متاحة لدورك" description="أداء الموظفين بيشوفه المدير والمالك بس." />
               ) : data?.agents ? (
                 <>
                   <div className="space-y-2">
@@ -394,7 +506,7 @@ export default function AnalyticsPage() {
                     )}
                   </div>
                   <p className="text-xs text-ink-muted">{String(jget(data.agents, "attribution", "notes") ?? "")}</p>
-                  <p className="text-xs text-ink-muted">مقاييس العروض لكل موظف: غير متاحة — أحداث البيع لا تحمل هوية فاعل (بلا تخمين).</p>
+                  <p className="text-xs text-ink-muted">العروض لكل موظف: غير متاحة — النظام ما بيسجّل مين عرضها (وما منخمّن).</p>
                 </>
               ) : null}
             </GlassCard>
@@ -407,9 +519,9 @@ export default function AnalyticsPage() {
                 <KV k="استدعاءات" v={(data.ai as Json).calls} />
                 <KV k="ناجحة" v={(data.ai as Json).successful} />
                 <KV k="فاشلة" v={(data.ai as Json).failed} />
-                <KV k="متوسط الاستجابة (ms)" v={(data.ai as Json).avgLatencyMs} />
-                <KV k="Input tokens" v={(data.ai as Json).inputTokens} />
-                <KV k="Output tokens" v={(data.ai as Json).outputTokens} />
+                <KV k="متوسط سرعة الرد (ملّي ثانية)" v={(data.ai as Json).avgLatencyMs} />
+                <KV k="توكنز داخلة" v={(data.ai as Json).inputTokens} />
+                <KV k="توكنز طالعة" v={(data.ai as Json).outputTokens} />
                 <div className="glass-subtle flex items-center justify-between rounded-xl px-3.5 py-2.5">
                   <span className="text-xs text-ink-muted">التكلفة (معروفة فقط)</span>
                   <span className="text-sm font-bold text-ink"><Cell value={(data.ai as Json).estimatedCost} /></span>
@@ -417,7 +529,7 @@ export default function AnalyticsPage() {
               </div>
               <Buckets title="حسب المهمة" entries={(data.ai as Json).byTask as Json} />
               <Buckets title="حسب النموذج" entries={(data.ai as Json).byModel as Json} />
-              <p className="text-xs text-ink-muted">التكلفة: null = لا تسعير معروف — لا تُجبر على صفر ولا يُبنى إجمالي دقيق من قيم مجهولة.</p>
+              <p className="text-xs text-ink-muted">التكلفة بتنحسب بس للنماذج الي سعرها معروف — الباقي «غير متاح» مش صفر.</p>
             </GlassCard>
           )}
 
@@ -425,16 +537,16 @@ export default function AnalyticsPage() {
           {tab === "campaigns" && data?.campaigns && (
             <GlassCard className="space-y-3 p-4">
               <Buckets title="حالة الحملات (الكل)" entries={jget(data.campaigns, "campaigns", "statusDistribution")} />
-              <Buckets title="المستلمون حسب الحالة (لقطة ≠ مرسل)" entries={jget(data.campaigns, "audience", "byStatus")} />
+              <Buckets title="المستلمون حسب الحالة" entries={jget(data.campaigns, "audience", "byStatus")} />
               <Buckets title="أسباب الاستبعاد" entries={jget(data.campaigns, "audience", "byExcludeReason")} />
               <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                <KV k="مستلمون فريدون (لقطة)" v={jget(data.campaigns, "audience", "uniqueRecipients")} />
-                <KV k="قبول API (مُرسل)" v={jget(data.campaigns, "sending", "apiAccepted")} />
+                <KV k="مستلمون (بدون تكرار)" v={jget(data.campaigns, "audience", "uniqueRecipients")} />
+                <KV k="انبعتت للمنصّة" v={jget(data.campaigns, "sending", "apiAccepted")} />
                 <KV k="تسليم مؤكد من المزود" v={jget(data.campaigns, "sending", "deliveryConfirmed")} />
               </div>
               <p className="text-xs text-ink-muted">
-                قبول API ≠ تسليم ≠ قراءة: تأكيد التسليم يتطلب webhooks الحالة من المزود (غير معالجة حاليًا — UNVERIFIED).
-                الطلبات المنسوبة للحملة و ROAS: غير متاحة (لا إسناد موثوق ولا تكلفة إعلان موثوقة).
+                «انبعتت» مش يعني «وصلت» ولا «انقرت» — تأكيد الوصول من المنصّة لسا مش مربوط.
+                الطلبات الجاية من الحملة والعائد على الإعلان: غير متاحين (ما في ربط موثوق بتكلفة الإعلان).
               </p>
             </GlassCard>
           )}
@@ -444,7 +556,7 @@ export default function AnalyticsPage() {
             <GlassCard className="space-y-3 p-4">
               {data?.automations && (
                 <div className="space-y-2">
-                  <p className="text-xs font-bold text-ink">تنفيذات سير العمل (النتائج الفعلية — إنشاء مهمة ≠ اكتمال)</p>
+                  <p className="text-xs font-bold text-ink">تنفيذ القواعد (الي خلص فعلًا، مش الي انجدول بس)</p>
                   {((data.automations as unknown as Array<Json>) ?? []).map((a) => (
                     <div key={String(a.automationId)} className="glass-subtle grid grid-cols-2 gap-2 rounded-xl px-3.5 py-2.5 md:grid-cols-5">
                       <span className="col-span-2 truncate text-xs font-bold text-ink">{String(a.name)}</span>
@@ -475,19 +587,19 @@ export default function AnalyticsPage() {
                   return (
                     <EmptyState
                       title="بيانات الاتجاهات غير مبنية بعد"
-                      description={`أيام مفقودة: ${String(jget(t.coverage, "missing") ?? "?")} — سُجلت مهمة تجميع (idempotent) وستمتلئ بعد تشغيل العامل.`}
+                      description={`في ${String(jget(t.coverage, "missing") ?? "?")} يوم لسا ما انحسبوا — النظام بيحسبهم لحاله بالخلفية، ارجع بعد شوي.`}
                     />
                   );
                 }
                 const max = Math.max(...ok.map((r) => Number(r.conversations ?? 0)), 1);
                 return (
                   <>
-                    <Buckets title="محادثات/يوم (أيام مجمعة UTC — بمنطقة المؤسسة للفترة)" entries={Object.fromEntries(ok.map((r) => [String(r.date).slice(5), Number(r.conversations ?? 0)]))} />
+                    <Buckets title="محادثات كل يوم" entries={Object.fromEntries(ok.map((r) => [String(r.date).slice(5), Number(r.conversations ?? 0)]))} />
                     <p className="text-xs text-ink-muted">
                       آخر بناء: {String(jget(t.coverage, "lastRebuiltAt") ?? "—")} · أيام مفقودة: {String(jget(t.coverage, "missing") ?? 0)}
-                      {jget(t.coverage, "rebuildEnqueued") ? " — مهمة تجميع مسجلة (ستمتلئ تلقائيًا)" : ""}
+                      {jget(t.coverage, "rebuildEnqueued") ? " — قيد الحساب" : ""}
                     </p>
-                    <p className="text-xs text-ink-muted">أيام MISSING/STALE لا تُعرض كصفر — الفراغ صريح، والحديث قد يكون قديمًا (حد أقصى للتحديث 6 ساعات).</p>
+                    <p className="text-xs text-ink-muted">اليوم الي لسا ما انحسب ما بيظهر صفر. الأرقام بتتحدّث كل ٦ ساعات بالأكتر.</p>
                   </>
                 );
               })()}
@@ -496,11 +608,6 @@ export default function AnalyticsPage() {
         </>
       )}
 
-      <div className="flex flex-wrap gap-2 text-xs text-ink-muted">
-        <Link href="/analytics/ai" className="hover:text-ink">تفاصيل AI ←</Link>
-        <Link href="/analytics/products" className="hover:text-ink">تفاصيل المنتجات ←</Link>
-        <Link href="/dashboard" className="hover:text-ink">لوحة النظرة ←</Link>
-      </div>
     </div>
   );
 }
