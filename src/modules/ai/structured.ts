@@ -28,6 +28,16 @@ export const extractionResultSchema = z.object({
       product: z.string().max(200).nullish(),
       product_variant: z.string().max(200).nullish(),
       quantity: z.number().int().min(1).max(1000).nullish(),
+      // P22 — سلة متعددة المنتجات: كل عنصر اسم + كمية (اختيارية).
+      products: z
+        .array(
+          z.object({
+            name: z.string().trim().min(1).max(200),
+            quantity: z.number().int().min(1).max(1000).nullish(),
+          })
+        )
+        .max(20)
+        .nullish(),
       notes: z.string().max(1000).nullish(),
     })
     .default({}),

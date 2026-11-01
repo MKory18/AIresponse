@@ -92,6 +92,8 @@ export type DraftInfo = {
   missingFields: string[];
   /** P19 — الحقول المطلوبة حسب صفحة المحادثة. */
   requiredFields?: string[];
+  /** P22 — سلة متعددة المنتجات. */
+  items?: { productId?: string | null; productName?: string | null; quantity?: number | null }[];
 };
 
 export const CHANNEL_LABELS: Record<string, string> = {

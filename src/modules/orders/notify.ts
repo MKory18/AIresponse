@@ -23,7 +23,7 @@ export function orderNotificationText(input: OrderNotificationInput): string {
     lines.push(`العميل: ${input.customerName ?? input.customerPhone ?? "-"}`);
   }
   lines.push(
-    `المنتج: ${input.productName} × ${input.quantity}`,
+    `المنتج: ${input.productName}${input.quantity ? ` × ${input.quantity}` : ""}`,
     `المجموع: ${input.total} ${input.currency}`,
     `الحالة: ${input.status}`
   );

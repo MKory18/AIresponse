@@ -6,9 +6,9 @@ import { requireWorkspaceOwner } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
-import { calculatePricing } from "./pricing";
+import { calculatePricing, calculateCartPricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
-import { computeMissingFields, getRequiredOrderFields } from "./draft-service";
+import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 export interface CreateOrderFromDraftResult {
@@ -69,7 +69,28 @@ export async function createOrderFromDraft(
     });
   }
 
-  // Rules engine decides â€” no exceptions, no bypasses.
+  // P22 — سلة: كل عنصر يُتحقق ويُسعّر من قاعدة البيانات (بلا أسعار من الموديل).
+  const draftItems = parseDraftItems(draft);
+  const itemIds = [...new Set(draftItems.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
+  const products = itemIds.length
+    ? await db.product.findMany({
+        where: { id: { in: itemIds }, workspaceId: ctx.workspaceId },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          price: true,
+          currency: true,
+          isActive: true,
+          isArchived: true,
+          stockStatus: true,
+          workspaceId: true,
+        },
+      })
+    : [];
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  // Rules engine decides — no exceptions, no bypasses.
   const rules = await evaluateOrderRules(db, {
     workspaceId: ctx.workspaceId,
     draft: {
@@ -81,6 +102,7 @@ export async function createOrderFromDraft(
       missingFields: missingNow,
       customerId: draft.customerId,
       conversationId: draft.conversationId,
+      items: draftItems.map((i) => ({ productId: i.productId, quantity: i.quantity })),
     },
   });
   const verdict = aggregateVerdict(rules);
@@ -98,19 +120,39 @@ export async function createOrderFromDraft(
     throw new AppError("Order requires human review", 422, "ORDER_REQUIRES_HUMAN");
   }
 
-  const product = await db.product.findUnique({ where: { id: draft.productId! } });
-  if (!product || product.workspaceId !== ctx.workspaceId) throw new NotFoundError("Product");
+  if (draftItems.length === 0) throw new AppError("Missing required fields", 422, "ORDER_MISSING_FIELDS");
+  const orderLines = draftItems.map((item) => {
+    if (!item.productId) throw new AppError("Missing product", 422, "ORDER_MISSING_FIELDS");
+    const product = productById.get(item.productId);
+    if (!product || product.workspaceId !== ctx.workspaceId) throw new NotFoundError("Product");
+    if (!product.isActive || product.isArchived) {
+      throw new AppError(`Product inactive: ${product.name}`, 422, "ORDER_RULES_DENIED");
+    }
+    if (!item.quantity || item.quantity <= 0) {
+      throw new AppError("Missing quantity", 422, "ORDER_MISSING_FIELDS");
+    }
+    return { item, product, quantity: item.quantity };
+  });
+  if (orderLines.length === 0) throw new AppError("Missing required fields", 422, "ORDER_MISSING_FIELDS");
+  if (new Set(orderLines.map((l) => l.product.currency)).size > 1) {
+    throw new AppError("Order items use different currencies", 422, "MIXED_CURRENCY");
+  }
 
-  // Pricing from Product DB â€” AI price input does not exist in this function.
-  const breakdown = await calculatePricing(db, {
+  // Pricing from Product DB — AI price input does not exist in this function.
+  const breakdown = await calculateCartPricing(db, {
     workspaceId: ctx.workspaceId,
-    product: { price: product.price, currency: product.currency },
-    quantity: draft.quantity!,
+    items: orderLines.map((line) => ({
+      price: line.product.price,
+      quantity: line.quantity,
+      currency: line.product.currency,
+    })),
     province: draft.province,
   });
   if (!breakdown.deliveryAvailable) {
     throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
   }
+  // hooks best-effort (sales events) تستخدم العنصر الأول — لا تغيّر الطلب.
+  const primary = orderLines[0];
 
   const idempotencyKey = draft.idempotencyKey ?? `draft:${draft.id}`;
   const existingByIdem = await db.order.findUnique({ where: { idempotencyKey } });
@@ -172,15 +214,15 @@ export async function createOrderFromDraft(
         source: params.source ?? "AI",
         idempotencyKey,
         items: {
-          create: {
-            productId: product.id,
-            variantId: draft.variantId,
-            productNameSnapshot: product.name,
-            skuSnapshot: product.sku,
-            unitPrice: breakdown.unitPrice,
-            quantity: draft.quantity!,
-            subtotal: breakdown.subtotal,
-          },
+          create: orderLines.map((line, idx) => ({
+            productId: line.product.id,
+            variantId: line.item.variantId,
+            productNameSnapshot: line.product.name,
+            skuSnapshot: line.product.sku,
+            unitPrice: breakdown.lines[idx].unitPrice,
+            quantity: line.quantity,
+            subtotal: breakdown.lines[idx].subtotal,
+          })),
         },
       } as Prisma.OrderUncheckedCreateInput,
     })) as Order;
@@ -226,22 +268,22 @@ export async function createOrderFromDraft(
     const shownRows = await (db as unknown as {
       salesEvent: { findMany: (a: unknown) => Promise<Array<Record<string, unknown>>> };
     }).salesEvent.findMany({
-      where: { workspaceId: ctx.workspaceId, conversationId: draft.conversationId, sku: product.sku },
+      where: { workspaceId: ctx.workspaceId, conversationId: draft.conversationId, sku: primary.product.sku },
     }).catch(() => [] as Array<Record<string, unknown>>);
     if (shownRows.some((r) => r.type === "OFFER_SHOWN")) {
       const offerQty = shownRows
         .filter((r) => r.type === "OFFER_SHOWN")
         .map((r) => Number((r.payload as { quantity?: number } | null)?.quantity ?? 0))
         .reduce((a: number, b: number) => Math.max(a, b), 0);
-      if (!offerQty || draft.quantity! >= offerQty) {
+      if (!offerQty || primary.quantity >= offerQty) {
         await recordSalesEvent(db, {
           workspaceId: ctx.workspaceId,
           type: "OFFER_ACCEPTED",
           conversationId: draft.conversationId,
           customerId: draft.customerId,
           orderId: order.id,
-          productId: product.id,
-          sku: product.sku,
+          productId: primary.product.id,
+          sku: primary.product.sku,
           value: breakdown.total,
         });
       }
@@ -253,8 +295,8 @@ export async function createOrderFromDraft(
         conversationId: draft.conversationId,
         customerId: draft.customerId,
         orderId: order.id,
-        productId: product.id,
-        sku: product.sku,
+        productId: primary.product.id,
+        sku: primary.product.sku,
         value: breakdown.total,
       });
     }
@@ -337,8 +379,12 @@ export async function createOrderFromDraft(
       // سيستم 1 — بلا بيانات زبون افتراضيًا؛ المالك يفعّلها صريحًا.
       const text = orderNotificationText({
         orderNumber,
-        productName: product.name,
-        quantity: draft.quantity,
+        // P22 — كل منتجات الطلب في سطر واحد (الكمية مدمجة بالاسم عند التعدد).
+        productName:
+          orderLines.length === 1
+            ? primary.product.name
+            : orderLines.map((l) => `${l.product.name} × ${l.quantity}`).join("، "),
+        quantity: orderLines.length === 1 ? primary.quantity : null,
         total: breakdown.total,
         currency: breakdown.currency,
         status,

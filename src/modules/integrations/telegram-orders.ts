@@ -15,6 +15,8 @@ export interface OrderReadyMessageInput {
   quantity: number | null;
   unitPrice: string | null;
   currency: string | null;
+  /** P22 — عدة منتجات: تُعرض كقائمة بدل سطر واحد. */
+  items?: { name: string; quantity: number | null; unitPrice: string | null }[];
   /** إجمالي تقديري (قبل التوصيل) إن توفر — بلا اختراع. */
   estimatedTotal: string | null;
 }
@@ -40,7 +42,16 @@ export function buildOrderReadyMessage(input: OrderReadyMessageInput): string {
   if (address) lines.push(`📍 العنوان: ${esc(address)}`);
 
   const product = input.productName?.trim();
-  if (product) lines.push(`🛒 المنتج: <b>${esc(product)}</b>${input.quantity ? ` × ${input.quantity}` : ""}`);
+  if (input.items && input.items.length > 0) {
+    lines.push("🛒 المنتجات:");
+    for (const item of input.items) {
+      const qty = item.quantity ? ` × ${item.quantity}` : "";
+      const price = item.unitPrice ? ` — ${esc(item.unitPrice)} ${esc(input.currency ?? "")}`.trimEnd() : "";
+      lines.push(`• <b>${esc(item.name)}</b>${qty}${price}`);
+    }
+  } else if (product) {
+    lines.push(`🛒 المنتج: <b>${esc(product)}</b>${input.quantity ? ` × ${input.quantity}` : ""}`);
+  }
 
   if (input.unitPrice) {
     lines.push(`💵 سعر الوحدة: ${esc(input.unitPrice)} ${esc(input.currency ?? "")}`.trimEnd());

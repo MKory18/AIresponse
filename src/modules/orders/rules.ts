@@ -28,6 +28,8 @@ export async function evaluateOrderRules(
       missingFields: string[];
       customerId: string;
       conversationId: string;
+      /** P22 — سلة: فحص كل عنصر (نشاط/مخزون/كمية)، لا العنصر الأول فقط. */
+      items?: { productId: string | null; quantity: number | null }[];
     };
     maxQuantity?: number;
   }
@@ -45,9 +47,20 @@ export async function evaluateOrderRules(
     });
   }
 
-  // 2. Product exists + active + in stock
-  if (params.draft.productId) {
-    const product = await db.product.findUnique({ where: { id: params.draft.productId } });
+  const items =
+    params.draft.items && params.draft.items.length > 0
+      ? params.draft.items
+      : [{ productId: params.draft.productId, quantity: params.draft.quantity }];
+
+  // 2. Every product exists + active + in stock (multi-item aware).
+  const ids = [...new Set(items.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
+  const products = ids.length
+    ? await db.product.findMany({ where: { id: { in: ids } } })
+    : [];
+  const byId = new Map(products.map((p) => [p.id, p]));
+  for (const item of items) {
+    if (!item.productId) continue; // missing_fields covers it
+    const product = byId.get(item.productId);
     if (!product || product.workspaceId !== params.workspaceId) {
       results.push({ rule: "product_exists", verdict: "DENY", reason: "PRODUCT_NOT_FOUND" });
     } else if (!product.isActive || product.isArchived) {
@@ -57,11 +70,12 @@ export async function evaluateOrderRules(
     }
   }
 
-  // 3. Quantity bounds
-  if (params.draft.quantity) {
-    if (params.draft.quantity <= 0) {
+  // 3. Quantity bounds (per item).
+  for (const item of items) {
+    if (!item.quantity) continue;
+    if (item.quantity <= 0) {
       results.push({ rule: "quantity_bounds", verdict: "DENY", reason: "NON_POSITIVE" });
-    } else if (params.draft.quantity > maxQuantity) {
+    } else if (item.quantity > maxQuantity) {
       results.push({ rule: "quantity_bounds", verdict: "DENY", reason: "EXCEEDS_MAX" });
     }
   }
@@ -76,13 +90,14 @@ export async function evaluateOrderRules(
     }
   }
 
-  // 5. Duplicate detection
+  // 5. Duplicate detection (primary item — same behaviour as the old single draft)
+  const primary = items[0] ?? null;
   const duplicate = await detectDuplicate(db, {
     workspaceId: params.workspaceId,
     customerId: params.draft.customerId,
     conversationId: params.draft.conversationId,
-    productId: params.draft.productId,
-    quantity: params.draft.quantity,
+    productId: primary?.productId ?? params.draft.productId,
+    quantity: primary?.quantity ?? params.draft.quantity,
   });
   if (duplicate === "LIKELY") {
     results.push({ rule: "duplicate_order", verdict: "REQUIRE_HUMAN", reason: "DUPLICATE_LIKELY" });
