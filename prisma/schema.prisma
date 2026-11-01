@@ -70,6 +70,7 @@ model Workspace {
   feedbacks               Feedback[]
   personas                Persona[]
   aiSettings              AISettings?
+  telegramOrderSettings   TelegramOrderSettings?
   orders                  Order[]
   followUps               FollowUp[]
   automations             Automation[]
@@ -152,6 +153,19 @@ enum ChannelStatus {
   ERROR
 }
 
+// P19 — workspace-level Telegram target for READY order drafts.
+// The bot token is encrypted at rest (AES-256-GCM) like other secrets.
+model TelegramOrderSettings {
+  workspaceId String   @id
+  enabled     Boolean  @default(false)
+  botTokenEnc String?
+  chatId      String?
+  topicId     String?
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
 model Channel {
   id          String        @id @default(cuid())
   workspaceId String
@@ -168,6 +182,10 @@ model Channel {
   // AUTO_REPLY = الرد الآلي يعمل وفق السياسات الحالية.
   // COLLECTION_ONLY = جمع وتحليل فقط — يُمنع أي إرسال آلي نهائيًا (حارس بمسار الإرسال).
   sendMode    ChannelSendMode @default(AUTO_REPLY)
+  // P19 — required draft fields to complete an order for THIS page.
+  // product + quantity are always required; this list carries the contact
+  // fields the owner chose (phone/address/name).
+  orderRequiredFields String[] @default(["product", "quantity", "phone", "address"])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

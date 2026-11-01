@@ -167,7 +167,9 @@ function draftMissingLabel(key: string): string {
 
 function OrderDraftCard({ draft }: { draft: DraftInfo }) {
   const complete = draft.missingFields.length === 0;
-  const pct = complete ? 100 : Math.round(((4 - draft.missingFields.length) / 4) * 100);
+  // P19 — العدد الكلي يتبع إعداد الصفحة (قد يزيد الاسم)؛ لا نسبة سالبة.
+  const total = Math.max(draft.requiredFields?.length ?? 4, draft.missingFields.length);
+  const pct = complete ? 100 : Math.max(0, Math.min(100, Math.round(((total - draft.missingFields.length) / total) * 100)));
   return (
     <div className={
       complete

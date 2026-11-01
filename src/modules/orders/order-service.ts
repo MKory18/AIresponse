@@ -8,6 +8,7 @@ import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
 import { calculatePricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
+import { computeMissingFields, getRequiredOrderFields } from "./draft-service";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 export interface CreateOrderFromDraftResult {
@@ -52,6 +53,22 @@ export async function createOrderFromDraft(
     }
   }
 
+  // A closed draft with no order (cancelled) can never create an order.
+  if (draft.state === "CANCELLED" || draft.state === "CONVERTED") {
+    throw new AppError("Draft is closed", 422, "DRAFT_CLOSED");
+  }
+
+  // P19 — أعِد حساب الناقص بحدود صفحة المحادثة لحظة التأكيد: إعداد الصفحة
+  // ممكن يتغيّر بعد ما صارت المسودة READY، والطلب ما بينشأ إذا لسا ناقص.
+  const requiredFields = await getRequiredOrderFields(db, ctx.workspaceId, draft.conversationId);
+  const missingNow = computeMissingFields(draft, requiredFields);
+  if (missingNow.length !== (draft.missingFields as string[]).length) {
+    await db.orderDraft.update({
+      where: { id: draft.id },
+      data: { missingFields: missingNow },
+    });
+  }
+
   // Rules engine decides â€” no exceptions, no bypasses.
   const rules = await evaluateOrderRules(db, {
     workspaceId: ctx.workspaceId,
@@ -61,7 +78,7 @@ export async function createOrderFromDraft(
       phone: draft.phone,
       rawAddress: draft.rawAddress,
       province: draft.province,
-      missingFields: draft.missingFields as string[],
+      missingFields: missingNow,
       customerId: draft.customerId,
       conversationId: draft.conversationId,
     },

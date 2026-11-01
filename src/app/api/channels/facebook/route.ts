@@ -4,6 +4,7 @@ import { getEnv } from "@/core/env";
 import { recordAudit } from "@/modules/audit/service";
 import { NotFoundError } from "@/core/errors";
 import { z } from "zod";
+import { normalizeOrderFields } from "@/modules/orders/required-fields";
 
 /**
  * GET /api/channels/facebook — connection health. SAFE fields only:
@@ -24,6 +25,8 @@ export const GET = createHandler(
         pageId: c.externalId,
         pageName: c.displayName,
         status: c.status,
+        // P19 — الحقول المطلوبة لإكمال الطلب لهذه الصفحة.
+        orderRequiredFields: normalizeOrderFields(c.orderRequiredFields),
         aiPersonaId: (c as { aiPersonaId?: string | null }).aiPersonaId ?? null,
         connectedAt: c.account?.connectedAt ?? null,
         lastWebhookAt: c.account?.lastWebhookAt ?? null,

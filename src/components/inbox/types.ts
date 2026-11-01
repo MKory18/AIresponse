@@ -90,6 +90,8 @@ export type DraftInfo = {
   rawAddress: string | null;
   province: string | null;
   missingFields: string[];
+  /** P19 — الحقول المطلوبة حسب صفحة المحادثة. */
+  requiredFields?: string[];
 };
 
 export const CHANNEL_LABELS: Record<string, string> = {

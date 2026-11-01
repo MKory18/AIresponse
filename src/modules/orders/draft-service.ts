@@ -6,9 +6,14 @@ import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertDraftTransition } from "./state-machine";
 import { inferProvince, normalizePhone } from "./primitives";
 import { resolveProduct, type ResolvableProduct } from "./primitives";
+import {
+  DEFAULT_ORDER_FIELDS,
+  normalizeOrderFields,
+  type OrderFieldKey,
+} from "./required-fields";
 
 export const REQUIRED_DRAFT_FIELDS = ["product", "quantity", "phone", "address"] as const;
-export type RequiredDraftField = (typeof REQUIRED_DRAFT_FIELDS)[number];
+export type RequiredDraftField = OrderFieldKey;
 
 export interface DraftExtractionInput {
   productName?: string | null;
@@ -219,7 +224,11 @@ export async function updateDraftFromExtraction(
     }
   }
 
-  const missing = computeMissingFields(refreshed);
+  // P19 — الحقول المطلوبة تتبع الصفحة (القناة) صاحبة المحادثة، مش إعدادًا
+  // عامًا واحدًا لكل المساحات.
+  const requiredFields = await getRequiredOrderFields(db, params.workspaceId, params.conversationId);
+
+  const missing = computeMissingFields(refreshed, requiredFields);
   const final = await db.orderDraft.update({
     where: { id: draft.id },
     data: { missingFields: missing },
@@ -238,6 +247,8 @@ export async function updateDraftFromExtraction(
   if (missing.length === 0 && final.state === "COLLECTING") {
     assertDraftTransition(final.state, "READY");
     const ready = await db.orderDraft.update({ where: { id: draft.id }, data: { state: "READY" } });
+    // P19 — إشعار تيليجرام للطلب الجاهز (مهمة مستقلة، idempotent).
+    await enqueueReadyOrderNotification(db, params.workspaceId, ready);
     await eventBus.publish(makeEvent("OrderReadyForConfirmation", params.workspaceId, { draftId: draft.id }));
     return { draft: ready, missingFields: missing, becameReady: true };
   }
@@ -245,19 +256,73 @@ export async function updateDraftFromExtraction(
   return { draft: final, missingFields: missing };
 }
 
-export function computeMissingFields(draft: {
-  productId: string | null;
-  quantity: number | null;
-  phone: string | null;
-  rawAddress: string | null;
-  province: string | null;
-}): RequiredDraftField[] {
+export function computeMissingFields(
+  draft: {
+    productId: string | null;
+    quantity: number | null;
+    customerName?: string | null;
+    phone: string | null;
+    rawAddress: string | null;
+    province: string | null;
+  },
+  requiredFields: readonly string[] = DEFAULT_ORDER_FIELDS
+): RequiredDraftField[] {
+  const required = new Set(requiredFields);
   const missing: RequiredDraftField[] = [];
+  // المنتج والكمية دائمًا مطلوبان — بدونهم ما في طلب.
   if (!draft.productId) missing.push("product");
   if (!draft.quantity || draft.quantity <= 0) missing.push("quantity");
-  if (!draft.phone) missing.push("phone");
-  if (!draft.rawAddress && !draft.province) missing.push("address");
+  if (required.has("phone") && !draft.phone) missing.push("phone");
+  if (required.has("address") && !draft.rawAddress && !draft.province) missing.push("address");
+  if (required.has("name") && !draft.customerName) missing.push("name");
   return missing;
+}
+
+/** الحقول المطلوبة لهذه المحادثة حسب صفحتها؛ غياب القناة = الافتراضي. */
+export async function getRequiredOrderFields(
+  db: Db,
+  workspaceId: string,
+  conversationId: string
+): Promise<OrderFieldKey[]> {
+  const conversation = await db.conversation.findUnique({
+    where: { id: conversationId },
+    select: { workspaceId: true, channelId: true },
+  });
+  if (!conversation || conversation.workspaceId !== workspaceId || !conversation.channelId) {
+    return [...DEFAULT_ORDER_FIELDS];
+  }
+  const channel = await db.channel.findUnique({
+    where: { id: conversation.channelId },
+    select: { workspaceId: true, orderRequiredFields: true },
+  });
+  if (!channel || channel.workspaceId !== workspaceId) return [...DEFAULT_ORDER_FIELDS];
+  return normalizeOrderFields((channel as { orderRequiredFields?: string[] }).orderRequiredFields);
+}
+
+/** P19 — إشعار تيليجرام عند جاهزية الطلب: مهمة مستقلة، لا تعطّل الرد. */
+async function enqueueReadyOrderNotification(
+  db: Db,
+  workspaceId: string,
+  draft: { id: string; idempotencyKey: string | null }
+): Promise<void> {
+  try {
+    const settings = await db.telegramOrderSettings.findUnique({
+      where: { workspaceId },
+      select: { enabled: true },
+    });
+    if (!settings?.enabled) return;
+    const { enqueueJob } = await import("@/modules/jobs/service");
+    await enqueueJob(db, {
+      workspaceId,
+      type: "notify_order_ready",
+      payload: { draftId: draft.id },
+      // يتغيّر عند إعادة تدوير المسودة لطلب جديد — طلب جديد = إشعار جديد.
+      idempotencyKey: `tg-order:${draft.id}:${draft.idempotencyKey ?? "first"}`,
+      maxAttempts: 4,
+    });
+  } catch {
+    // الإشعار تجميلي/تشغيلي: فشل التصفيف ما بيفشّل المسودة ولا الرد.
+  }
 }
 
 /**
