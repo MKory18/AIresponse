@@ -25,36 +25,6 @@ export async function GET() {
     log.error({ err }, "health_db_unhealthy");
   }
 
-  // Schema readiness — catches a deployed app running against an older DB
-  // (the most common cause of "AI stopped replying" after a migration release).
-  if (status.database === "APP_HEALTHY") {
-    try {
-      const rows = await prisma.$queryRaw<Array<{ table_name: string; column_name: string }>>`
-        SELECT table_name, column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name IN ('Customer', 'Order', 'OrderItem', 'OrderDraft', 'TelegramOrderSettings')
-      `;
-      const have = new Set(rows.map((r) => `${r.table_name}.${r.column_name}`));
-      const required = [
-        "Customer.memoryResetAt",
-        "Customer.memoryVersion",
-        "Order.orderBatchId",
-        "OrderItem.offerNameSnapshot",
-        "OrderDraft.items",
-        "TelegramOrderSettings.workspaceId",
-      ];
-      const missing = required.filter((k) => !have.has(k));
-      status.schema = missing.length === 0 ? "APP_HEALTHY" : "DB_SCHEMA_OUTDATED";
-      if (missing.length > 0) {
-        httpStatus = 503;
-        log.error({ missing }, "health_db_schema_outdated");
-      }
-    } catch {
-      status.schema = "DB_SCHEMA_UNKNOWN";
-    }
-  }
-
   // Queue depth (only meaningful if DB is reachable)
   if (status.database === "APP_HEALTHY") {
     try {
