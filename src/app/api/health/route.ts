@@ -82,6 +82,12 @@ export async function GET() {
         httpStatus = 503;
         log.error({ ageMs: health.ageMs, workerId: heartbeat?.workerId }, "health_worker_stale");
       }
+      // No heartbeat at all = the worker was never started (or cannot write
+      // its heartbeat). This must be degraded, not silently "healthy".
+      if (health.status === "WORKER_UNKNOWN") {
+        httpStatus = 503;
+        log.error("health_worker_unknown");
+      }
     } catch {
       status.worker = "WORKER_UNKNOWN";
     }
@@ -92,7 +98,7 @@ export async function GET() {
   status.facebook = env.META_APP_ID && env.META_APP_SECRET ? "APP_HEALTHY" : "FACEBOOK_CONFIGURATION_MISSING";
 
   const healthy = Object.values(status).every(
-    (v) => v === "APP_HEALTHY" || v === "FACEBOOK_CONFIGURATION_MISSING" || v === "WORKER_UNKNOWN"
+    (v) => v === "APP_HEALTHY" || v === "FACEBOOK_CONFIGURATION_MISSING"
   );
   return NextResponse.json(
     { status: healthy && httpStatus === 200 ? "APP_HEALTHY" : "DEGRADED", checks: status },
