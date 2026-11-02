@@ -150,4 +150,31 @@ describe("P24 transactional outbox", () => {
     expect(jobs().every((j) => j.status === "DONE")).toBe(true);
     expect(result.orders).toHaveLength(3);
   });
+
+  it("Timeout/network غير مؤكد: الطلب يبقى، ويُسجّل إشعار ملتبس", async () => {
+    const { customer } = await seed();
+    setTelegramClientFactory(
+      () =>
+        new TelegramClient({
+          fetchImpl: (async () => {
+            throw new Error("network reset");
+          }) as typeof fetch,
+        })
+    );
+    const r = await updateDraftFromExtraction(db as unknown as Db, {
+      workspaceId: WS,
+      conversationId: db._stores.conversation[0].id,
+      customerId: customer.id,
+      extraction: { items: [{ productName: "منتج 1", quantity: 1 }] },
+      source: "TEST",
+    });
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    const run = await runJobs(db as never);
+    expect(run.failed).toBe(1);
+    expect((db._stores.order as any[]).find((o) => o.id === result.orderId)).toBeTruthy();
+    const ambiguous = (db._stores.auditLog as any[]).filter((a) => a.action === "order.telegram_ambiguous");
+    expect(ambiguous).toHaveLength(1);
+    expect(ambiguous[0].metadata.reason).toBe("TIMEOUT_OR_NETWORK");
+    expect(jobs()[0]!.status).toBe("PENDING");
+  });
 });

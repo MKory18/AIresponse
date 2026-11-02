@@ -19,6 +19,10 @@ export interface OrderTelegramInput {
   /** Final order total for this product (DB pricing engine). */
   price: string | number;
   quantity: number;
+  /** Batch delivery share for this order (0 for free delivery). */
+  deliveryFee?: string | number | null;
+  /** Order total = product subtotal + delivery share. */
+  total?: string | number | null;
 }
 
 /** `YYYY-MM-DD HH:mm:ss` in the given IANA timezone (24h, stable). */
@@ -39,7 +43,7 @@ export function formatOrderDate(date: Date, timeZone: string): string {
 
 /** Plain text (no HTML) — the exact operational format requested by the owner. */
 export function buildOrderTelegramMessage(input: OrderTelegramInput): string {
-  return [
+  const lines = [
     `رقم الطلب: ${input.orderNumber}`,
     `تاريخ الطلب: ${formatOrderDate(input.createdAt, input.timeZone)}`,
     `إسم العميل: ${input.customerName?.trim() || "-"}`,
@@ -49,5 +53,11 @@ export function buildOrderTelegramMessage(input: OrderTelegramInput): string {
     `إسم العرض: ${input.offerName?.trim() || "-"}`,
     `السعر: ${input.price}`,
     `الكمية: ${input.quantity}`,
-  ].join("\n");
+  ];
+  const deliveryFee = Number(input.deliveryFee ?? 0);
+  if (Number.isFinite(deliveryFee) && deliveryFee > 0) {
+    lines.push(`رسوم التوصيل: ${input.deliveryFee}`);
+    if (input.total !== undefined && input.total !== null) lines.push(`الإجمالي: ${input.total}`);
+  }
+  return lines.join("\n");
 }

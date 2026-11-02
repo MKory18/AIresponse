@@ -324,6 +324,29 @@ export async function runResponse(
     };
   }
 
+  // P25 — the customer's memory may have been wiped while the model was
+  // generating. Never send a reply built from a generation that no longer
+  // exists. Check immediately before the outbound send.
+  const currentMemory = (await db.customer.findUnique({
+    where: { id: customer.id },
+    select: { memoryVersion: true },
+  })) as { memoryVersion: number } | null;
+  if ((currentMemory?.memoryVersion ?? 0) !== gate.memoryVersion) {
+    log.info(
+      { conversationId: conversation.id, messageId: message.id, from: gate.memoryVersion, to: currentMemory?.memoryVersion },
+      "ai_reply_stale_memory"
+    );
+    logTimings("STALE_MEMORY", { intent: extraction.intent });
+    return {
+      status: "STALE_MEMORY",
+      intent: extraction.intent as Intent,
+      confidence: extraction.confidence,
+      plan,
+      violations: ["MEMORY_VERSION_CHANGED"],
+      persona: activePersona,
+    };
+  }
+
   // 11. Persist: send as AI + citations + memory.
   // A failed/queued send is NEVER reported as success: return AI_FAILED so
   // the job queue retries (same idempotency key reuses the row — no duplicate).

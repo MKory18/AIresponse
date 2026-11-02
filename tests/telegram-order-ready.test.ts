@@ -144,6 +144,8 @@ describe("Telegram — رسالة مستقلة لكل طلب", () => {
     const offerText = texts.find((t) => t.includes("ماء الكمأة الأصلي"))!;
     expect(offerText).toContain("الكمية: 1");
     expect(offerText).toContain("السعر: 25");
+    expect(offerText).toContain("رسوم التوصيل: 1.67");
+    expect(offerText).toContain("الإجمالي: 26.67");
 
     // Retry: no duplicate message.
     await runJobs(db as never);

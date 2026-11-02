@@ -20,7 +20,7 @@ import type { PersonaConfig, Intent } from "../prompts";
 import type { VectorStore } from "@/modules/knowledge/vector-store";
 
 export interface AIExecutionResult {
-  status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND" | "DEFERRED";
+  status: "RESPONDED" | "CLARIFIED" | "HANDOFF" | "SKIPPED" | "AI_DISABLED" | "AI_FAILED" | "DUPLICATE" | "NOT_INBOUND" | "DEFERRED" | "STALE_MEMORY";
   intent?: Intent;
   confidence?: number;
   plan?: ResponsePlan;
@@ -72,6 +72,8 @@ export interface GatingState {
   customer: Customer;
   channelRow: { displayName: string | null; externalId: string | null } | null;
   customerText: string;
+  /** Memory generation captured when the turn started (P25). */
+  memoryVersion: number;
   recentMessages: { id: string; senderType: string; direction: string; text: string | null }[];
   customerPII: CustomerPII;
   trustedContacts: string[];

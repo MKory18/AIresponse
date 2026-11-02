@@ -605,7 +605,8 @@ async function handleResolveSenderProfile(
 async function handleNotifyOrderTelegram(
   db: HandlerDb,
   payload: Record<string, unknown>,
-  workspaceId: string
+  workspaceId: string,
+  jobId?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!workspaceId) return { success: false, error: "MISSING_WORKSPACE_CONTEXT" };
   const orderId = String(payload.orderId ?? "");
@@ -659,6 +660,8 @@ async function handleNotifyOrderTelegram(
     offerName: item.offerNameSnapshot,
     price: order.subtotal.toString(),
     quantity: item.quantity,
+    deliveryFee: order.deliveryFee.toString(),
+    total: order.total.toString(),
   });
 
   let messageThreadId: number | undefined;
@@ -696,6 +699,27 @@ async function handleNotifyOrderTelegram(
         { workspaceId, orderId: order.id, kind: err.kind, code: err.code ?? null },
         "telegram_order_failed"
       );
+      // A timeout/network failure is ambiguous: the message MAY have reached
+      // Telegram. Record it explicitly for the owner instead of hiding it.
+      const ambiguous =
+        /timed out|unreachable/i.test(err.message) || err.code === undefined;
+      if (ambiguous) {
+        const { recordAudit } = await import("@/modules/audit/service");
+        await recordAudit(db, {
+          workspaceId,
+          userId: null,
+          action: "order.telegram_ambiguous",
+          entityType: "Order",
+          entityId: order.id,
+          metadata: {
+            orderNumber: order.orderNumber,
+            jobId: jobId ?? null,
+            reason: "TIMEOUT_OR_NETWORK",
+            message: err.message,
+          },
+        }).catch(() => null);
+        return { success: false, error: "TELEGRAM_DELIVERY_UNKNOWN" };
+      }
       return { success: false, error: `TELEGRAM_${err.kind}_${err.code ?? "ERROR"}` };
     }
     throw err;
@@ -787,8 +811,8 @@ export function getJobHandlers(): Record<string, JobHandler> {
       handleProcessAIMessage(db, payload, workspaceId),
     resolve_sender_profile: (payload, _jobId, workspaceId) =>
       handleResolveSenderProfile(db, payload, workspaceId),
-    notify_order_telegram: (payload, _jobId, workspaceId) =>
-      handleNotifyOrderTelegram(db, payload, workspaceId),
+    notify_order_telegram: (payload, jobId, workspaceId) =>
+      handleNotifyOrderTelegram(db, payload, workspaceId, jobId),
     generate_summary: (payload) => handleGenerateSummary(db, payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(db, payload),
     process_channel_inbound: (payload) => handleChannelInbound(db, payload),

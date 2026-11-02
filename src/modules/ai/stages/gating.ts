@@ -313,6 +313,7 @@ export async function runGating(
       customer,
       channelRow,
       customerText,
+      memoryVersion: (customer as { memoryVersion?: number }).memoryVersion ?? 0,
       recentMessages,
       customerPII,
       trustedContacts,

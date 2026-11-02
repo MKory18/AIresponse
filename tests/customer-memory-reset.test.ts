@@ -13,6 +13,7 @@ import type { AIProvider } from "@/modules/ai/provider";
 import { MockAIProvider, setMockAIProvider } from "@/modules/ai/provider";
 import { enqueueJob } from "@/modules/jobs/service";
 import { runJobs } from "@/modules/jobs/handlers";
+import { processAIMessage } from "@/modules/ai/orchestrator";
 
 type Db = Prisma.TransactionClient;
 type FakeDb = ReturnType<typeof createFakeDb> & Record<string, any>;
@@ -197,6 +198,52 @@ describe("مسح ذاكرة العميل", () => {
       summary: string | null;
     };
     expect(conversation.summary).toBeNull();
+  });
+
+  it("رد AI بدأ قبل المسح لا يُرسل بعد تغيّر إصدار الذاكرة", async () => {
+    const message = (await db.message.create({
+      data: {
+        workspaceId: WS,
+        conversationId,
+        senderType: "CUSTOMER",
+        direction: "INBOUND",
+        type: "TEXT",
+        text: "بدي أعرف عن المنتج",
+      },
+    } as never)) as { id: string };
+
+    const provider: AIProvider = {
+      name: "stub",
+      delivery: "local",
+      generateStructured: async () => ({
+        text: "{}",
+        promptTokens: 1,
+        completionTokens: 1,
+        latencyMs: 1,
+        value: {
+          intent: "PRODUCT_QUESTION",
+          confidence: 0.9,
+          language: "ar",
+          entities: {},
+          missingFields: [],
+          memories: [],
+          requestedAction: "ANSWER",
+        },
+      }),
+      generateText: async () => {
+        await resetCustomerMemory(db as unknown as Db, CTX, customerId);
+        return { text: "رد قديم", promptTokens: 1, completionTokens: 1, latencyMs: 1 };
+      },
+    };
+
+    const res = await processAIMessage(
+      db as unknown as Db,
+      { workspaceId: WS, conversationId, messageId: message.id },
+      { provider, vectorStore: { search: async () => [] } as never }
+    );
+    expect(res.status).toBe("STALE_MEMORY");
+    expect((db._stores.message as any[]).filter((m) => m.direction === "OUTBOUND")).toHaveLength(0);
+    expect(await db.customerMemory.findMany({ where: { customerId } })).toHaveLength(0);
   });
 
   it("الصلاحية: المدير يمسح، البيعي لا", () => {
