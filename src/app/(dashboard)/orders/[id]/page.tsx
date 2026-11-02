@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, History, MapPin, MessageSquare, Receipt, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, History, MapPin, MessageSquare, Receipt, Send, Trash2, UserRound } from "lucide-react";
 import { label } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
@@ -34,7 +34,7 @@ type OrderDetail = {
   customer: { id: string; name: string | null; phone: string | null };
   /** المحادثة الي انعمل منها الطلب (إذا في) — منها «افتح المحادثة». */
   conversationId?: string | null;
-  items: { id: string; productNameSnapshot: string; skuSnapshot: string; unitPrice: string; quantity: number; subtotal: string }[];
+  items: { id: string; productNameSnapshot: string; skuSnapshot: string; offerNameSnapshot?: string | null; unitPrice: string; quantity: number; subtotal: string }[];
   timeline: { id: string; action: string; metadata: Record<string, unknown>; createdAt: string }[];
 };
 
@@ -55,6 +55,8 @@ export default function OrderDetailPage() {
   const [saving, setSaving] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [telegramMsg, setTelegramMsg] = useState<string | null>(null);
+  const [sendingTelegram, setSendingTelegram] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/orders/${params.id}`);
@@ -87,6 +89,15 @@ export default function OrderDetailPage() {
       setError(data.message ?? "انتقال غير مسموح");
     }
     load();
+  }
+
+  async function resendTelegram() {
+    setSendingTelegram(true);
+    setTelegramMsg(null);
+    const res = await fetch(`/api/orders/${params.id}/telegram`, { method: "POST" });
+    setSendingTelegram(false);
+    const data = (await res.json().catch(() => ({}))) as { message?: string };
+    setTelegramMsg(res.ok ? "تم جدولة إرسال الإشعار." : data.message ?? "تعذّر إرسال الإشعار");
   }
 
   async function deleteThisOrder() {
@@ -146,6 +157,11 @@ export default function OrderDetailPage() {
                 {label(next)}
               </Button>
             ))}
+            {order.canWrite && (
+              <Button size="sm" variant="secondary" onClick={resendTelegram} disabled={sendingTelegram} loading={sendingTelegram}>
+                <Send size={13} /> إعادة إشعار تيليجرام
+              </Button>
+            )}
             {order.canDelete && (
               <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)} disabled={saving} title="حذف الطلب نهائيًا (المالك فقط)">
                 <Trash2 size={13} /> حذف الطلب
@@ -156,6 +172,9 @@ export default function OrderDetailPage() {
       />
       {error && (
         <GlassCard level="glass-subtle" className="border-red-500/20 px-4 py-2.5 text-sm text-red-600 dark:text-red-400">{error}</GlassCard>
+      )}
+      {telegramMsg && (
+        <GlassCard level="glass-subtle" className="px-4 py-2.5 text-sm text-ink-muted">{telegramMsg}</GlassCard>
       )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -172,6 +191,9 @@ export default function OrderDetailPage() {
                 <div key={item.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                   <div className="min-w-0">
                     <p className="truncate font-bold text-ink">{item.productNameSnapshot}</p>
+                    {item.offerNameSnapshot && (
+                      <p className="truncate text-[11px] text-brand-700 dark:text-brand-300">عرض: {item.offerNameSnapshot}</p>
+                    )}
                     <p className="num mt-0.5 text-xs text-ink-subtle" dir="ltr">{item.skuSnapshot}</p>
                   </div>
                   <div className="num shrink-0 text-end" dir="ltr">

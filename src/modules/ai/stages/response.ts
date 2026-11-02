@@ -117,6 +117,7 @@ export async function runResponse(
             objections: context.product.objections,
             salesNotes: context.product.salesNotes,
             priceTiers: context.product.priceTiers ?? [],
+            offers: context.product.offers ?? [],
             compliance: context.product.compliance ?? null,
             faqs: context.product.faqs,
           }
@@ -145,10 +146,16 @@ export async function runResponse(
           }
         : undefined,
       customer: {
-        name: (customer as { name?: string | null }).name ?? null,
+        name: (customer as { memoryResetAt?: Date | null }).memoryResetAt
+          ? null
+          : (customer as { name?: string | null }).name ?? null,
         page: channelRow?.displayName ?? null,
-        city: (customer as { city?: string | null }).city ?? null,
-        province: (customer as { province?: string | null }).province ?? null,
+        city: (customer as { memoryResetAt?: Date | null }).memoryResetAt
+          ? null
+          : (customer as { city?: string | null }).city ?? null,
+        province: (customer as { memoryResetAt?: Date | null }).memoryResetAt
+          ? null
+          : (customer as { province?: string | null }).province ?? null,
       },
     }),
   ].join("\n\n");

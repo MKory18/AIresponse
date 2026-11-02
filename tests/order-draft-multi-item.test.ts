@@ -100,15 +100,16 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     expect((await draftRow()).productName).toBe("ماء الكمأة");
   });
 
-  it("منتجان برسالتين + كمية بلا اسم تُحدّث آخر عنصر فقط", async () => {
+  it("منتجان برسالتين + كمية بلا اسم: يسأل أي منتج (لا تخمين)", async () => {
     await merge({ productName: "ماء الكمأة", quantity: 2 });
     await merge({ productName: "عسل الكمأة", quantity: 1 });
     expect(parseDraftItems(await draftRow())).toHaveLength(2);
 
-    await merge({ quantity: 5 });
+    const out = await merge({ quantity: 5 });
+    expect(out).toHaveProperty("ambiguousCandidates");
     const items = parseDraftItems(await draftRow());
     expect(items.find((i) => i.productId === productA.id)?.quantity).toBe(2);
-    expect(items.find((i) => i.productId === productB.id)?.quantity).toBe(5);
+    expect(items.find((i) => i.productId === productB.id)?.quantity).toBe(1);
   });
 
   it("نفس المنتج مرة ثانية: سطر واحد (آخر كمية تفوز) بلا تكرار", async () => {
@@ -119,7 +120,7 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     expect(items[0]).toMatchObject({ productId: productA.id, quantity: 4 });
   });
 
-  it("إنشاء الطلب: بندان صحيحان، مجموع 250 + توصيل مرة واحدة", async () => {
+  it("إنشاء الطلب: طلب مستقل لكل منتج (رقم/سجل/سعر مستقل)", async () => {
     const r = await merge({
       items: [
         { productName: "ماء الكمأة", quantity: 2 },
@@ -130,13 +131,17 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
 
     const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
     expect(result.created).toBe(true);
-    expect(result.total).toBe(250);
-    expect(result.currency).toBe("USD");
+    expect(result.orders).toHaveLength(2);
+    expect(result.orders.map((o) => o.total).sort((a, b) => a - b)).toEqual([50, 200]);
+    expect(new Set(result.orders.map((o) => o.orderNumber)).size).toBe(2);
+    expect(new Set(result.orders.map((o) => o.orderBatchId)).size).toBe(1);
 
-    const orderItems = (db._stores.orderItem as any[]).filter((i) => i.orderId === result.orderId);
+    const orderItems = db._stores.orderItem as any[];
     expect(orderItems).toHaveLength(2);
-    expect(orderItems.map((i) => i.productNameSnapshot).sort()).toEqual(["عسل الكمأة", "ماء الكمأة"].sort());
-    expect(orderItems.reduce((s, i) => s + Number(i.subtotal), 0)).toBe(250);
+    // Each order has exactly ONE item.
+    const counts = new Map<string, number>();
+    for (const item of orderItems) counts.set(item.orderId, (counts.get(item.orderId) ?? 0) + 1);
+    expect([...counts.values()]).toEqual([1, 1]);
 
     const draft = await draftRow();
     expect(draft.state).toBe("CONVERTED");
@@ -183,8 +188,14 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
       } as never,
     });
     expect(out.action).toBe("ORDER_CONFIRMED");
-    const orderItems = (db._stores.orderItem as any[]).filter((i) => i.orderId === out.orderId);
+    const createdOrders = (db._stores.order as any[]).filter((o) => o.conversationId === conversationId);
+    expect(createdOrders).toHaveLength(2);
+    const orderItems = (db._stores.orderItem as any[]).filter((i) =>
+      createdOrders.some((o) => o.id === i.orderId)
+    );
     expect(orderItems).toHaveLength(2);
+    // One item per independent order.
+    expect(new Set(orderItems.map((i) => i.orderId)).size).toBe(2);
   });
 
   it("مسودة قديمة مفردة (items فارغة) لسا تنشئ طلبًا صحيحًا", async () => {
@@ -238,6 +249,84 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     });
     expect(parseDraftItems(limited.draft)).toHaveLength(1);
     expect(parseDraftItems(limited.draft)[0].productId).toBe(productA.id);
+  });
+
+  it("عرض/باقة: الكمية = عدد الباقات، والسعر من العرض لا من القطع", async () => {
+    await db.product.update({
+      where: { id: productA.id },
+      data: { offers: [{ title: "قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني", quantity: 3, price: 25 }] },
+    } as never);
+
+    const r = await merge({
+      items: [
+        {
+          productName: "ماء الكمأة",
+          offerTitle: "قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني",
+          quantity: 1,
+        },
+      ],
+    });
+    const items = parseDraftItems(await draftRow());
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      productId: productA.id,
+      offerTitle: "قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني",
+      quantity: 1,
+    });
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    expect(result.orders).toHaveLength(1);
+    expect(result.orders[0]!.total).toBe(25);
+    const orderItem = (db._stores.orderItem as any[]).find((i) => i.orderId === result.orderId);
+    expect(orderItem.quantity).toBe(1); // packages, not 3 pieces
+    expect(Number(orderItem.unitPrice)).toBe(25);
+    expect(orderItem.offerNameSnapshot).toContain("قطعة هدية");
+    expect(orderItem.offerQuantity).toBe(3);
+  });
+
+  it("نفس المنتج بعرضين مختلفين = بندان وطلبان مستقلان", async () => {
+    await db.product.update({
+      where: { id: productA.id },
+      data: {
+        offers: [
+          { title: "باقة قطعتين", quantity: 2, price: 80 },
+          { title: "باقة 3 قطع", quantity: 3, price: 110 },
+        ],
+      },
+    } as never);
+    await merge({ productName: "ماء الكمأة", offerTitle: "باقة قطعتين", quantity: 1 });
+    await merge({ productName: "ماء الكمأة", offerTitle: "باقة 3 قطع", quantity: 1 });
+    expect(parseDraftItems(await draftRow())).toHaveLength(2);
+  });
+
+  it("عرض غير موجود: يسأل ولا يخمّن سعرًا", async () => {
+    await db.product.update({
+      where: { id: productA.id },
+      data: { offers: [{ title: "باقة قطعتين", quantity: 2, price: 80 }] },
+    } as never);
+    const out = await merge({ productName: "ماء الكمأة", offerTitle: "باقة مفقودة", quantity: 1 });
+    expect(out).toHaveProperty("clarification");
+    expect(parseDraftItems(await draftRow())).toHaveLength(0);
+  });
+
+  it("التحقق النهائي: منتج خارج كتالوج الصفحة ما بينشئ طلب", async () => {
+    const r = await merge({
+      items: [
+        { productName: "ماء الكمأة", quantity: 1 },
+        { productName: "عسل الكمأة", quantity: 1 },
+      ],
+    });
+    const catalog = (await db.catalog.create({
+      data: { workspaceId: WS, name: "كتالوج الصفحة", isActive: true },
+    } as never)) as { id: string };
+    await db.catalogProduct.create({ data: { catalogId: catalog.id, productId: productA.id } } as never);
+    await db.catalogPageAssignment.create({
+      data: { workspaceId: WS, catalogId: catalog.id, channelId: db._stores.channel[0].id },
+    } as never);
+
+    await expect(
+      createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id })
+    ).rejects.toMatchObject({ code: "ORDER_PRODUCT_OUTSIDE_CATALOG" });
+    expect((db._stores.order as any[]).filter((o) => o.customerId === customerId)).toHaveLength(0);
   });
 
   it("منتج بلا كمية: quantity ناقصة لحد ما تنذكر", async () => {

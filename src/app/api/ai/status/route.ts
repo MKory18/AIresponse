@@ -31,25 +31,11 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
   } catch {
     env = {} as ReturnType<typeof getEnv>;
   }
-  const hasOpenaiKey = Boolean(env.OPENAI_API_KEY);
   const hasOpenrouterKey = Boolean(env.OPENROUTER_API_KEY);
-  const hasHermesConfig = Boolean(env.HERMES_BASE_URL && env.HERMES_API_KEY);
   const allowMock = ["1", "true", "yes"].includes(((env.ALLOW_MOCK_AI ?? "") as string).toLowerCase());
   const isProd = process.env.NODE_ENV === "production";
 
   const providers = [
-    {
-      id: "hermes",
-      configured: hasHermesConfig,
-      status: hasHermesConfig ? "configured" : "needs_env",
-      endpoint: (settings.customBaseUrl as string | null) ?? (env.HERMES_BASE_URL as string | null) ?? null,
-    },
-    {
-      id: "openai",
-      configured: hasOpenaiKey,
-      status: hasOpenaiKey ? ("configured" as const) : ("needs_key" as const),
-      endpoint: "https://api.openai.com/v1/chat/completions",
-    },
     {
       id: "openrouter",
       configured: hasOpenrouterKey,
@@ -60,6 +46,12 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
       id: "internal",
       configured: Boolean(settings.customBaseUrl),
       status: settings.customBaseUrl ? ("configured" as const) : ("unconfigured" as const),
+      endpoint: (settings.customBaseUrl as string | null) ?? null,
+    },
+    {
+      id: "custom",
+      configured: Boolean(settings.customBaseUrl && settings.customApiKeyEnc),
+      status: settings.customBaseUrl && settings.customApiKeyEnc ? ("configured" as const) : ("unconfigured" as const),
       endpoint: (settings.customBaseUrl as string | null) ?? null,
     },
     {

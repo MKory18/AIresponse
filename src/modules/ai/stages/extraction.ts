@@ -273,7 +273,7 @@ export async function runExtraction(
   ];
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
-      loadMemory(db, params.workspaceId, customer.id),
+      loadMemory(db, params.workspaceId, customer.id, 10, (customer as { memoryResetAt?: Date | null }).memoryResetAt),
       resolveProductId(
         db,
         params.workspaceId,

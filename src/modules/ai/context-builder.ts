@@ -43,6 +43,8 @@ export interface AIContext {
     faqs: { id: string; question: string; answer: string }[];
     /** أسعار إضافية مسمّاة — تُغذّى للذكاء كسنة رسمية من قاعدة البيانات. */
     priceTiers?: { label: string; price: string }[];
+    /** عروض/باقات OMS (اسم + عدد القطع + سعر الباقة) — من DB فقط. */
+    offers?: { title: string; quantity: number; price: string }[];
     /** P12 — قواعد الادعاءات من سيستم 1 (إن رُبط المنتج بمرجعه). */
     compliance?: { allowedClaims: string[]; bannedClaims: string[]; verdict: string | null } | null;
   };
@@ -114,6 +116,9 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
       priceTiers: ((product as unknown as { priceTiers?: { label: string; price: string }[] }).priceTiers ?? []).map(
         (t) => ({ label: t.label, price: t.price.toString() })
       ),
+      offers: (await import("@/modules/orders/offers")).activeOffers(
+        (product as unknown as { offers?: unknown }).offers
+      ).map((o) => ({ title: o.title, quantity: o.quantity, price: String(o.price) })),
       ...(compliance ? { compliance } : {}),
     } as AIContext["product"],
     citations: [

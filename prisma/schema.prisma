@@ -271,6 +271,10 @@ model Customer {
   // P12 — من سجّل الموافقة/الإلغاء: AGENT · CUSTOMER_KEYWORD · IMPORT
   // (مصدر مسمى فقط — بلا نص حر من العميل).
   marketingConsentSource String?
+  // ── Customer memory reset ──────────────────────────────────────────────
+  // When set, the AI must not read any memory/summary/intel created before
+  // this instant. Historical orders, audit rows and channel identities stay.
+  memoryResetAt     DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -1094,6 +1098,9 @@ model Order {
   customerId         String
   conversationId     String?
   draftId            String?
+  // One cart confirmation creates N INDEPENDENT orders (one product each).
+  // They share this batch id for traceability only — never a single combined order.
+  orderBatchId       String?
   status             OrderStatus        @default(NEW)
   confirmationStatus ConfirmationStatus @default(PENDING)
   paymentStatus      PaymentStatus      @default(UNPAID)
@@ -1148,6 +1155,7 @@ model Order {
   @@index([workspaceId, customerId, createdAt])
   @@index([workspaceId, omsOrderNumber])
   @@index([workspaceId, refCode])
+  @@index([workspaceId, orderBatchId])
 }
 
 // اتصال الـ OMS لكل مستأجر — التوكن مشفّر بنفس آلية أسرار القنوات (AES-256-GCM)
@@ -1197,6 +1205,10 @@ model OrderItem {
   variantId           String?
   productNameSnapshot String
   skuSnapshot         String
+  // Snapshot of the DB offer/package chosen at creation time (never AI text).
+  offerNameSnapshot   String?
+  // Pieces inside one package (from the offer row) — order quantity stays packages.
+  offerQuantity       Int?
   unitPrice           Decimal  @db.Decimal(12, 2)
   quantity            Int
   subtotal            Decimal  @db.Decimal(12, 2)
@@ -1797,7 +1809,6 @@ model Campaign {
   failReason      String?
   lastTickSeq     Int            @default(0)
   createdBy       String
-  /// P12 — مصدر الحملة: manual · clipper · hermes. الحملات القادمة من نظام
   /// آخر تحمل مرجعه ومفتاح عدم التكرار حتى لا تتكرر بإعادة المحاولة.
   source          String         @default("manual")
   externalSystem  String?
@@ -1928,7 +1939,6 @@ model AttributionTouch {
 }
 
 /// اتصال سيستم 7 بنظام آخر بالمنظومة (الميديا باير · الكليبر · المالية ·
-/// سيستم 1 · الأزمات · المهام · مساحة العمل · جسر Hermes). التوكن والسر
 /// مشفّران (AES-256-GCM) ولا يرجعان لأي شاشة أو سجل.
 model IntegrationConnection {
   id                    String    @id @default(cuid())
@@ -2006,7 +2016,6 @@ model IntegrationDelivery {
   @@index([workspaceId, system, createdAt])
 }
 
-/// مسودة من وكيل (Hermes) أو نظام: بطابور المراجعة ولا أثر لها قبل الاعتماد.
 model AgentDraft {
   id             String    @id @default(cuid())
   workspaceId    String

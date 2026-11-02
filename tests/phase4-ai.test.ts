@@ -455,7 +455,8 @@ describe("Phase 4 — queue integration & cost logging", () => {
       expect(l.provider).toBe("mock");
       expect(l.model).toBeTruthy();
       expect(l.promptTokens).toBeGreaterThanOrEqual(0);
-      expect(l.costUsd).toBeGreaterThanOrEqual(0);
+      // Unknown model pricing stays NULL (never a fake $0).
+      expect(l.costUsd === null || l.costUsd >= 0).toBe(true);
     }
     const response = logs.find((l) => l.purpose === "RESPONSE");
     expect(response.intent).toBeTruthy();

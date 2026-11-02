@@ -31,6 +31,8 @@ export interface AIExecutionResult {
   error?: string;
   /** Page-resolved AI persona driving this execution (channel → workspace). */
   persona?: { id: string | null; name: string; source: string };
+  /** Per-stage durations (ms). IDs/durations only — never message content. */
+  timings?: Record<string, number>;
 }
 
 export interface OrchestratorDeps {

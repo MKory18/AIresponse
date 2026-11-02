@@ -206,6 +206,16 @@ async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unk
     conversationId: String(payload.conversationId ?? ""),
     messageId: String(payload.messageId ?? ""),
   }, { vectorStore });
+  log.info(
+    {
+      workspaceId,
+      conversationId: String(payload.conversationId ?? ""),
+      messageId: String(payload.messageId ?? ""),
+      status: result.status,
+      timings: result.timings ?? null,
+    },
+    "ai_reply_finished"
+  );
   // Transient AI provider failures are retried by the job queue; permanent
   // gates (AI disabled, duplicate, takeover) are terminal successes.
   if (result.status === "AI_FAILED") {
@@ -569,131 +579,70 @@ async function handleResolveSenderProfile(
 }
 
 /**
- * P19 — notify_order_ready: يرسل بيانات الطلب الجاهز لمجموعة/توبيك تيليجرام.
+ * notify_order_telegram — ONE independent Telegram message per confirmed order.
  *
- * - المستقل: ما بيعطّل الرد ولا إنشاء الطلب (مهمة خلفية).
- * - idempotent: مفتاح المهمة لكل مسودة/جيل، وفحص أثر سابق قبل الإرسال.
- * - لا يرسل إذا: المسودة ما عادت READY/انحوّلت لطلب/انلغت، أو الإعدادات مطفية.
- * - بيانات الزبون (اسم/هاتف/عنوان) تُرسل للمجموعة الخاصة التي حدّدها المالك فقط.
+ * - Runs after the order is committed (never blocks the customer reply).
+ * - Idempotent: the job key is per order, and a prior `order.telegram_sent`
+ *   audit row short-circuits a retry after a successful send.
+ * - A send failure never deletes or recreates the order; the job retries.
  */
-async function handleNotifyOrderReady(
+async function handleNotifyOrderTelegram(
   db: HandlerDb,
   payload: Record<string, unknown>,
   workspaceId: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!workspaceId) return { success: false, error: "MISSING_WORKSPACE_CONTEXT" };
-  const draftId = String(payload.draftId ?? "");
-  if (!draftId) return { success: true };
+  const orderId = String(payload.orderId ?? "");
+  if (!orderId) return { success: true };
 
-  const draft = await db.orderDraft.findUnique({ where: { id: draftId } });
-  if (!draft || draft.workspaceId !== workspaceId) return { success: true };
-  if (draft.state !== "READY" || draft.orderId) return { success: true };
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    include: { items: true },
+  });
+  if (!order || order.workspaceId !== workspaceId) return { success: true };
 
   const settings = await db.telegramOrderSettings.findUnique({ where: { workspaceId } });
   if (!settings?.enabled || !settings.chatId || !settings.botTokenEnc) return { success: true };
 
-  const generation = draft.idempotencyKey ?? "first";
-  // أثر إرسال سابق لنفس الجيل = لا تكرار (حتى لو أعيدت المهمة بعد تعافٍ).
-  try {
-    const already = await (db as any).auditLog.findFirst({
-      where: {
-        workspaceId,
-        action: "order.ready_notified_telegram",
-        entityType: "OrderDraft",
-        entityId: draft.id,
-        metadata: { path: ["generation"], equals: generation },
-      },
-      select: { id: true },
-    });
-    if (already) return { success: true };
-  } catch {
-    // فلتر JSON غير مدعوم في بعض القواعد/البدائل — نكمل بحماية مفتاح المهمة.
-  }
+  // Already delivered for this exact order → never send twice.
+  const already = await (db as any).auditLog.findFirst({
+    where: {
+      workspaceId,
+      action: "order.telegram_sent",
+      entityType: "Order",
+      entityId: order.id,
+    },
+    select: { id: true },
+  });
+  if (already) return { success: true };
 
-  const { parseDraftItems } = await import("@/modules/orders/draft-service");
-  const draftItems = parseDraftItems(draft);
-  const itemIds = [...new Set(draftItems.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
-  const [conversation, customer, products] = await Promise.all([
-    db.conversation.findUnique({
-      where: { id: draft.conversationId },
-      select: { channelId: true },
-    }),
+  const [customer, workspace] = await Promise.all([
     db.customer.findUnique({
-      where: { id: draft.customerId },
+      where: { id: order.customerId },
       select: { name: true, phone: true, workspaceId: true },
     }),
-    itemIds.length
-      ? db.product.findMany({
-          where: { id: { in: itemIds }, workspaceId },
-          select: { id: true, name: true, price: true, currency: true, workspaceId: true },
-        })
-      : Promise.resolve([]),
+    db.workspace.findUnique({ where: { id: workspaceId }, select: { timezone: true } }),
   ]);
+  if (!customer || customer.workspaceId !== workspaceId) return { success: true };
 
-  // عزل: كل الأطراف لازم يكونوا بنفس مساحة المهمة.
-  if (customer && customer.workspaceId !== workspaceId) return { success: true };
-  const channel = conversation?.channelId
-    ? await db.channel.findUnique({
-        where: { id: conversation.channelId },
-        select: { displayName: true, workspaceId: true },
-      })
-    : null;
-  if (channel && channel.workspaceId !== workspaceId) return { success: true };
+  const item = order.items[0];
+  if (!item) return { success: true };
+  const timeZone = (workspace as { timezone?: string | null } | null)?.timezone || "UTC";
+  const address = [order.province, order.deliveryAddress].filter((v): v is string => Boolean(v?.trim())).join(" - ");
+  const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
 
-  const productById = new Map(products.map((p) => [p.id, p]));
-  const messageItems = draftItems
-    .map((item) => {
-      const product = item.productId ? productById.get(item.productId) : null;
-      if (item.productId && !product) return null;
-      return {
-        name: item.productName || product?.name || "منتج",
-        quantity: item.quantity,
-        unitPrice: product ? product.price.toString() : null,
-      };
-    })
-    .filter((x): x is { name: string; quantity: number | null; unitPrice: string | null } => Boolean(x));
-
-  // إجمالي تقديري من محرك الأسعار لكل البنود — أفضل جهد، بلا اختراع.
-  let estimatedTotal: string | null = null;
-  const pricedItems = draftItems
-    .map((item) => {
-      const product = item.productId ? productById.get(item.productId) : null;
-      return product && item.quantity
-        ? { price: product.price, quantity: item.quantity, currency: product.currency }
-        : null;
-    })
-    .filter((x): x is { price: (typeof products)[number]["price"]; quantity: number; currency: string } => Boolean(x));
-  if (pricedItems.length > 0 && pricedItems.length === draftItems.length) {
-    try {
-      const { calculateCartPricing } = await import("@/modules/orders/pricing");
-      const breakdown = await calculateCartPricing(db as never, {
-        workspaceId,
-        items: pricedItems,
-        province: draft.province,
-      });
-      if (breakdown?.total !== undefined && breakdown?.total !== null) {
-        estimatedTotal = String(breakdown.total);
-      }
-    } catch {
-      estimatedTotal = null;
-    }
-  }
-
-  const firstItem = draftItems[0] ?? null;
-  const firstMessageItem = messageItems[0] ?? null;
-  const { buildOrderReadyMessage } = await import("@/modules/integrations/telegram-orders");
-  const text = buildOrderReadyMessage({
-    pageName: channel?.displayName ?? null,
-    customerName: draft.customerName ?? customer?.name ?? null,
-    phone: draft.phone ?? customer?.phone ?? null,
-    province: draft.province,
-    address: draft.rawAddress,
-    productName: firstMessageItem?.name ?? draft.productName ?? null,
-    quantity: draftItems.length === 1 ? firstItem?.quantity ?? draft.quantity : null,
-    unitPrice: firstMessageItem?.unitPrice ?? null,
-    currency: products[0]?.currency ?? null,
-    ...(messageItems.length > 1 ? { items: messageItems } : {}),
-    estimatedTotal,
+  const { buildOrderTelegramMessage } = await import("@/modules/orders/notify");
+  const text = buildOrderTelegramMessage({
+    orderNumber: order.orderNumber,
+    createdAt,
+    timeZone,
+    customerName: customer.name,
+    phone: customer.phone,
+    address,
+    productName: item.productNameSnapshot,
+    offerName: item.offerNameSnapshot,
+    price: order.total.toString(),
+    quantity: item.quantity,
   });
 
   let messageThreadId: number | undefined;
@@ -708,18 +657,17 @@ async function handleNotifyOrderReady(
     const token = decryptSecret(settings.botTokenEnc);
     const result = await getTelegramClient().sendMessage(token, settings.chatId, {
       text,
-      parseMode: "HTML",
       ...(messageThreadId ? { messageThreadId } : {}),
     });
     const { recordAudit } = await import("@/modules/audit/service");
     await recordAudit(db, {
       workspaceId,
       userId: null,
-      action: "order.ready_notified_telegram",
-      entityType: "OrderDraft",
-      entityId: draft.id,
+      action: "order.telegram_sent",
+      entityType: "Order",
+      entityId: order.id,
       metadata: {
-        generation,
+        orderNumber: order.orderNumber,
         chatId: settings.chatId,
         topicId: settings.topicId ?? null,
         messageId: result.messageId,
@@ -729,10 +677,9 @@ async function handleNotifyOrderReady(
   } catch (err) {
     if (err instanceof TelegramApiError) {
       log.warn(
-        { workspaceId, draftId: draft.id, kind: err.kind, code: err.code ?? null },
-        "telegram_order_ready_failed"
+        { workspaceId, orderId: order.id, kind: err.kind, code: err.code ?? null },
+        "telegram_order_failed"
       );
-      // فشل عابر → إعادة محاولة من الطابور؛ دائم → يظهر FAILED للمراجعة.
       return { success: false, error: `TELEGRAM_${err.kind}_${err.code ?? "ERROR"}` };
     }
     throw err;
@@ -824,8 +771,8 @@ export function getJobHandlers(): Record<string, JobHandler> {
       handleProcessAIMessage(db, payload, workspaceId),
     resolve_sender_profile: (payload, _jobId, workspaceId) =>
       handleResolveSenderProfile(db, payload, workspaceId),
-    notify_order_ready: (payload, _jobId, workspaceId) =>
-      handleNotifyOrderReady(db, payload, workspaceId),
+    notify_order_telegram: (payload, _jobId, workspaceId) =>
+      handleNotifyOrderTelegram(db, payload, workspaceId),
     generate_summary: (payload) => handleGenerateSummary(db, payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(db, payload),
     process_channel_inbound: (payload) => handleChannelInbound(db, payload),

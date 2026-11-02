@@ -37,7 +37,7 @@ type Settings = {
 
 type ModelKey = "classificationModel" | "extractionModel" | "responseModel" | "visionModel" | "summaryModel" | "embeddingModel";
 
-const PROVIDER_OPTIONS = ["custom", "hermes", "openai", "openrouter", "internal", "mock"];
+const PROVIDER_OPTIONS = ["openrouter", "custom", "internal", "mock"];
 
 // الاسم نفسه ببطاقة الحالة وهون (`TASK_AR`) — كانوا اسمين لنفس المهمة («التصنيف» هون و«فهم النية» بالاستوديو).
 const MODEL_FIELDS: { key: ModelKey; task: string; placeholder: string }[] = [
@@ -197,7 +197,10 @@ export default function AISettingsPage() {
     try {
       const res = await fetch("/api/ai/settings");
       if (!res.ok) throw new Error();
-      setForm((await res.json()) as Settings);
+      const data = (await res.json()) as Settings;
+      // Legacy providers were removed: show OpenRouter instead of a dead value.
+      if (!PROVIDER_OPTIONS.includes(data.provider)) data.provider = "openrouter";
+      setForm(data);
     } catch {
       setLoadError("تعذّر تحميل إعدادات الذكاء الاصطناعي");
     }
@@ -266,9 +269,10 @@ export default function AISettingsPage() {
       autoRespond: form.autoRespond,
     };
 
-    // حقل العنوان ما بينرسل للمزوّدين اللي مفاتيحهم من بيئة الخادم —
-    // حتى ما نمسح عنواناً محفوظاً لمجرد تبديل المزوّد.
-    if (aiConnectionMode(form.provider) !== "environment") {
+    // OpenRouter uses its official endpoint only — clear any legacy workspace URL.
+    if (form.provider === "openrouter") {
+      payload.customBaseUrl = null;
+    } else if (aiConnectionMode(form.provider) !== "environment") {
       payload.customBaseUrl = blank(form.customBaseUrl);
     }
     if (apiKey.trim()) payload.customApiKey = apiKey.trim();
@@ -362,7 +366,7 @@ export default function AISettingsPage() {
         }
       >
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="المزوّد" hint="GLM جاهز: اضغط «تعبئة GLM» وبعدها احفظ.">
+          <Field label="المزوّد" hint="OpenRouter هو المزوّد الخارجي المعتمد. GLM جاهز عبر «تعبئة GLM» للمزوّد المخصص.">
             <Select value={form.provider} onChange={(e) => update("provider", e.target.value)}>
               {PROVIDER_OPTIONS.map((provider) => (
                 <option key={provider} value={provider}>

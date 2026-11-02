@@ -57,65 +57,6 @@ export async function calculatePricing(
   };
 }
 
-/**
- * P22 — تسعير سلة متعددة المنتجات: مجموع البنود + رسوم توصيل واحدة (على
- * مجموع السلة، لا لكل بند). كل الأسعار من قاعدة البيانات. المبالغ
- * بالكسور الصحيحة (cents) لتفادي أخطاء الفاصلة العائمة.
- */
-export interface CartItemInput {
-  price: Prisma.Decimal | number | string;
-  quantity: number;
-  currency: string;
-}
-export interface CartPriceBreakdown {
-  lines: { unitPrice: number; quantity: number; subtotal: number }[];
-  subtotal: number;
-  discount: number;
-  deliveryFee: number;
-  total: number;
-  currency: string;
-  deliveryAvailable: boolean;
-  deliveryReason?: string;
-}
-
-export async function calculateCartPricing(
-  db: Db,
-  params: {
-    workspaceId: string;
-    items: CartItemInput[];
-    province?: string | null;
-    discount?: number;
-  }
-): Promise<CartPriceBreakdown> {
-  const lines = params.items.map((item) => ({
-    unitPrice: Number(item.price),
-    quantity: item.quantity,
-    subtotal: (Math.round(Number(item.price) * 100) * item.quantity) / 100,
-  }));
-  const subtotalCents = params.items.reduce(
-    (sum, item) => sum + Math.round(Number(item.price) * 100) * item.quantity,
-    0
-  );
-  const subtotal = subtotalCents / 100;
-  const delivery = await quoteDelivery(db, {
-    workspaceId: params.workspaceId,
-    province: params.province,
-    subtotal,
-  });
-  const discount = Math.min(Math.max(params.discount ?? 0, 0), subtotal);
-  const total = (subtotalCents - Math.round(discount * 100) + Math.round(delivery.fee * 100)) / 100;
-  return {
-    lines,
-    subtotal,
-    discount,
-    deliveryFee: delivery.fee,
-    total,
-    currency: params.items[0]?.currency ?? "USD",
-    deliveryAvailable: delivery.available,
-    deliveryReason: delivery.reason,
-  };
-}
-
 /** Deterministic order summary used by the AI to phrase a message. */
 export function formatOrderSummary(params: {  productName: string;
   quantity: number;

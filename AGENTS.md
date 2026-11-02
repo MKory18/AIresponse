@@ -4,8 +4,8 @@
 > أي قاعدة جديدة بتنكتب هون بس — ولا قاعدة بملف تاني.
 
 منصة ردود ومبيعات متعددة المستأجرين (Next.js 14 App Router · RTL · Prisma/Postgres · zod · Vitest) — جزء من منظومة Zaki:
-الـ OMS · الميديا باير · الكليبر · المالية · سيستم 1 · الأزمات · المهام · مساحة العمل · جسر Hermes.
-المراحل P0–P12 موثّقة بـ `docs/PROGRESS.md`. الربط مع المنظومة وباب Hermes: `docs/INTEGRATIONS.md` (المرجع الأول).
+الـ OMS · الميديا باير · الكليبر · المالية · سيستم 1 · الأزمات · المهام · مساحة العمل.
+المراحل P0–P12 موثّقة بـ `docs/PROGRESS.md`. الربط مع المنظومة: `docs/INTEGRATIONS.md` (المرجع الأول).
 العقود بين الأنظمة: `contracts/` · باب الـ OMS القادم + برومبت GLM: `docs/OMS-DOOR-V1.md`.
 
 ## قواعد المالك (إلزامية بكل جلسة)
@@ -35,10 +35,9 @@
 
 | النظام | الريبو | الحالة | العلاقة مع سيستم 7 |
 |---|---|---|---|
-| سيستم 7 — الردود والمبيعات (هاد الريبو) | `MKory18/AIresponse` | شغّال | المحور: سجل الأنظمة · الصادر الموقّع · باب الوكلاء · `contracts/` |
+| سيستم 7 — الردود والمبيعات (هاد الريبو) | `MKory18/AIresponse` | شغّال | المحور: سجل الأنظمة · الصادر الموقّع · `contracts/` |
 | الـ OMS / CRM (salesflow) | `MKory18/Zaki-ai-CRM` | **الأصل الوحيد** · شغّال (Next 16 · Prisma 6 · Node 24) | بيبعت أحداث الطلبات الستة موقّعة (`contracts/oms-app-events.v1`) · سيستم 7 بيرحّل الطلبات يدويًا اليوم و`/api/v1` لما ينبني |
 | نسخ الـ OMS | `MKory18/zaki-ai-OSM-1` · `iahmed30004000-wq/zaki-ai-OSM` | ⚠️ نسخ مطابقة | ولا شي |
-| Hermes | برنامج وكيل مفتوح المصدر على سيرفر المالك (مش ريبو إلنا) | شغّال | باب الوكلاء agent-door/v1 + مزوّد ردود اختياري ⚠️ |
 | الكليبر · مساحة العمل · سيستم 1 · المالية · المهام · الميديا باير · الأزمات | لسا ما انرفعوا | مخطط | العقد جاهز: `/api/v1/*` + الصادر الموقّع (`docs/INTEGRATIONS.md`) — أي نظام جديد بيلتزم فيه |
 
 - ⚠️ 3 نسخ من الـ OMS بنفس الكود: إذا GLM رفع على نسخة وClaude طوّر على نسخة تانية بيصيروا مختلفين بصمت.
@@ -78,8 +77,9 @@ npm run build
 | الكليبر · القدرة · الامتثال · الإشارات | `clipper.ts` · `capacity.ts` · `compliance.ts` · `ops-signals.ts` · `scheduler.ts` |
 | الإسناد والموافقة | `attribution.ts` (حلقات · «بداية المحادثة بتحكم») · `consent.ts` |
 | الـ OMS | `src/modules/oms/` — `app-webhook.ts` (أحداث التطبيقات الحقيقية) · `manual.ts` (نص الإدخال + الربط) · `handoff.ts` · `auto-handoff.ts` (8 محاولات + كنس ساعي) · `client.ts` (legacy · v1) |
-| باب الوكلاء (Hermes) | `src/modules/agent-door/` — `tools.ts` (11 أداة · مخططات حرفية) · `door.ts` · `drafts.ts` · `status.ts` |
-| المزوّد الخارجي (الوكيل الذكي) | `src/modules/ai/router.ts` (`isHermesSelected` · `isHermesPersonaMode`) · `stages/*` · `hermes-diagnostics.ts` — الشخصيات المحلية بتقود الصوت بكل مزوّد · ⚠️ بلا تحويل تلقائي للموظف على المسار الخارجي |
+| الطلبات المستقلة | `orders/order-service.ts` — تأكيد سلة = **طلب مستقل لكل منتج** (`orderBatchId` مشترك للتتبع فقط) · `orders/offers.ts` (باقة/عرض من DB) · `orders/notify.ts` + `notify_order_telegram` (رسالة لكل طلب) |
+| مسح ذاكرة العميل | `customers/memory.ts` + `POST /api/customers/[id]/memory/reset` + `Customer.memoryResetAt` — يمسح الذاكرة/الملخصات/الاستخراج ويترك الطلبات والسجل والهوية |
+| المزوّد الخارجي | `src/modules/ai/provider.ts` · `router.ts` · `config.ts` — **OpenRouter فقط** للذكاء الخارجي، وموديل GLM مركزي (`OPENROUTER_GLM_MODEL`) · الشخصيات المحلية بتقود الصوت · مزوّد داخلي/مخصص لسيرفر المالك |
 | وسائط القنوات الواردة | `src/modules/channels/whatsapp/media-download.ts` (معرّف ميتا ← رابط مؤقت ← بايتات ← مخزننا) · الصف من `channels/inbound-job.ts` بمفتاح `wa-media:مساحة:wamid` · الحذف بـ `media-retention.ts` |
 | خصوصية وسيط الزبون | تصنيف `CUSTOMER_INBOUND` + `MediaAsset.messageId` · `excludeCustomerInbound()` بـ `media/service.ts` **لازم ينضاف لأي استعلام وسائط جديد** · الاسم معتم دايمًا |
 | مدة الاحتفاظ بالحمولة الخام | `src/modules/channels/webhook-retention.ts` — كنس ساعي من المجدول · `WEBHOOK_PAYLOAD_RETENTION_DAYS` (30 · `0` مطفي) · الصف يبقى (عدم التكرار) |
@@ -99,17 +99,17 @@ npm run build
 - `ctwaClidEnc` و`psidEnc` ما بيطلعوا بأي رد API (`withoutClickSecrets`).
 - **صفحة جديدة بلوحة التحكم لازم تنضاف لـ `NAV_GROUPS`** (`src/lib/nav-model.ts`) بمجموعتها ويصلاحيتها — وإلا `tests/nav-structure.test.ts` بيفشل («صفحة بلا مجموعة»). **وكلمات البحث السريع** بـ`PAGE_KEYWORDS` (`src/lib/nav-search.ts`) — `tests/nav-search.test.ts` بيفشل لو الصفحة بلا كلمات (وإلا ما بتنلاقى). **ولا مسار بيتغيّر** عند إعادة التجميع: الروابط بالإشعارات والمفضلة وباب الوكلاء بتضل شغّالة.
 - **ألوان الثيم من متغيّرات CSS بس** — ممنوع hex ثابت بـ `tailwind.config.ts` أو `bg-[#hex]` بمكوّن (الاختبار بيفشل): ثيم ما بيقدر يبدّل لون ثابت. **ثيم جديد** = `THEMES` بـ `theme.ts` + كتلة `[data-theme="…"]` بـ `globals.css` بكل الأدوار، و`tests/theme-system.test.ts` بيفرض التباين (نص ≥ 7:1 · مخفّف ≥ 4.5 · `text-primary` على السطح والشريحة ≥ 4.5 · أبيض على التعبئة ≥ 4.5). الثيم الافتراضي بيتفرض إنه = الألوان القديمة بالحرف. ثيم ليلي بطبيعته = `forcesDark: true` وكتلة `[data-theme="…"]` وحدة (بتقعد فوق `.dark`) والمنتقي بيعطّل «فاتح» مع سبب. **مقابض الثيمات (`data-*`)**: `data-page-header` · `data-showcase` / `data-showcase-dots` · `data-hero` · `data-illustration` · `data-pane="nav"` · `data-brand-logo` / `data-logo-tile` — الثيم بيتزيّن منها بـCSS بلا ما نلمس كل صفحة (الاختبار بيفرض وجودها). **النطاقات الداكنة** (القائمة الجانبية وبطاقة الترحيب) بتعيد تعريف المتغيّرات جوّا نطاقها بس، والتباين مفحوص (`scopedPalette`). **رسمة تغطّي نص أبيض** (لوحة الدخول · بطاقة الترحيب): الغلاف الداكن (`linear-gradient`) **أول** بـ`background-image` (فوق الصورة) — وبعد أي تغيير بالصورة تتفحّص نسبة التباين لكل نص فوقها بمقاسات 1024×768 · 1440×900 · 1920×1080 (القياس بـ`docs/PROGRESS.md`). **اللوجو**: مسار SVG واحد (فقاعة + Z مفرّغ) بـ`brand-logo.tsx` ونفسه بـ`icon.svg` — شكل البلاطة بالثيم من CSS.
-- **والقائمة الفاضية الفعلية بتدلّ على الخطوة الجاية** (`EmptyNext` من `components/ui/empty-state.tsx` أو زر الإضافة) — مش نهاية مسدودة (`tests/empty-next.test.ts`). **وكل صفحة جديدة لازم إلها شرح** بـ `PAGE_GUIDES` (`src/lib/page-guides.ts`): «شو هاي الصفحة» + «الخطوة الجاية» بتأشّر على صفحة بالقائمة — `tests/page-guides.test.ts` بيفرضه. ولا «Hermes» بنص الشرح (قرار المالك: تسميات عامة).
+- **والقائمة الفاضية الفعلية بتدلّ على الخطوة الجاية** (`EmptyNext` من `components/ui/empty-state.tsx` أو زر الإضافة) — مش نهاية مسدودة (`tests/empty-next.test.ts`). **وكل صفحة جديدة لازم إلها شرح** بـ `PAGE_GUIDES` (`src/lib/page-guides.ts`): «شو هاي الصفحة» + «الخطوة الجاية» بتأشّر على صفحة بالقائمة — `tests/page-guides.test.ts` بيفرضه.
 - **كل حقل سري (كلمة سر · مفتاح · توكن) = `PasswordInput`** (`components/ui/password-input.tsx`): عين لإظهار القيمة وإخفائها — ممنوع `type="password"` خام بأي مكان بـ`src` (`tests/password-input.test.ts` بيفشل). للمفاتيح والتوكنات `kind="secret"`. كلمة سر بتنعطى لموظف بصفحة الفريق بتضل `type="text"` عن قصد (المدير لازم يشوفها).
 - **جدول «شو بيقدر كل دور؟» بصفحة الفريق** (`components/role-matrix.tsx`): خلاياه من `ROLE_PERMISSIONS` — لا تنسخ الصلاحيات بإيدك. **دور جديد** بـ`UserRole` لازم يوصل لـ`ROLE_OPTIONS` ونبذته لـ`ROLE_BLURB` (`tests/role-matrix.test.ts` بيفشل لو الـschema والمنتقي اختلفوا). صلاحية جديدة بتفرّق بين الأدوار وبدك تبيّنها = صف بـ`CAPABILITIES`.
 - وسيط الزبون الوارد (`CUSTOMER_INBOUND`) مربوط برسالته بس: ممنوع يطلع بالمكتبة أو منتقي أو سياق ذكاء أو رابط عام، والاسم معتم — أي استعلام وسائط جديد لازم يمرّ من `excludeCustomerInbound()` (`tests/wa-media-privacy.test.ts` بيحرسه).
 - عدم تكرار الإرسال: SENT · DELIVERED · READ نهائية لنفس المفتاح.
 - قواعد سيستم 1 (المسموح · الممنوع) بتوصل لكل مسار بيكتب رد: كل المزوّدين · التجربة اليدوية (`tests/p12-merge-main.test.ts`).
-- **ولا «Hermes» بأي نص مرئي بالموقع** (قرار المالك): تسميات عامة — «الوكيل الذكي» · «مزوّد الذكاء الاصطناعي». القيم الداخلية (`hermes` · `hermes-bridge` · `HERMES_*` · `hermes-agent`) والتعليقات والتوثيق والاختبارات بتضل — `tests/persona-management.test.ts` + `tests/p12-merge-main.test.ts` بيحرسوها.
+- **مزوّد ذكاء خارجي واحد: OpenRouter**، وموديل GLM واحد مركزي (`OPENROUTER_GLM_MODEL`). ممنوع إضافة مزوّد خارجي ثانٍ أو fallback صامت — الفشل يظهر ويُعاد بأمان (`tests/openrouter-only.test.ts`).
 
 ## المعلّق
 
-- طلب الدمج #1 (P12 + دمج وضع Hermes) — CI أخضر · بانتظار مراجعة المالك والدمج.
+- ترحيلات `20261101115033_telegram_order_ready` + `20261101142509_order_draft_items` + `20261102162825_independent_orders_memory_reset` بانتظار `migrate deploy` على الإنتاج.
 - باب `/api/v1` بالـ OMS (برومبت GLM جاهز بـ `docs/OMS-DOOR-V1.md`) ← بعده بالإعدادات: «API · v1» + توكن.
 - ⚠️ إدخال الطلبات بالذكاء بالـ OMS (`src/app/api/orders/ai-intake/route.ts`) بيبعت نص الطلب كامل (اسم · رقم · عنوان) لـ OpenRouter وبموديل مجاني افتراضيًا، وبيتخطّى إعدادات الذكاء بالـ OMS نفسه.
   🔧 يمرّ عبر `aiChat` بإعدادات الـ OMS بمزوّد `LOCAL` (GLM على سيرفراتك) — أو شيل `OPENROUTER_API_KEY` من بيئة الـ OMS لحد ما ينصلح.

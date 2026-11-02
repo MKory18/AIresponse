@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 /**
  * P12 — توقيع أحداث المنظومة والتحقق منها.
  *
- * القاعدة الموحّدة (عقود الكليبر وسيستم 1 وجسر Hermes):
+ * القاعدة الموحّدة (عقود الكليبر وسيستم 1 والأنظمة):
  *   X-Zaki-Timestamp  = وقت الإرسال (ثواني يونكس)
  *   X-Zaki-Signature  = hex( HMAC-SHA256( secret, "<timestamp>.<raw body>" ) )
  *   أقدم من 5 دقايق = رفض · event_id مكرر = نجاح بلا معالجة تانية.

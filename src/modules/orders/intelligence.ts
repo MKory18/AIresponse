@@ -131,7 +131,12 @@ export async function handleOrderIntent(
             orderNumber: result.orderNumber,
             total: result.total,
             currency: result.currency,
-            summaryText: `تم تأكيد طلبك ✅ رقم الطلب: ${result.orderNumber}`,
+            summaryText:
+              result.orders.length > 1
+                ? `تم تأكيد طلباتك ✅ عدد الطلبات: ${result.orders.length} — الأرقام: ${result.orders
+                    .map((o) => o.orderNumber)
+                    .join("، ")}`
+                : `تم تأكيد طلبك ✅ رقم الطلب: ${result.orderNumber}`,
           };
         } catch (err) {
           if (err instanceof AppError && err.code === "ORDER_REQUIRES_HUMAN") {
@@ -164,10 +169,15 @@ export async function handleOrderIntent(
       ? entities.products
           .filter((p) => p && typeof p.name === "string" && p.name.trim())
           .slice(0, 20)
-          .map((p) => ({ productName: p.name.trim(), quantity: p.quantity ?? null }))
+          .map((p) => ({
+            productName: p.name.trim(),
+            offerTitle: p.offer?.trim() || null,
+            quantity: p.quantity ?? null,
+          }))
       : [];
     const draftInput: Parameters<typeof updateDraftFromExtraction>[1]["extraction"] = {
       productName: multiItems.length ? null : entities.product ?? null,
+      offerTitle: multiItems.length ? null : entities.product_variant ?? null,
       quantity: multiItems.length ? null : entities.quantity ?? null,
       customerName: entities.customer_name ?? null,
       phone: entities.phone ?? null,
@@ -269,7 +279,14 @@ export async function handleOrderIntent(
       return {
         handled: true,
         action: "ASK_MISSING_FIELD",
-        summaryText: `لقينا أكثر من منتج مطابق: ${result.ambiguousCandidates.join("، ")}. أي واحد تقصد؟`,
+        summaryText: `لقينا أكثر من خيار مطابق: ${result.ambiguousCandidates.join("، ")}. أي واحد تقصد؟`,
+      };
+    }
+    if ("clarification" in result && result.clarification) {
+      return {
+        handled: true,
+        action: "ASK_MISSING_FIELD",
+        summaryText: result.clarification,
       };
     }
 

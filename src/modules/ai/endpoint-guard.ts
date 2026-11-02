@@ -247,29 +247,25 @@ export async function assertEndpointResolvesPublic(
   return { ok: true };
 }
 
-// ── Hermes-scoped private-network exception ─────────────────────────────
-// A self-hosted Hermes gateway typically listens on loopback/LAN
-// (e.g. http://127.0.0.1:8642), which the strict guard above rejects by
-// design. This exception is NARROW and deployer-opt-in:
+// ── Private-network exception (self-hosted / LAN gateways) ──────────────
+// A self-hosted OpenAI-compatible gateway may listen on loopback/LAN, which
+// the strict guard above rejects by design. This exception is NARROW and
+// deployer-opt-in:
 //
-// - Enabled ONLY via server-side `HERMES_ALLOW_PRIVATE_NETWORK=1/true/yes`
-//   (never from workspace UI input — the UI only supplies the URL).
-// - Applies ONLY to provider "hermes" call sites (settings save + probe).
-//   Every other provider keeps the strict guard, byte-identical.
-// - Additionally allowed (beyond strict): IPv4 loopback 127/8, RFC1918 LAN
-//   (10/8, 172.16/12, 192.168/16 — obfuscated literals included, since
-//   normalizeIPv4 canonicalizes them first), the `localhost` hostname, and
-//   IPv6 `::1`.
+// - Enabled ONLY via the server-side flag passed by the caller
+//   (AI_CUSTOM_ALLOW_PRIVATE_NETWORK for the workspace "custom" provider).
+// - Applies ONLY to the custom/internal call sites (settings save + probe).
+// - Additionally allowed (beyond strict): IPv4 loopback 127/8, RFC1918 LAN,
+//   the `localhost` hostname, and IPv6 `::1`.
 // - ALWAYS blocked, flag or not: cloud metadata hostnames/IPs (notably
-//   169.254.169.254, which lives in link-local 169.254/16 — kept blocked),
-//   0.0.0.0/::, multicast, reserved, CGNAT, ULA, embedded credentials,
-//   non-http(s) schemes, and malformed URLs.
+//   169.254.169.254), 0.0.0.0/::, multicast, reserved, CGNAT, ULA,
+//   embedded credentials, non-http(s) schemes, and malformed URLs.
 
-export interface HermesEndpointOpts {
+export interface PrivateEndpointOpts {
   allowPrivateNetwork?: boolean;
 }
 
-function parseHermesHost(raw: string):
+function parsePrivateHost(raw: string):
   | { ok: true; url: URL; host: string }
   | { ok: false; reason: EndpointRejection } {
   let url: URL;
@@ -288,7 +284,7 @@ function parseHermesHost(raw: string):
   if (!host) return { ok: false, reason: "INVALID_URL" };
   if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
   host = host.split("%")[0];
-  // Metadata namespaces are never Hermes targets, flag or not.
+  // Metadata namespaces are never private targets, flag or not.
   if (
     METADATA_HOSTS.has(host) ||
     host === "metadata.google.internal" ||
@@ -299,12 +295,12 @@ function parseHermesHost(raw: string):
   return { ok: true, url, host };
 }
 
-/** Hermes sync checks: strict baseline + optional loopback/RFC1918. */
-export function validateHermesEndpoint(
+/** Private sync checks: strict baseline + optional loopback/RFC1918. */
+export function validatePrivateEndpoint(
   raw: string,
-  opts: HermesEndpointOpts = {}
+  opts: PrivateEndpointOpts = {}
 ): { ok: true } | { ok: false; reason: EndpointRejection } {
-  const parsed = parseHermesHost(raw);
+  const parsed = parsePrivateHost(raw);
   if (!parsed.ok) return parsed;
   const { host } = parsed;
   if (!opts.allowPrivateNetwork) return validateEndpointUrl(raw);
@@ -342,16 +338,16 @@ function dnsAddrAllowed(
   const v4 = normalizeIPv4(addr);
   if (!v4) return false;
   if (!ipv4Blocked(v4)) return true; // global unicast
-  // Blocked-literal that is still acceptable for Hermes iff explicitly
-  // loopback/RFC1918 under the flag. 169.254/16 (metadata), 0.0.0.0,
+  // Blocked-literal that is still acceptable for a private gateway iff
+  // explicitly loopback/RFC1918 under the flag. 169.254/16 (metadata), 0.0.0.0,
   // multicast, reserved and CGNAT never pass, flag or not.
   return allowPrivateNetwork && (isLoopbackIPv4(v4) || isRfc1918IPv4(v4));
 }
 
-/** Hermes DNS layer: every resolved address must be allowed (see above). */
-export async function assertHermesEndpointResolves(
+/** Private DNS layer: every resolved address must be allowed (see above). */
+export async function assertPrivateEndpointResolves(
   raw: string,
-  opts: HermesEndpointOpts & {
+  opts: PrivateEndpointOpts & {
     lookupFn?: (host: string) => Promise<Array<{ address: string; family: number }>>;
   } = {}
 ): Promise<{ ok: true } | { ok: false; reason: EndpointRejection }> {
@@ -359,9 +355,9 @@ export async function assertHermesEndpointResolves(
     const resolved = await lookup(h, { all: true });
     return resolved.map((x) => ({ address: x.address, family: x.family }));
   }, allowPrivateNetwork = false } = opts;
-  const sync = validateHermesEndpoint(raw, { allowPrivateNetwork });
+  const sync = validatePrivateEndpoint(raw, { allowPrivateNetwork });
   if (!sync.ok) return sync;
-  const parsed = parseHermesHost(raw);
+  const parsed = parsePrivateHost(raw);
   if (!parsed.ok) return parsed;
   // Literal IPs need no DNS (already classified above).
   if (normalizeIPv4(parsed.host) || parsed.host.includes(":")) return { ok: true };
@@ -380,17 +376,6 @@ export async function assertHermesEndpointResolves(
   return { ok: true };
 }
 
-/**
- * Trusted server-side toggle for the Hermes private exception. Reads ONLY
- * the deployer's environment (never workspace input): "1"/"true"/"yes"
- * (case-insensitive) enables; anything else (incl. unset) disables.
- */
-export function isHermesPrivateNetworkAllowed(
-  env: Record<string, string | undefined> = process.env
-): boolean {
-  return ["1", "true", "yes"].includes((env.HERMES_ALLOW_PRIVATE_NETWORK ?? "").toLowerCase());
-}
-
 // ── Custom-scoped private-network exception ──────────────────────────────
 // نفس منطق استثناء الوكيل الذكي حرفياً — لكن الباب لمزوّد "custom" (أي
 // واجهة OpenAI خارجية على سيرفر المالك الداخلي/LAN). متغير بيئة مستقل
@@ -405,16 +390,16 @@ export function isCustomPrivateNetworkAllowed(
 
 export function validateCustomEndpoint(
   raw: string,
-  opts: HermesEndpointOpts = {}
+  opts: PrivateEndpointOpts = {}
 ): { ok: true } | { ok: false; reason: EndpointRejection } {
-  return validateHermesEndpoint(raw, opts);
+  return validatePrivateEndpoint(raw, opts);
 }
 
 export async function assertCustomEndpointResolves(
   raw: string,
-  opts: HermesEndpointOpts & {
+  opts: PrivateEndpointOpts & {
     lookupFn?: (host: string) => Promise<Array<{ address: string; family: number }>>;
   } = {}
 ): Promise<{ ok: true } | { ok: false; reason: EndpointRejection }> {
-  return assertHermesEndpointResolves(raw, opts);
+  return assertPrivateEndpointResolves(raw, opts);
 }

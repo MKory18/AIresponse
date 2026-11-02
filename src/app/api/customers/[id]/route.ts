@@ -16,6 +16,7 @@ export const GET = createHandler(
       ...customer,
       canWrite: hasPermission(auth!.role, [], "customers.write"),
       canConfirm: hasPermission(auth!.role, [], "conversations.reply"),
+      canResetMemory: hasPermission(auth!.role, [], "customers.memory.reset"),
     });
   }
 );

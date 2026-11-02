@@ -23,13 +23,8 @@ process.env.ENCRYPTION_KEY = "test-encryption-key-for-unit-tests-00000000000";
 // setMockAIProvider, or direct resolveAIProvider opts) — never ambient.
 for (const k of [
   "AI_PROVIDER",
-  "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "GOOGLE_API_KEY",
-  "HERMES_BASE_URL",
-  "HERMES_API_KEY",
-  "HERMES_MODEL",
+  "OPENROUTER_GLM_MODEL",
   "ALLOW_MOCK_AI",
   "AI_DISABLE_AUTO_HANDOFF",
   // Empty-string overrides (e.g. `META_REDIRECT_URI=` in a local .env) defeat

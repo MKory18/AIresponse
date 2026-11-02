@@ -177,21 +177,11 @@ describe("P12 × main — ولا اسم مزار داخلي بأي نص مرئي
     "src/components/inbox/marketing-card.tsx",
   ];
   /** النص المرئي تقريبًا = المصدر بلا تعليقات وبلا المعرّفات التقنية المسموحة. */
-  const visible = (src: string) =>
-    src
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|\s)\/\/.*$/gm, "$1")
-      .replace(/value="hermes"/g, "")
-      .replace(/["'`]hermes(-bridge)?["'`]/g, "")
-      .replace(/\bhermes(?=\s*:)/g, "")
-      .replace(/HERMES_[A-Z_]+/g, "")
-      .replace(/hermes-agent/g, "");
-
-  it.each(P12_UI)("%s: بلا اسم العلامة", (f) => {
-    expect(visible(readFileSync(f, "utf8"))).not.toMatch(/hermes/i);
+  it.each(P12_UI)("%s: بلا أي أثر للاسم المحذوف", (f) => {
+    expect(readFileSync(f, "utf8")).not.toMatch(/hermes/i);
   });
 
-  it("أسماء الأنظمة والتوكنات المعروضة عامة بالكامل", () => {
+  it("أسماء الأنظمة والتوكنات المعروضة بلا الاسم المحذوف", () => {
     for (const spec of Object.values(SYSTEM_SPECS) as Array<Record<string, unknown>>) {
       for (const [k, v] of Object.entries(spec)) {
         if (typeof v === "string" && /Ar$/.test(k)) expect(v, k).not.toMatch(/hermes/i);

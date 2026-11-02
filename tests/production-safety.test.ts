@@ -62,9 +62,9 @@ describe("fail-closed AI provider resolution (pure)", () => {
     }
   });
 
-  it("openai without key throws AI_NOT_CONFIGURED", () => {
-    expect(() => resolveAIProvider({ aiProvider: "openai", nodeEnv: "production" })).toThrow(
-      /OPENAI_API_KEY/
+  it("openrouter without key throws AI_NOT_CONFIGURED", () => {
+    expect(() => resolveAIProvider({ aiProvider: "openrouter", nodeEnv: "production" })).toThrow(
+      /OPENROUTER_API_KEY/
     );
   });
 
