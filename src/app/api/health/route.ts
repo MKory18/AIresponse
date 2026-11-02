@@ -93,9 +93,28 @@ export async function GET() {
     }
   }
 
-  // Facebook configuration (presence only — never values)
+  // AI readiness (presence only — never key values).
   const env = getEnvSafe();
   status.facebook = env.META_APP_ID && env.META_APP_SECRET ? "APP_HEALTHY" : "FACEBOOK_CONFIGURATION_MISSING";
+  const aiProvider = (env.AI_PROVIDER ?? "unset") as string;
+  status.aiProvider = aiProvider;
+  status.aiKey = env.hasOpenRouterKey ? "CONFIGURED" : "MISSING";
+  let workspaceCustom = false;
+  try {
+    workspaceCustom =
+      (await prisma.aISettings.count({
+        where: { provider: "custom", customBaseUrl: { not: null }, customApiKeyEnc: { not: null } },
+      })) > 0;
+  } catch {
+    workspaceCustom = false;
+  }
+  status.ai =
+    env.hasOpenRouterKey && (aiProvider === "openrouter" || aiProvider === "openai")
+      ? "APP_HEALTHY"
+      : workspaceCustom
+        ? "APP_HEALTHY"
+        : "AI_NOT_CONFIGURED";
+  if (status.ai === "AI_NOT_CONFIGURED") httpStatus = 503;
 
   const healthy = Object.values(status).every(
     (v) => v === "APP_HEALTHY" || v === "FACEBOOK_CONFIGURATION_MISSING"
@@ -106,11 +125,21 @@ export async function GET() {
   );
 }
 
-function getEnvSafe(): Record<string, string | undefined> {
+function getEnvSafe(): {
+  META_APP_ID?: string;
+  META_APP_SECRET?: string;
+  AI_PROVIDER?: string;
+  hasOpenRouterKey: boolean;
+} {
   try {
     const env = getEnv();
-    return { META_APP_ID: env.META_APP_ID, META_APP_SECRET: env.META_APP_SECRET };
+    return {
+      META_APP_ID: env.META_APP_ID,
+      META_APP_SECRET: env.META_APP_SECRET,
+      AI_PROVIDER: env.AI_PROVIDER,
+      hasOpenRouterKey: Boolean(env.OPENROUTER_API_KEY),
+    };
   } catch {
-    return {};
+    return { hasOpenRouterKey: false };
   }
 }

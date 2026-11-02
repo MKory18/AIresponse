@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { resolveAIProvider, OpenAICompatibleProvider } from "@/modules/ai/provider";
 import { getWorkspaceProvider, DEFAULT_MODELS } from "@/modules/ai/router";
 import { DEFAULT_OPENROUTER_GLM_MODEL, openRouterModel } from "@/modules/ai/config";
+import { encryptSecret } from "@/core/crypto";
 
 describe("OpenRouter is the only external provider", () => {
   it("resolves OpenRouter with the configured GLM id", () => {
@@ -29,6 +30,37 @@ describe("OpenRouter is the only external provider", () => {
     expect(p.name).toBe("openrouter");
     const q = resolveAIProvider({ aiProvider: "openai", openrouterKey: "sk-or-test", nodeEnv: "production" });
     expect(q.name).toBe("openrouter");
+  });
+
+  it("provider precedence: env OpenRouter wins over workspace mock; workspace custom is explicit", () => {
+    const fromMock = getWorkspaceProvider(
+      { provider: "mock", responseModel: null },
+      { aiProvider: "openrouter", openrouterKey: "sk-or-test", nodeEnv: "production" }
+    );
+    expect(fromMock.name).toBe("openrouter");
+
+    const custom = getWorkspaceProvider(
+      {
+        provider: "custom",
+        responseModel: "auto/best-chat",
+        customBaseUrl: "https://glm.example/v1",
+        customApiKeyEnc: encryptSecret("test-key"),
+      },
+      { aiProvider: "openrouter", openrouterKey: "sk-or-test", nodeEnv: "production" }
+    );
+    expect(custom.name).toBe("custom");
+
+    const explicit = getWorkspaceProvider(
+      { provider: "openrouter", responseModel: null },
+      { aiProvider: "mock", openrouterKey: "sk-or-test", nodeEnv: "production" }
+    );
+    expect(explicit.name).toBe("openrouter");
+  });
+
+  it("mock never runs as a production provider", () => {
+    expect(() =>
+      getWorkspaceProvider({ provider: "mock", responseModel: null }, { nodeEnv: "production" })
+    ).toThrow(/AI_NOT_CONFIGURED/);
   });
 
   it("fails closed without a key (never a fake reply)", () => {
