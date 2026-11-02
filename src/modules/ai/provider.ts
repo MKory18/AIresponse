@@ -385,12 +385,13 @@ export function resolveAIProvider(opts: {
   openaiKey?: string;
 }): AIProvider {
   if (globalForAI.__acreMockAI) return globalForAI.__acreMockAI;
-  if (opts.aiProvider && opts.aiProvider !== "openrouter" && opts.aiProvider !== "mock") {
+  const aiProvider = opts.aiProvider === "openai" ? "openrouter" : opts.aiProvider;
+  if (aiProvider && aiProvider !== "openrouter" && aiProvider !== "mock") {
     throw new AIProviderError(
-      `AI_NOT_CONFIGURED: unsupported AI_PROVIDER="${opts.aiProvider}". Use "openrouter" with OPENROUTER_API_KEY.`
+      `AI_NOT_CONFIGURED: unsupported AI_PROVIDER="${aiProvider}". Use "openrouter" with OPENROUTER_API_KEY.`
     );
   }
-  if (opts.aiProvider === "openrouter") {
+  if (aiProvider === "openrouter") {
     if (!opts.openrouterKey) {
       throw new AIProviderError(
         `AI_NOT_CONFIGURED: AI_PROVIDER="openrouter" is configured but OPENROUTER_API_KEY is missing. Refusing mock fallback — no fake replies will be sent.`

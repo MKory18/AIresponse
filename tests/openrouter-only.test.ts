@@ -21,6 +21,16 @@ describe("OpenRouter is the only external provider", () => {
     }
   });
 
+  it("legacy workspace/env provider 'openai' maps to OpenRouter, never OpenAI", () => {
+    const p = getWorkspaceProvider(
+      { provider: "openai", responseModel: "auto/best-chat" },
+      { openrouterKey: "sk-or-test", nodeEnv: "production" }
+    );
+    expect(p.name).toBe("openrouter");
+    const q = resolveAIProvider({ aiProvider: "openai", openrouterKey: "sk-or-test", nodeEnv: "production" });
+    expect(q.name).toBe("openrouter");
+  });
+
   it("fails closed without a key (never a fake reply)", () => {
     expect(() => resolveAIProvider({ aiProvider: "openrouter", nodeEnv: "production" })).toThrow(/OPENROUTER_API_KEY/);
     expect(() =>

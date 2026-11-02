@@ -69,8 +69,9 @@ Set on the Coolify application (Values marked SECRET must be generated, never co
 | `STORAGE_PROVIDER` | `local`. |
 | `STORAGE_DIR` | e.g. `/app/.data/storage` (must be a persistent volume — see §6). |
 | `LOG_LEVEL` | `info`. |
-| `AI_PROVIDER` | `openai` (or the provider used in staging). |
-| `OPENAI_API_KEY` / other provider keys | SECRET — as configured. |
+| `AI_PROVIDER` | `openrouter` |
+| `OPENROUTER_API_KEY` | SECRET — required for real AI replies; missing key = fail-closed, no fake reply. |
+| `OPENROUTER_GLM_MODEL` | `z-ai/glm-4.6` (central model; change only after a live quality test). |
 | `META_APP_ID`, `META_APP_SECRET` | SECRET — required for the real Meta flow; health reports `FACEBOOK_CONFIGURATION_MISSING` without them. |
 | `META_WEBHOOK_VERIFY_TOKEN` | SECRET — the token entered in the Meta App webhook UI. |
 | `META_REDIRECT_URI`, `META_GRAPH_VERSION` | Optional; defaults derive from `APP_URL` / `v21.0`. |
