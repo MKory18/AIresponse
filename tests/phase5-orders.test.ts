@@ -16,7 +16,6 @@ import { encryptSecret } from "@/core/crypto";
 import { createProduct } from "@/modules/products/service";
 import { AppError } from "@/core/errors";
 import { InMemoryVectorStore } from "@/modules/knowledge/vector-store";
-import { assignPageCatalog } from "./helpers/catalog";
 
 const WS_A = "ws-a";
 const WS_B = "ws-b";
@@ -48,7 +47,6 @@ async function seedWorld() {
       encryptedCredentials: encryptSecret("page-token-test"),
     },
   } as never);
-  await assignPageCatalog(db as Db, WS_A, ch.id, [productId]);
   await db.channelIdentity.create({
     data: { workspaceId: WS_A, customerId, channelType: "FACEBOOK", channelExternalId: "fb-conv-1" },
   } as never);

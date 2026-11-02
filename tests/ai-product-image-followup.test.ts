@@ -10,7 +10,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
-import { assignPageCatalog } from "./helpers/catalog";
 import { encryptSecret } from "@/core/crypto";
 import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
 import { processIncomingMessage } from "@/modules/conversations/service";
@@ -109,7 +108,6 @@ describe("AI product images — follow-up request", () => {
         currency: "JOD",
       },
     } as never)) as any;
-    await assignPageCatalog(db as never, WS, ch.id, [product.id]);
     const photo = (await db.mediaAsset.create({
       data: {
         workspaceId: WS,

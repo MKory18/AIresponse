@@ -58,28 +58,40 @@ export async function calculatePricing(
 }
 
 /**
- * Pricing for N independent orders created from ONE cart confirmation.
- * Delivery is quoted ONCE on the whole cart subtotal (never charged twice),
- * then allocated to the first independent order only. Item prices still come
- * from the DB rows passed by the caller.
+ * P22 — تسعير سلة متعددة المنتجات: مجموع البنود + رسوم توصيل واحدة (على
+ * مجموع السلة، لا لكل بند). كل الأسعار من قاعدة البيانات. المبالغ
+ * بالكسور الصحيحة (cents) لتفادي أخطاء الفاصلة العائمة.
  */
-export interface IndependentOrderLine {
-  unitPrice: number;
+export interface CartItemInput {
+  price: Prisma.Decimal | number | string;
   quantity: number;
+  currency: string;
+}
+export interface CartPriceBreakdown {
+  lines: { unitPrice: number; quantity: number; subtotal: number }[];
   subtotal: number;
   discount: number;
   deliveryFee: number;
   total: number;
   currency: string;
+  deliveryAvailable: boolean;
+  deliveryReason?: string;
 }
-export async function calculateIndependentOrdersPricing(
+
+export async function calculateCartPricing(
   db: Db,
   params: {
     workspaceId: string;
-    items: { price: Prisma.Decimal | number | string; quantity: number; currency: string }[];
+    items: CartItemInput[];
     province?: string | null;
+    discount?: number;
   }
-): Promise<{ lines: IndependentOrderLine[]; deliveryAvailable: boolean; deliveryReason?: string }> {
+): Promise<CartPriceBreakdown> {
+  const lines = params.items.map((item) => ({
+    unitPrice: Number(item.price),
+    quantity: item.quantity,
+    subtotal: (Math.round(Number(item.price) * 100) * item.quantity) / 100,
+  }));
   const subtotalCents = params.items.reduce(
     (sum, item) => sum + Math.round(Number(item.price) * 100) * item.quantity,
     0
@@ -90,39 +102,18 @@ export async function calculateIndependentOrdersPricing(
     province: params.province,
     subtotal,
   });
-  const feeCents = Math.round(delivery.fee * 100);
-  const weights = params.items.map((item) => Math.round(Number(item.price) * 100) * item.quantity);
-  const totalWeight = weights.reduce((a, b) => a + b, 0);
-  // Exact proportional split in integer cents (largest remainder). The sum of
-  // every order's delivery share equals the batch fee exactly — never a full
-  // fee dumped on the first order, never a duplicated fee.
-  const rawShares =
-    totalWeight > 0
-      ? weights.map((w) => (feeCents * w) / totalWeight)
-      : params.items.map(() => feeCents / Math.max(1, params.items.length));
-  const shares = rawShares.map((v) => Math.floor(v));
-  let remainder = feeCents - shares.reduce((a, b) => a + b, 0);
-  const order = rawShares
-    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-    .sort((a, b) => b.frac - a.frac || a.i - b.i);
-  for (let k = 0; k < order.length && remainder > 0; k += 1) {
-    shares[order[k]!.i] += 1;
-    remainder -= 1;
-  }
-  const lines = params.items.map((item, idx) => {
-    const lineCents = Math.round(Number(item.price) * 100) * item.quantity;
-    const lineFee = shares[idx] ?? 0;
-    return {
-      unitPrice: Number(item.price),
-      quantity: item.quantity,
-      subtotal: lineCents / 100,
-      discount: 0,
-      deliveryFee: lineFee / 100,
-      total: (lineCents + lineFee) / 100,
-      currency: item.currency,
-    };
-  });
-  return { lines, deliveryAvailable: delivery.available, deliveryReason: delivery.reason };
+  const discount = Math.min(Math.max(params.discount ?? 0, 0), subtotal);
+  const total = (subtotalCents - Math.round(discount * 100) + Math.round(delivery.fee * 100)) / 100;
+  return {
+    lines,
+    subtotal,
+    discount,
+    deliveryFee: delivery.fee,
+    total,
+    currency: params.items[0]?.currency ?? "USD",
+    deliveryAvailable: delivery.available,
+    deliveryReason: delivery.reason,
+  };
 }
 
 /** Deterministic order summary used by the AI to phrase a message. */

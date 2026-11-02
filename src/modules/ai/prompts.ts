@@ -112,8 +112,6 @@ export function trustedDataPrompt(data: {
     faqs: { question: string; answer: string }[];
     /** أسعار إضافية مسمّاة (سعر الجملة · موزع …) — بيانات رسمية من النظام. */
     priceTiers?: { label: string; price: string }[];
-    /** عروض/باقات: اسم العرض + عدد القطع داخله + سعر الباقة. */
-    offers?: { title: string; quantity: number; price: string }[];
     /** P12 — قواعد الادعاءات من سيستم 1. */
     compliance?: { allowedClaims: string[]; bannedClaims: string[] } | null;
   };
@@ -155,11 +153,6 @@ export function trustedDataPrompt(data: {
         `السعر الرسمي: ${p.price} ${p.currency}`,
         p.priceTiers?.length
           ? `أسعار إضافية مسمّاة (السعر الرسمي فوق هو الأساس): ${p.priceTiers.map((tp) => `${tp.label} ${tp.price}`).join(" · ")}`
-          : null,
-        p.offers?.length
-          ? `عروض/باقات (الكمية المطلوبة = عدد الباقات، وليس عدد القطع): ${p.offers
-              .map((o) => `${o.title} — ${o.quantity} قطع بسعر ${o.price} ${p.currency}`)
-              .join(" · ")}`
           : null,
         `التوفر: ${p.stockStatus}`,
         p.shortDescription ? `وصف: ${p.shortDescription}` : null,
@@ -265,7 +258,7 @@ export function extractionInstruction(): string {
   return [
     "استخرج الكيانات من رسالة العميل مع استخدام سياق المحادثة (مثلاً «بدي 3» بعد حديث عن منتج يعني 3 من ذلك المنتج).",
     "أعد JSON فقط:",
-    '{"intent":"...","confidence":0-1,"entities":{"customer_name","phone","address","province","product","product_variant","quantity","products":[{"name","offer","quantity"}],"notes"},"missingFields":[],"memories":[{"type":"FACT|PREFERENCE|NOTE","content":"..."}],"requestedAction":"ANSWER|CREATE_ORDER|HANDOFF_HUMAN|CLARIFY"}',
+    '{"intent":"...","confidence":0-1,"entities":{"customer_name","phone","address","province","product","product_variant","quantity","products":[{"name","quantity"}],"notes"},"missingFields":[],"memories":[{"type":"FACT|PREFERENCE|NOTE","content":"..."}],"requestedAction":"ANSWER|CREATE_ORDER|HANDOFF_HUMAN|CLARIFY"}',
     "إذا ذكر الزبون أكثر من منتج، املأ products لكل منتج مع كميته (واترك product/quantity للعنصر الأول فقط).",
     "استخرج فقط ما ذُكر صراحة. لا تخمّن أسعاراً. memories فقط للمعلومات المفيدة مستقبلاً (ليس «مرحبا»).",
     "missingFields لطلب غير مكتمل: أدرج phone/address/product/quantity الناقصة فقط إذا كان intent هو ORDER_CREATE.",

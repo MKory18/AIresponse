@@ -24,7 +24,6 @@ export async function GET(req: NextRequest) {
  * verify signature → persist raw (idempotent) → route page → enqueue → 200 fast.
  */
 export async function POST(req: NextRequest) {
-  const startedAt = Date.now();
   const rawBody = await req.text();
   const env = getEnv();
 
@@ -43,10 +42,6 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await ingestMetaWebhook(prisma, payload);
-  log.info(
-    { status: result.status, ackMs: Date.now() - startedAt },
-    "facebook.webhook.acked"
-  );
   // Unknown pages / non-page objects: acknowledge (200) with no processing.
   return NextResponse.json({ ok: true, status: result.status });
 }

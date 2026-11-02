@@ -7,7 +7,6 @@ import { getOverview, getAIAnalytics, getProductAnalytics, getFunnel, getSLA, ge
 import { rebuildDailyAnalytics, rebuildRange } from "@/modules/analytics/aggregation";
 import { incrementUsage } from "@/core/analytics/usage-service";
 import { createProduct } from "@/modules/products/service";
-import { assignPageCatalog } from "./helpers/catalog";
 import { createOrderFromDraft, updateDraftFromExtraction } from "@/modules/orders/order-service";
 import { updateDraftFromExtraction as updateDraft } from "@/modules/orders/draft-service";
 import { estimateCost, logUsage } from "@/modules/ai/router";
@@ -19,17 +18,11 @@ type Db = Prisma.TransactionClient;
 
 let db: ReturnType<typeof createFakeDb>;
 let productId: string;
-let channelId: string;
 
 beforeEach(async () => {
   db = createFakeDb();
   const product = await createProduct(db as Db, AGENT, { name: "ماء الكمأة", sku: "TW-500", price: 450000, currency: "SYP" });
   productId = product.id;
-  const channel = (await db.channel.create({
-    data: { workspaceId: WS_A, type: "FACEBOOK", status: "CONNECTED", displayName: "Page", externalId: "page-8" },
-  } as never)) as { id: string };
-  channelId = channel.id;
-  await assignPageCatalog(db as Db, WS_A, channelId, [productId]);
 });
 
 describe("Phase 8 — time ranges & timezone", () => {
@@ -139,7 +132,7 @@ describe("Phase 8 — historical revenue from snapshots", () => {
   it("critical: product price change does NOT change historical revenue", async () => {
     const customer = await db.customer.create({ data: { workspaceId: WS_A } } as never);
     const conv = await db.conversation.create({
-      data: { workspaceId: WS_A, customerId: customer.id, channelId, channelConversationId: "c1" },
+      data: { workspaceId: WS_A, customerId: customer.id, channelId: "ch", channelConversationId: "c1" },
     } as never);
     await updateDraft(db as Db, {
       workspaceId: WS_A, conversationId: conv.id, customerId: customer.id,
@@ -197,7 +190,7 @@ describe("Phase 8 — funnel & zero denominators", () => {
   it("funnel computes real rates with data", async () => {
     const customer = await db.customer.create({ data: { workspaceId: WS_A } } as never);
     const conv = await db.conversation.create({
-      data: { workspaceId: WS_A, customerId: customer.id, channelId, channelConversationId: "c2" },
+      data: { workspaceId: WS_A, customerId: customer.id, channelId: "ch", channelConversationId: "c2" },
     } as never);
     await updateDraft(db as Db, {
       workspaceId: WS_A, conversationId: conv.id, customerId: customer.id,
@@ -218,7 +211,7 @@ describe("Phase 8 — first response time definition", () => {
   it("FRT = first OUTBOUND after first INBOUND", async () => {
     const customer = await db.customer.create({ data: { workspaceId: WS_A } } as never);
     const conv = await db.conversation.create({
-      data: { workspaceId: WS_A, customerId: customer.id, channelId, channelConversationId: "c3" },
+      data: { workspaceId: WS_A, customerId: customer.id, channelId: "ch", channelConversationId: "c3" },
     } as never);
     const t0 = Date.now();
     await db.message.createMany({
@@ -237,7 +230,7 @@ describe("Phase 8 — SLA", () => {
   it("breach counting with configured target", async () => {
     const customer = await db.customer.create({ data: { workspaceId: WS_A } } as never);
     const conv = await db.conversation.create({
-      data: { workspaceId: WS_A, customerId: customer.id, channelId, channelConversationId: "c4" },
+      data: { workspaceId: WS_A, customerId: customer.id, channelId: "ch", channelConversationId: "c4" },
     } as never);
     const t0 = Date.now();
     await db.message.createMany({
@@ -261,7 +254,7 @@ describe("Phase 8 — SLA", () => {
 
 describe("Phase 8 — daily aggregation (idempotent, late events)", () => {
   it("rebuild is idempotent — repeated rebuild yields identical totals", async () => {
-    await db.conversation.create({ data: { workspaceId: WS_A, customerId: "c", channelId, channelConversationId: "x" } } as never);
+    await db.conversation.create({ data: { workspaceId: WS_A, customerId: "c", channelId: "ch", channelConversationId: "x" } } as never);
     const day = new Date();
     await rebuildDailyAnalytics(db as Db, WS_A, day);
     await rebuildDailyAnalytics(db as Db, WS_A, day);
@@ -287,7 +280,7 @@ describe("Phase 8 — daily aggregation (idempotent, late events)", () => {
   });
 
   it("aggregation is workspace-scoped", async () => {
-    await db.conversation.create({ data: { workspaceId: WS_B, customerId: "c", channelId, channelConversationId: "y" } } as never);
+    await db.conversation.create({ data: { workspaceId: WS_B, customerId: "c", channelId: "ch", channelConversationId: "y" } } as never);
     await rebuildDailyAnalytics(db as Db, WS_A, new Date());
     const rows = db._stores.dailyWorkspaceAnalytics as any[];
     expect(rows.every((r) => r.workspaceId === WS_A)).toBe(true);

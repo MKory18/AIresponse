@@ -48,8 +48,6 @@ export async function runGating(
   if (!message || message.workspaceId !== params.workspaceId || message.conversationId !== params.conversationId) {
     return { terminal: { status: "SKIPPED" } };
   }
-  // Queue wait: from message persistence (webhook ACK) to worker pickup.
-  fx.stageMs.queueWait = Math.max(0, pipelineStarted - new Date(message.createdAt).getTime());
   if (message.direction !== "INBOUND" || message.senderType !== "CUSTOMER") {
     return { terminal: { status: "NOT_INBOUND" } }; // AI loop prevention
   }
@@ -182,9 +180,9 @@ export async function runGating(
   // no dependency on the others — serializing it wasted one full DB round-trip
   // on every single AI turn (critical-path latency). Persona resolution is
   // ALWAYS active: the selected persona (channel → workspace default →
-  // builtin) drives reply voice in every provider mode; the provider carries
-  // no personaId parameter, so local instructions travel in the request via
-  // the standard message builder.
+  // builtin) drives reply voice in every provider mode, including Hermes —
+  // Hermes carries no personaId parameter, so local instructions travel in
+  // the request via the standard message builder.
   const [settingsRaw, resolvedPersona, customer, recentMessagesRaw] = await timed("config", () => Promise.all([
     loadAISettings(db, params.workspaceId),
     resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
@@ -193,7 +191,7 @@ export async function runGating(
       where: { conversationId: conversation.id, deletedAt: null, isNote: false },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 8,
-      select: { id: true, senderType: true, direction: true, text: true, createdAt: true },
+      select: { id: true, senderType: true, direction: true, text: true },
     }),
   ]));
   // PERF — the channel row is read once inside resolveChannelPersona (scope
@@ -290,14 +288,9 @@ export async function runGating(
     email: (customer as { email?: string | null }).email ?? null,
     address: (customer as { address?: string | null }).address ?? null,
   };
-  const memoryResetAt = (customer as { memoryResetAt?: Date | null }).memoryResetAt ?? null;
-  const trustedContacts = !memoryResetAt && customerPII.phone ? [customerPII.phone] : [];
+  const trustedContacts = customerPII.phone ? [customerPII.phone] : [];
   const customerText = message.text ?? "[رسالة وسائط]";
-  const recentMessages = (
-    recentMessagesRaw as { id: string; senderType: string; direction: string; text: string | null; createdAt: Date }[]
-  )
-    .filter((m) => !memoryResetAt || new Date(m.createdAt).getTime() > new Date(memoryResetAt).getTime())
-    .slice(0, 8);
+  const recentMessages = recentMessagesRaw as { id: string; senderType: string; direction: string; text: string | null }[];
   // Bound per-message chars so one huge turn can't blow up every prompt.
   for (const m of recentMessages) {
     if (m.text && m.text.length > 500) m.text = m.text.slice(0, 500);
@@ -313,7 +306,6 @@ export async function runGating(
       customer,
       channelRow,
       customerText,
-      memoryVersion: (customer as { memoryVersion?: number }).memoryVersion ?? 0,
       recentMessages,
       customerPII,
       trustedContacts,

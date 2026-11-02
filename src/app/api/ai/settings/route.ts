@@ -5,15 +5,16 @@ import { recordAudit } from "@/modules/audit/service";
 import {
   validateEndpointUrl,
   assertEndpointResolvesPublic,
-  validateCustomEndpoint,
-  assertCustomEndpointResolves,
+  validateHermesEndpoint,
+  assertHermesEndpointResolves,
+  isHermesPrivateNetworkAllowed,
   isCustomPrivateNetworkAllowed,
 } from "@/modules/ai/endpoint-guard";
 import { AppError } from "@/core/errors";
 import { encryptSecret } from "@/core/crypto";
 
 const settingsSchema = z.object({
-  provider: z.enum(["mock", "openrouter", "internal", "custom"]).optional(),
+  provider: z.enum(["mock", "openai", "openrouter", "internal", "hermes", "custom"]).optional(),
   classificationModel: z.string().trim().max(120).nullable().optional(),
   extractionModel: z.string().trim().max(120).nullable().optional(),
   responseModel: z.string().trim().max(120).nullable().optional(),
@@ -25,7 +26,7 @@ const settingsSchema = z.object({
   customApiKey: z.string().trim().min(8).max(300).nullable().optional(),
   // P6: self-hosted OpenAI-compatible endpoint + explicit fallback.
   customBaseUrl: z.string().trim().max(500).url("عنوان الاتصال يجب أن يكون رابطًا صالحًا").nullable().optional(),
-  fallbackProvider: z.enum(["mock", "openrouter", "internal", "custom"]).nullable().optional(),
+  fallbackProvider: z.enum(["mock", "openai", "openrouter", "internal", "hermes", "custom"]).nullable().optional(),
   fallbackModel: z.string().trim().max(120).nullable().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(50).max(4000).optional(),
@@ -54,24 +55,35 @@ export const GET = createHandler(
 export const PATCH = createHandler(
   { body: settingsSchema, permission: "ai.configure" },
   async ({ auth, body }) => {
-    // SSRF guard (fail-closed) for self-hosted/custom endpoints. Strict by
-    // default; the deployer may opt into LAN/loopback via
-    // AI_CUSTOM_ALLOW_PRIVATE_NETWORK. Metadata/reserved ranges stay blocked.
+    // P7 SSRF guard (fail-closed): an operator-supplied model endpoint must
+    // not target loopback/LAN/metadata addresses. Sync checks always; DNS
+    // re-check when a new endpoint is being stored.
+    // Hermes exception (narrow, deployer-opt-in): when the EFFECTIVE provider
+    // is hermes, loopback/RFC1918 targets are additionally allowed IFF the
+    // server sets HERMES_ALLOW_PRIVATE_NETWORK=1/true/yes. Metadata, creds,
+    // and reserved ranges stay blocked regardless; every other provider keeps
+    // the strict guard byte-identically.
     if (body.customBaseUrl !== undefined && body.customBaseUrl !== null) {
       const current = await prisma.aISettings.findUnique({ where: { workspaceId: auth!.workspaceId } });
-      const effectiveProvider = body.provider ?? current?.provider ?? "openrouter";
-      const isCustomProvider = effectiveProvider === "custom" || effectiveProvider === "internal";
-      if (isCustomProvider) {
-        const allowPrivateNetwork = isCustomPrivateNetworkAllowed();
-        const sync = validateCustomEndpoint(body.customBaseUrl, { allowPrivateNetwork });
+      const effectiveProvider = body.provider ?? current?.provider ?? "mock";
+      const isHermesProvider = effectiveProvider === "hermes";
+      const isCustomProvider = effectiveProvider === "custom";
+      if (isHermesProvider || isCustomProvider) {
+        const allowPrivateNetwork = isHermesProvider
+          ? isHermesPrivateNetworkAllowed()
+          : isCustomPrivateNetworkAllowed();
+        const sync = validateHermesEndpoint(body.customBaseUrl, { allowPrivateNetwork });
         if (!sync.ok) {
+          const hint = isHermesProvider
+            ? "فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة"
+            : "فعّل AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 في بيئة الخادم إذا الـ API على نفس السيرفر أو شبكتك المحلية";
           throw new AppError(
-            `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) فعّل AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 في بيئة الخادم`,
+            `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) ${hint}`,
             422,
             "ENDPOINT_REJECTED"
           );
         }
-        const dns = await assertCustomEndpointResolves(body.customBaseUrl, { allowPrivateNetwork });
+        const dns = await assertHermesEndpointResolves(body.customBaseUrl, { allowPrivateNetwork });
         if (!dns.ok) {
           throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — تحقق من العنوان وأن DNS يحله لوجهة مسموحة`, 422, "ENDPOINT_REJECTED");
         }

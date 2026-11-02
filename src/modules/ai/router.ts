@@ -6,11 +6,10 @@ import {
   MockAIProvider,
   OpenAICompatibleProvider,
   getInjectedMockProvider,
-  normalizeChatCompletionsEndpoint,
+  normalizeHermesEndpoint,
   resolveAIProvider,
   type AIProvider,
 } from "./provider";
-import { DEFAULT_OPENROUTER_GLM_MODEL, openRouterModel } from "./config";
 
 const log = childLogger("ai-router");
 
@@ -40,12 +39,11 @@ export type AiTask = "CLASSIFICATION" | "EXTRACTION" | "RESPONSE" | "VISION" | "
 export const AI_TASKS: AiTask[] = ["CLASSIFICATION", "EXTRACTION", "RESPONSE", "VISION", "SUMMARY", "EMBEDDING", "RETRIEVAL"];
 
 export const DEFAULT_MODELS: Record<AiTask, string> = {
-  CLASSIFICATION: DEFAULT_OPENROUTER_GLM_MODEL,
-  EXTRACTION: DEFAULT_OPENROUTER_GLM_MODEL,
-  RESPONSE: DEFAULT_OPENROUTER_GLM_MODEL,
-  VISION: DEFAULT_OPENROUTER_GLM_MODEL,
-  SUMMARY: DEFAULT_OPENROUTER_GLM_MODEL,
-  // Embeddings stay local (no external embedding calls by default).
+  CLASSIFICATION: "gpt-4o-mini",
+  EXTRACTION: "gpt-4o-mini",
+  RESPONSE: "gpt-4o",
+  VISION: "gpt-4o-mini",
+  SUMMARY: "gpt-4o-mini",
   EMBEDDING: "text-embedding-3-small",
   RETRIEVAL: "text-embedding-3-small",
 };
@@ -301,7 +299,11 @@ export function getWorkspaceProvider(
   } | null,
   env?: {
     aiProvider?: string;
+    openaiKey?: string;
     openrouterKey?: string;
+    hermesBaseUrl?: string;
+    hermesKey?: string;
+    hermesModel?: string;
     responseModel?: string;
     nodeEnv?: string;
     allowMockAi?: string;
@@ -313,29 +315,31 @@ export function getWorkspaceProvider(
   if (injected) return injected;
   const e = env ?? {
     aiProvider: process.env.AI_PROVIDER,
+    openaiKey: process.env.OPENAI_API_KEY,
     openrouterKey: process.env.OPENROUTER_API_KEY,
+    hermesBaseUrl: process.env.HERMES_BASE_URL,
+    hermesKey: process.env.HERMES_API_KEY,
+    hermesModel: process.env.HERMES_MODEL,
     responseModel: process.env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: process.env.ALLOW_MOCK_AI,
     allowWorkspaceGatewayKeys: process.env.AI_WORKSPACE_GATEWAY_KEYS,
   };
-
-  // Removed external providers fail loudly instead of silently switching.
+  // Precedence (P6): an explicit workspace choice of a REAL provider
+  // (openai/openrouter/internal/hermes) is effective and fail-closed on a
+  // missing key. A workspace "mock"/unset DEFERS to ENV — so a misconfigured
+  // ENV still fail-closes exactly as before (no behavior change for existing
+  // deployments), while a workspace can still opt into a real provider whose
+  // key exists even when ENV names no provider.
   const wsChoice = settings?.provider ?? null;
-  if (wsChoice && !["openrouter", "internal", "custom", "mock"].includes(wsChoice)) {
-    throw new AIProviderError(
-      `AI_NOT_CONFIGURED: unsupported provider "${wsChoice}". Set the workspace provider to "openrouter".`
-    );
-  }
-
-  // Precedence: explicit workspace provider → env → OpenRouter (the only
-  // external provider). A workspace "mock"/unset defers to ENV.
-  const wsWantsReal =
-    wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "custom";
-  const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? "openrouter";
-
-  // Self-hosted/custom OpenAI-compatible endpoints stay workspace-owned and
-  // never receive a platform key.
+  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "hermes" || wsChoice === "custom";
+  const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? null;
+  const keyFor = (p: string | null | undefined) =>
+    p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : p === "hermes" ? e.hermesKey : undefined;
+  // Custom provider — أي واجهة OpenAI-compatible خارجية بعنوان + مفتاح من
+  // إعداد مساحة العمل نفسه (المفتاح مخزّن مشفّراً AES-256-GCM، لا من بيئة
+  // الخادم — لا يجوز تسريب مفتاح المنصة هنا إطلاقاً). التسليم "external":
+  // بوابة الخصوصية تحجب PII قبل الإرسال (ثقة بالتصنيف لا بالاسم).
   if (choice === "custom") {
     const base = settings?.customBaseUrl?.trim();
     const enc = settings?.customApiKeyEnc?.trim();
@@ -347,50 +351,72 @@ export function getWorkspaceProvider(
     return new OpenAICompatibleProvider({
       name: "custom",
       apiKey: decryptSecret(enc),
-      baseUrl: normalizeChatCompletionsEndpoint(base),
+      // /v1 أو رابط كامل — التطبيع بيبني مسار chat/completions الوحيد
+      // الذي يفهمه مزوّد OpenAI-compatible (زائد شرطة صلبة).
+      baseUrl: normalizeHermesEndpoint(base),
       defaultModel: settings?.responseModel ?? e.responseModel ?? "gpt-4o-mini",
       delivery: "external",
+      // لا تتبّع إعادة توجيه مع المفتاح والأسئلة (فشل سريع).
       followRedirects: false,
     });
   }
-
+  // Hermes Agent (OpenAI-compatible gateway). Endpoint comes from server ENV
+  // (HERMES_BASE_URL — localhost/LAN allowed, it is deployer-trusted, not a
+  // workspace-user URL, so the SSRF guard for customBaseUrl does not apply).
+  // A workspace customBaseUrl may still override it for public Hermes
+  // endpoints (then the save/probe SSRF guard applies as usual).
+  if (choice === "hermes") {
+    const override = settings?.customBaseUrl?.trim();
+    const base = override || e.hermesBaseUrl?.trim();
+    const key = e.hermesKey?.trim();
+    if (!base || !key) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: provider "hermes" needs HERMES_BASE_URL + HERMES_API_KEY in server env${override ? "" : " (or a public customBaseUrl on the workspace)"}. Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
+    return new OpenAICompatibleProvider({
+      name: "hermes",
+      apiKey: key,
+      baseUrl: normalizeHermesEndpoint(base),
+      defaultModel: settings?.responseModel ?? e.hermesModel ?? e.responseModel ?? "hermes-agent",
+      // Never follow gateway redirects with the key + prompts (fail fast).
+      followRedirects: false,
+    });
+  }
+  // Self-hosted endpoint: explicit opt-in per workspace. Delivery is declared
+  // "internal" at construction (privacy-gate trusts the flag, not the name).
   const base = settings?.customBaseUrl?.trim();
-  if (base && choice === "internal") {
+  if (base && (choice === "openai" || choice === "openrouter" || choice === "internal")) {
+    // HIGH (OCR-2026-10-16): platform env keys must NEVER ride a
+    // workspace-owned URL — a public attacker host would exfiltrate the
+    // server-wide key. Explicit opt-in flag only; otherwise refuse when an
+    // env key would have been attached (fail-closed), keep the historic
+    // "internal-endpoint" behavior when no env key exists.
+    const envKey = keyFor(choice);
+    const optedIn = ["1", "true", "yes"].includes((e.allowWorkspaceGatewayKeys ?? "").toLowerCase());
+    if ((choice === "openai" || choice === "openrouter") && envKey && !optedIn) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: refusing platform ${choice.toUpperCase()} key on workspace customBaseUrl ("${base}") — key exfiltration risk. Use provider "internal", or set AI_WORKSPACE_GATEWAY_KEYS=1 to accept deliberately.`
+      );
+    }
+    const key = envKey ?? "internal-endpoint";
     return new OpenAICompatibleProvider({
       name: "internal",
-      apiKey: "internal-endpoint",
-      baseUrl: normalizeChatCompletionsEndpoint(base),
+      apiKey: key,
+      baseUrl: base,
       defaultModel: settings?.responseModel ?? e.responseModel ?? "gpt-4o-mini",
       delivery: "internal",
-      followRedirects: false,
     });
   }
-
-  if (choice === "openrouter") {
-    if (base) {
-      throw new AIProviderError(
-        `AI_NOT_CONFIGURED: OpenRouter uses its official endpoint; a workspace customBaseUrl is not allowed. Use provider "custom" for a self-hosted gateway.`
-      );
-    }
-    const key = e.openrouterKey?.trim();
-    if (!key) {
-      // Hermetic tests with NO explicit provider run on a mock; an explicitly
-      // configured OpenRouter without a key always fails closed.
-      const explicit = Boolean(e.aiProvider || wsChoice);
-      if (e.nodeEnv === "test" && !explicit) return new MockAIProvider();
-      throw new AIProviderError(
-        `AI_NOT_CONFIGURED: OpenRouter is selected but OPENROUTER_API_KEY is missing. Refusing any other provider — no fake replies will be sent.`
-      );
-    }
+  if ((choice === "openai" || choice === "openrouter") && keyFor(choice)) {
+    const isOpenai = choice === "openai";
     return new OpenAICompatibleProvider({
-      name: "openrouter",
-      apiKey: key,
-      baseUrl: "https://openrouter.ai/api/v1/chat/completions",
-      defaultModel: openRouterModel(settings?.responseModel ?? e.responseModel),
-      modelMap: openRouterModel,
+      name: choice,
+      apiKey: keyFor(choice)!,
+      baseUrl: isOpenai ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions",
+      defaultModel: settings?.responseModel ?? e.responseModel ?? (isOpenai ? "gpt-4o-mini" : "openai/gpt-4o-mini"),
     });
   }
-
   if (choice === "mock") {
     const allowed =
       e.nodeEnv === "test" ||
@@ -398,15 +424,22 @@ export function getWorkspaceProvider(
       (e.nodeEnv !== "production" && !e.aiProvider);
     if (allowed) return new MockAIProvider();
   }
-
+  // Fall back to the global ENV resolution (preserves legacy behavior and
+  // keeps every existing test green); it fail-closes when unconfigured.
   return resolveAIProvider({
     aiProvider: e.aiProvider,
+    openaiKey: e.openaiKey,
     openrouterKey: e.openrouterKey,
     responseModel: e.responseModel,
     nodeEnv: e.nodeEnv,
     allowMockAi: e.allowMockAi,
   });
 }
+
+// ── P6: configured fallback (failover only, never policy bypass) ──────────
+// Both primary and fallback calls MUST already be privacy-gated by the
+// caller (sendProtected*). This helper only decides WHEN a second attempt is
+// allowed: a configured fallbackModel + a retryable primary failure.
 
 export function getFallbackModel(settings: AISettingsLike | null): string | null {
   const m = settings?.fallbackModel?.trim();
