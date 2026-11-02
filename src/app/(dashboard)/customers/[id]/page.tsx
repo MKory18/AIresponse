@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Check, Eraser, MessageSquare, Phone, Save, Sparkles, UserRound } from "lucide-react";
+import { ArrowLeft, Check, MessageSquare, Phone, Save, Sparkles, UserRound } from "lucide-react";
 import { formatNumber, label, t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -32,8 +32,6 @@ type IntelSnapshot = {
 type CustomerDetail = {
   canWrite: boolean;
   canConfirm: boolean;
-  canResetMemory: boolean;
-  memoryResetAt: string | null;
   id: string;
   name: string | null;
   phone: string | null;
@@ -127,9 +125,6 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState({ name: "", phone: "", city: "", province: "", address: "" });
   const [saving, setSaving] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const [resetResult, setResetResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/customers/${params.id}`);
@@ -200,28 +195,6 @@ export default function CustomerDetailPage() {
       setError(data.message ?? "تعذّر الحفظ (تحقق من الصلاحية أو الرقم المكرر)");
       return;
     }
-    load();
-  }
-
-  async function resetMemory() {
-    setResetting(true);
-    setResetResult(null);
-    const res = await fetch(`/api/customers/${params.id}/memory/reset`, { method: "POST" });
-    setResetting(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.message ?? "تعذّر مسح الذاكرة (تحقق من الصلاحية)");
-      return;
-    }
-    const data = (await res.json().catch(() => ({}))) as {
-      memoriesDeleted?: number;
-      intelDeleted?: number;
-      summariesCleared?: number;
-    };
-    setConfirmReset(false);
-    setResetResult(
-      `تم مسح الذاكرة: ${data.memoriesDeleted ?? 0} معلومة محفوظة · ${data.intelDeleted ?? 0} استخراج · ${data.summariesCleared ?? 0} ملخص. الطلبات والسجل باقيين.`
-    );
     load();
   }
 
@@ -310,37 +283,6 @@ export default function CustomerDetailPage() {
               {customer.identities.map((i) => (
                 <Badge key={i.id} tone="OPEN">{i.displayName ?? i.channelType}</Badge>
               ))}
-            </div>
-          )}
-
-          {customer.canResetMemory && (
-            <div className="mt-2 rounded-lg border border-amber-300/60 bg-amber-50/60 p-2.5 text-[11px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
-              <p className="flex items-center gap-1.5 font-bold"><Eraser size={13} /> ذاكرة الذكاء</p>
-              <p className="mt-1 leading-relaxed">
-                المسح يبدأ الذكاء مع العميل من الصفر: يحذف المعلومات المستنتجة والملخصات والتفضيلات.
-                <b> الطلبات والسجل والهوية والموافقات تبقى محفوظة.</b>
-              </p>
-              {customer.memoryResetAt && (
-                <p className="mt-1 text-[10px] opacity-80">آخر مسح: {new Date(customer.memoryResetAt).toLocaleString("ar")}</p>
-              )}
-              {resetResult && <p className="mt-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">{resetResult}</p>}
-              {!confirmReset ? (
-                <Button size="sm" variant="secondary" className="mt-2" onClick={() => setConfirmReset(true)}>
-                  <Eraser size={13} /> مسح ذاكرة العميل
-                </Button>
-              ) : (
-                <div className="mt-2 space-y-2">
-                  <p className="font-semibold">تأكيد: يبدأ الذكاء من الصفر ولا يستخدم أي معلومة قديمة. ما في رجعة.</p>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={resetMemory} disabled={resetting}>
-                      {resetting ? "جاري المسح…" : "تأكيد المسح"}
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setConfirmReset(false)} disabled={resetting}>
-                      إلغاء
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </GlassCard>

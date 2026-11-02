@@ -165,10 +165,10 @@ describe("page assignment — one active catalog per page", () => {
 });
 
 describe("resolution — the trusted id decides, never the name", () => {
-  it("no catalogs anywhere: a page gets NO products (no global fallback)", async () => {
+  it("no catalogs anywhere: legacy workspaces resolve nothing new", async () => {
     const ch = await channel();
     expect(await workspaceHasCatalogs(db as Db, WS)).toBe(false);
-    expect(await resolveCatalogForChannel(db as Db, WS, ch.id)).toEqual({ status: "no_assignment", catalog: null });
+    expect(await resolveCatalogForChannel(db as Db, WS, ch.id)).toEqual({ status: "no_catalogs", catalog: null });
   });
 
   it("an inactive catalog is never used", async () => {
@@ -270,11 +270,13 @@ describe("wiring — routes, permissions, audit, AI gate", () => {
     }
   });
 
-  it("the AI resolves products inside the page catalog, with no legacy fallback", () => {
+  it("the AI resolves products inside the page catalog, with legacy intact", () => {
     const ex = src("src/modules/ai/stages/extraction.ts");
+    // The trusted resolver feeds an allow-list into the match…
     expect(ex).toContain("resolveCatalogForChannel");
-    expect(ex).toContain("catalogProductIds");
-    expect(ex).not.toContain("no_catalogs");
+    expect(ex).toMatch(/id: \{ in: allowedIds \}/);
+    // …and undefined (no catalogs anywhere) keeps the legacy behaviour.
+    expect(ex).toContain("allowedIds?: string[] | null");
   });
 
   it("prices are never copied into catalog tables", () => {

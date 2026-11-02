@@ -38,14 +38,13 @@ COPY --from=builder /app/prisma ./prisma
 # which tsx executes from source (no tsconfig path aliases used).
 COPY --from=builder /app/src ./src
 # scripts/worker.ts is the background-job consumer (npm run worker) for the
-# separate worker container; tsx runs it from source. Only the worker script is
-# copied — local admin helpers (password reset / owner listing) never ship.
+# separate worker container; tsx runs it from source.
 # Production dependency guard: `tsx` and the `prisma` CLI MUST stay in
 # package.json `dependencies` (not devDependencies) — the worker start command
 # (`npx prisma migrate deploy && npm run worker`) needs both, while the web
 # app (`npm start`) needs neither. Any production prune of devDependencies
 # would otherwise silently kill the worker while the web app keeps running.
-COPY --from=builder /app/scripts/worker.ts ./scripts/worker.ts
+COPY --from=builder /app/scripts ./scripts
 # tsconfig.json defines the @/* path aliases used by src/** imports; tsx
 # (worker, seed) resolves them by reading tsconfig.json at runtime.
 COPY --from=builder /app/tsconfig.json ./tsconfig.json

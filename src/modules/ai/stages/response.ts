@@ -117,7 +117,6 @@ export async function runResponse(
             objections: context.product.objections,
             salesNotes: context.product.salesNotes,
             priceTiers: context.product.priceTiers ?? [],
-            offers: context.product.offers ?? [],
             compliance: context.product.compliance ?? null,
             faqs: context.product.faqs,
           }
@@ -146,16 +145,10 @@ export async function runResponse(
           }
         : undefined,
       customer: {
-        name: (customer as { memoryResetAt?: Date | null }).memoryResetAt
-          ? null
-          : (customer as { name?: string | null }).name ?? null,
+        name: (customer as { name?: string | null }).name ?? null,
         page: channelRow?.displayName ?? null,
-        city: (customer as { memoryResetAt?: Date | null }).memoryResetAt
-          ? null
-          : (customer as { city?: string | null }).city ?? null,
-        province: (customer as { memoryResetAt?: Date | null }).memoryResetAt
-          ? null
-          : (customer as { province?: string | null }).province ?? null,
+        city: (customer as { city?: string | null }).city ?? null,
+        province: (customer as { province?: string | null }).province ?? null,
       },
     }),
   ].join("\n\n");
@@ -321,29 +314,6 @@ export async function runResponse(
       // Categorized so job lastError + sweeper logs tell operators whether a
       // retry can succeed (TRANSIENT) or config must be fixed (PERMANENT).
       error: categorized,
-    };
-  }
-
-  // P25 — the customer's memory may have been wiped while the model was
-  // generating. Never send a reply built from a generation that no longer
-  // exists. Check immediately before the outbound send.
-  const currentMemory = (await db.customer.findUnique({
-    where: { id: customer.id },
-    select: { memoryVersion: true },
-  })) as { memoryVersion: number } | null;
-  if ((currentMemory?.memoryVersion ?? 0) !== gate.memoryVersion) {
-    log.info(
-      { conversationId: conversation.id, messageId: message.id, from: gate.memoryVersion, to: currentMemory?.memoryVersion },
-      "ai_reply_stale_memory"
-    );
-    logTimings("STALE_MEMORY", { intent: extraction.intent });
-    return {
-      status: "STALE_MEMORY",
-      intent: extraction.intent as Intent,
-      confidence: extraction.confidence,
-      plan,
-      violations: ["MEMORY_VERSION_CHANGED"],
-      persona: activePersona,
     };
   }
 

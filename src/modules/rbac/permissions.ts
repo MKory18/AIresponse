@@ -1,8 +1,6 @@
 export const PERMISSIONS = [
   "customers.read",
   "customers.write",
-  // مسح ذاكرة الذكاء للعميل (يبدأ من الصفر) — ليس حذف بيانات العميل.
-  "customers.memory.reset",
   "conversations.read",
   "conversations.reply",
   "conversations.assign",
@@ -80,7 +78,6 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     ...SALES_SUPPORT,
     "conversations.assign",
     "conversations.delete",
-    "customers.memory.reset",
     "products.write",
     "catalogs.read",
     "catalogs.write",

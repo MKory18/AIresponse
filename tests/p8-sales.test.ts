@@ -14,7 +14,6 @@ import { evaluateDiscountPolicy, discountedPrice, requestDiscountApproval, decid
 import { recordAdSource } from "@/modules/sales/ad-source";
 import { buildCoachSuggestions, assertNoWholesaleLeak } from "@/modules/sales/coach";
 import { ROLE_PERMISSIONS, PERMISSIONS } from "@/modules/rbac/permissions";
-import { assignPageCatalog } from "./helpers/catalog";
 
 const WS = "ws-p8";
 type Db = Prisma.TransactionClient;
@@ -36,7 +35,6 @@ async function seedConv(opts: { aiState?: string } = {}) {
   await db.channelAccount.create({
     data: { channelId: ch.id, provider: "FACEBOOK", externalAccountId: ch.externalId, pageName: "P", encryptedCredentials: encryptSecret("page-token-test") },
   } as never);
-  await assignPageCatalog(db as unknown as Db, WS, ch.id);
   setFacebookClientFactory(
     () =>
       new FacebookClient({

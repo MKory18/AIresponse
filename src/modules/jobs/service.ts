@@ -34,8 +34,8 @@ export const JOB_TYPES = [
   // P17 — اسم/صورة المرسل من Graph: مهمة تجميلية خارج مسار الرد تمامًا،
   // كي لا يدفع الزبون الجديد ثمن نداء Graph (حتى 4 ثوان) قبل أول رد.
   "resolve_sender_profile",
-  // P19 — إشعار تيليجرام مستقل لكل طلب مؤكد (منتج واحد لكل رسالة).
-  "notify_order_telegram",
+  // P19 — إشعار تيليجرام بمسودة طلب صارت READY (مجموعة/توبيك محدّد).
+  "notify_order_ready",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
@@ -387,14 +387,12 @@ export function shouldRunMaintenance(cycle: number, every: number): boolean {
  * sequential order: they are cheap DB/bookkeeping work and reordering them
  * would change the meaning of the queue.
  *
- * Production default is 1 (safe serial mode) until the AI/automation/follow-up
- * interaction is proven on a real PostgreSQL workload. `AI_JOB_CONCURRENCY`
- * can raise it after that evidence; tests/dev default to 4. Clamped to 1..16.
+ * Default 4, clamped to 1..16. Setting it to 1 restores the old serial
+ * behaviour exactly (useful for debugging or a constrained host).
  */
-const AI_DEFAULT_CONCURRENCY = process.env.NODE_ENV === "production" ? 1 : 4;
 export const AI_JOB_CONCURRENCY = Math.min(
   16,
-  Math.max(1, Math.trunc(Number(process.env.AI_JOB_CONCURRENCY ?? AI_DEFAULT_CONCURRENCY)) || AI_DEFAULT_CONCURRENCY)
+  Math.max(1, Math.trunc(Number(process.env.AI_JOB_CONCURRENCY ?? 4)) || 4)
 );
 
 function createSemaphore(max: number) {

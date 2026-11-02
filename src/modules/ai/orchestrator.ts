@@ -59,11 +59,10 @@ export async function processAIMessage(
   const fx = { pipelineStarted, stageMs, timed, logTimings };
 
   const gated = await runGating(db, params, deps, fx);
-  if ("terminal" in gated) return { ...gated.terminal, timings: { ...stageMs, total: Date.now() - pipelineStarted } };
+  if ("terminal" in gated) return gated.terminal;
 
   const extracted = await runExtraction(db, params, deps, fx, gated.state);
-  if ("terminal" in extracted) return { ...extracted.terminal, timings: { ...stageMs, total: Date.now() - pipelineStarted } };
+  if ("terminal" in extracted) return extracted.terminal;
 
-  const responded = await runResponse(db, params, fx, gated.state, extracted.ready);
-  return { ...responded, timings: { ...stageMs, total: Date.now() - pipelineStarted } };
+  return runResponse(db, params, fx, gated.state, extracted.ready);
 }

@@ -8,7 +8,7 @@ export type AiConnectionMode = "custom" | "endpoint" | "environment";
 
 export function aiConnectionMode(provider: string): AiConnectionMode {
   if (provider === "custom") return "custom";
-  if (provider === "internal") return "endpoint";
+  if (provider === "internal" || provider === "hermes") return "endpoint";
   return "environment";
 }
 

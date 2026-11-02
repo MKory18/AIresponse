@@ -22,7 +22,6 @@ import { createProduct } from "@/modules/products/service";
 import { upsertDeliveryRule } from "@/modules/orders/delivery";
 import { updateDraftFromExtraction } from "@/modules/orders/draft-service";
 import { createOrderFromDraft, transitionOrder, updateOrderFromChat } from "@/modules/orders/order-service";
-import { assignPageCatalog } from "./helpers/catalog";
 import { parseQuantity } from "@/modules/orders/primitives";
 import { handleOrderIntent } from "@/modules/orders/intelligence";
 
@@ -50,7 +49,6 @@ async function seedWorld(opts: { sendMode?: string; aiState?: string } = {}) {
     displayName: "صفحة الاختبار",
     sendMode: opts.sendMode ?? "AUTO_REPLY",
   });
-  await assignPageCatalog(db as Db, WS_A, "ch-1", [productId]);
   const customer = await db.customer.create({
     data: { workspaceId: WS_A, name: "محمد", phone: "0930000000", status: "INTERESTED" },
   } as never);

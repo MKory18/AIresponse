@@ -1,5 +1,4 @@
 import { AIProviderError, OpenAICompatibleProvider, type AIProvider } from "@/modules/ai/provider";
-import { openRouterModel } from "@/modules/ai/config";
 
 /** العنوان الرسمي لـ OpenRouter — الأساس دائمًا، وأي تغيير صريح من بيئة الخادم فقط. */
 export const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
@@ -36,7 +35,7 @@ export function getExtractionProvider(): ExtractionProviderHandle {
       httpStatus: 401,
     });
   }
-  const model = openRouterModel(process.env.INTEL_MODEL ?? process.env.EXTRACTION_MODEL ?? null);
+  const model = (process.env.INTEL_MODEL ?? process.env.EXTRACTION_MODEL ?? "openai/gpt-4o-mini").trim();
   const provider = new OpenAICompatibleProvider({
     name: "openrouter",
     apiKey,

@@ -9,6 +9,7 @@
 | العقد | المُرسِل ← المستقبِل | المكان | الحارس |
 |---|---|---|---|
 | أحداث تطبيقات الـ OMS v1 | الـ OMS (`MKory18/Zaki-ai-CRM` · `src/lib/apps/events.ts`) ← سيستم 7 (`/api/webhooks/oms/[key]`) | `oms-app-events.v1/` | `tests/contracts-oms-app-events.test.ts` (سيستم 7) · اختبار مقابل بالـ OMS |
+| باب الوكلاء agent-door/v1 (Hermes) | Hermes ← سيستم 7 (`/api/agent/tools` · `/api/agent/call`) | `docs/INTEGRATIONS.md` | `tests/p12-agent-door.test.ts` (مخططات حرفية) |
 | باب `/api/v1` (القدرة · حملات الكليبر · أحداث الأنظمة) + الصادر الموقّع | الكليبر · مساحة العمل · سيستم 1 · المالية · المهام ↔ سيستم 7 | `docs/INTEGRATIONS.md` | `tests/p12-v1-routes.test.ts` |
 | باب الـ OMS v1 (لسا مش مبني بالـ OMS) | سيستم 7 ← الـ OMS | `docs/OMS-DOOR-V1.md` (مواصفة + برومبت GLM) | `tests/p12-oms.test.ts` |
 

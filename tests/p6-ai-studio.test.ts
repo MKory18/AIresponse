@@ -175,15 +175,15 @@ describe("P6-1 model router resolves the REAL model per task", () => {
   });
 
   it("workspace provider choice is EFFECTIVE (not display-only)", () => {
-    const openrouter = getWorkspaceProvider(
-      { provider: "openrouter", responseModel: null, customBaseUrl: null },
-      { aiProvider: undefined, openrouterKey: "test-key-openrouter-fixture", nodeEnv: "test" }
+    const openai = getWorkspaceProvider(
+      { provider: "openai", responseModel: null, customBaseUrl: null },
+      { aiProvider: undefined, openaiKey: "test-key-openai-fixture", openrouterKey: undefined, nodeEnv: "test" }
     );
-    expect(openrouter.name).toBe("openrouter");
-    expect(openrouter.delivery).toBe("external");
+    expect(openai.name).toBe("openai");
+    expect(openai.delivery).toBe("external");
     // Missing key + production → fail-closed, never a silent mock.
     expect(() =>
-      getWorkspaceProvider({ provider: "openrouter", responseModel: null, customBaseUrl: null }, { aiProvider: "openrouter", nodeEnv: "production" })
+      getWorkspaceProvider({ provider: "openai", responseModel: null, customBaseUrl: null }, { aiProvider: "openai", nodeEnv: "production" })
     ).toThrow(/AI_NOT_CONFIGURED/);
   });
 
@@ -192,7 +192,7 @@ describe("P6-1 model router resolves the REAL model per task", () => {
     mock.responseHandler = () => "injected!";
     setMockAIProvider(mock);
     try {
-      expect(getWorkspaceProvider({ provider: "openrouter", responseModel: null, customBaseUrl: null }, { aiProvider: "openrouter", openrouterKey: "test-key-openrouter-fixture", nodeEnv: "production" }).name).toBe("mock");
+      expect(getWorkspaceProvider({ provider: "openai", responseModel: null, customBaseUrl: null }, { aiProvider: "openai", openaiKey: "test-key-openai-fixture", nodeEnv: "production" }).name).toBe("mock");
     } finally {
       setMockAIProvider(undefined);
     }

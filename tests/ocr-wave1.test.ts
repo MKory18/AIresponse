@@ -11,7 +11,7 @@ import { AppError } from "@/core/errors";
 import { getWorkspaceProvider } from "@/modules/ai/router";
 import { calculatePricing } from "@/modules/orders/pricing";
 import { resolveRange } from "@/core/analytics/time";
-import { getEmbeddingProvider, HashEmbeddingProvider } from "@/modules/knowledge/embeddings";
+import { externalEmbeddingAllowed, OpenAIEmbeddingProvider } from "@/modules/knowledge/embeddings";
 import { processPendingJobs } from "@/modules/jobs/service";
 import { handleChannelInbound } from "@/modules/channels/inbound-job";
 import { inviteMember, removeMember, updateMember } from "@/modules/members/service";
@@ -21,37 +21,42 @@ type Db = Prisma.TransactionClient;
 // ── 1) متوسطة — مفاتيح المنصة ما تترحل لعناوين مخصصة من مساحة عمل (HIGH 2) ──
 describe("OCR — workspace customBaseUrl never leaks platform env keys", () => {
   const env = {
-    aiProvider: "openrouter",
-    openrouterKey: "sk-or-platform-secret",
-    responseModel: "z-ai/glm-4.6",
+    aiProvider: "openai",
+    openaiKey: "sk-platform-secret",
+    openrouterKey: undefined,
+    responseModel: "gpt-4o-mini",
     nodeEnv: "test",
     allowMockAi: undefined,
   };
 
-  it("refuses a workspace custom URL on the OpenRouter provider", () => {
+  it("refuses to attach the platform OPENAI key to a workspace URL", () => {
     expect(() =>
       getWorkspaceProvider(
-        { provider: "openrouter", customBaseUrl: "https://evil-gw.example/v1", responseModel: null },
+        { provider: "openai", customBaseUrl: "https://evil-gw.example/v1", responseModel: null },
         env
       )
-    ).toThrow(/customBaseUrl is not allowed/);
+    ).toThrow(/AI_WORKSPACE_GATEWAY_KEYS/);
   });
 
-  it("official OpenRouter endpoint works with the platform key", () => {
+  it("opt-in flag keeps the documented gateway behavior working", () => {
     const p = getWorkspaceProvider(
-      { provider: "openrouter", customBaseUrl: null, responseModel: null },
-      env
+      { provider: "openai", customBaseUrl: "https://gateway.ok.example/v1", responseModel: null },
+      { ...env, allowWorkspaceGatewayKeys: "1" }
     );
-    expect(p.name).toBe("openrouter");
+    expect(p.name).toBe("internal");
   });
 
-  it("no key → fail-closed even with a workspace URL", () => {
-    expect(() =>
-      getWorkspaceProvider(
-        { provider: "openrouter", customBaseUrl: "https://gateway.ok.example/v1", responseModel: null },
-        { ...env, openrouterKey: undefined }
-      )
-    ).toThrow(/customBaseUrl is not allowed|OPENROUTER_API_KEY/);
+  it("no platform key → same internal behavior as before", () => {
+    const p = getWorkspaceProvider(
+      { provider: "openai", customBaseUrl: "https://gateway.ok.example/v1", responseModel: null },
+      { ...env, openaiKey: undefined }
+    );
+    expect(p.name).toBe("internal");
+  });
+
+  it("official openai endpoint without customBaseUrl is unchanged", () => {
+    const p = getWorkspaceProvider({ provider: "openai", customBaseUrl: null, responseModel: null }, env);
+    expect(p.name).toBe("openai");
   });
 });
 
@@ -163,15 +168,29 @@ describe("OCR — custom range validation", () => {
   });
 });
 
-// ── 6) embeddings محلية فقط (OpenRouter لا يوفّر تضمينات) ──
-describe("OCR — embeddings stay local (no customer text leaves the process)", () => {
-  it("the provider is deterministic and never calls the network", async () => {
-    const p = getEmbeddingProvider();
-    expect(p).toBeInstanceOf(HashEmbeddingProvider);
-    const a = await p.embed("نص زبون");
-    const b = await p.embed("نص زبون");
-    expect(a).toHaveLength(1536);
-    expect(a).toEqual(b);
+// ── 6) embed محرم للخارج افتراضيًا (HIGH 4) ──
+describe("OCR — external embeddings are fail-closed by policy", () => {
+  const KEY = process.env.OPENAI_API_KEY;
+  const FLAG = process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS;
+  afterEach(() => {
+    if (KEY === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = KEY;
+    if (FLAG === undefined) delete process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS;
+    else process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS = FLAG;
+  });
+
+  it("default (no flag) → provider refuses before any network call", async () => {
+    process.env.OPENAI_API_KEY = "sk-present";
+    delete process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS;
+    const p = new OpenAIEmbeddingProvider("text-embedding-3-small", 1536);
+    await expect(p.embed("نص زبون")).rejects.toThrow(/EXTERNAL_EMBEDDING_DISABLED/);
+  });
+
+  it("flag decision reflects the env explicitly", () => {
+    delete process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS;
+    expect(externalEmbeddingAllowed()).toBe(false);
+    process.env.AI_ALLOW_EXTERNAL_EMBEDDINGS = "1";
+    expect(externalEmbeddingAllowed()).toBe(true);
   });
 });
 

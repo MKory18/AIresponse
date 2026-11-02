@@ -63,30 +63,13 @@ export async function saveMemories(
   return saved;
 }
 
-export async function loadMemory(
-  db: Db,
-  workspaceId: string,
-  customerId: string,
-  limit = 10,
-  since?: Date | null
-) {
-  const rows = await db.customerMemory.findMany({
-    where: {
-      workspaceId,
-      customerId,
-      type: { not: "CONVERSATION_SUMMARY" },
-    },
+export async function loadMemory(db: Db, workspaceId: string, customerId: string, limit = 10) {
+  return db.customerMemory.findMany({
+    where: { workspaceId, customerId, type: { not: "CONVERSATION_SUMMARY" } },
     orderBy: { updatedAt: "desc" },
-    take: since ? Math.max(limit * 3, 30) : limit,
+    take: limit,
     select: { type: true, value: true, confidence: true, updatedAt: true },
   });
-  // Filter in JS as well: the in-memory test DB does not implement Date
-  // operators, and real Prisma can return same-millisecond rows. Rows learned
-  // before the reset watermark are never used as AI memory.
-  const cutoff = since ? new Date(since).getTime() : null;
-  return rows
-    .filter((r) => cutoff === null || new Date(r.updatedAt).getTime() >= cutoff)
-    .slice(0, limit);
 }
 
 function normalizeKey(content: string): string {

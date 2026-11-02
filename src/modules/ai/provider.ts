@@ -5,7 +5,6 @@
  */
 import { getEnv } from "@/core/env";
 import { heuristicIntent } from "./intent";
-import { openRouterModel } from "./config";
 
 export interface TextRequest {
   system: string;
@@ -49,13 +48,15 @@ export interface AIProvider {
   generateVision?(req: VisionRequest): Promise<AIResponse>;
 }
 
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /**
- * Normalizes an OpenAI-compatible gateway base URL into a full
- * chat-completions endpoint. Accepts host, `/v1`, or the full path.
+ * Normalizes a Hermes gateway base URL into a full chat-completions endpoint.
+ * Accepts any of: http://host:8642, http://host:8642/v1,
+ * http://host:8642/v1/chat/completions (trailing slashes tolerated).
  */
-export function normalizeChatCompletionsEndpoint(baseUrl: string): string {
+export function normalizeHermesEndpoint(baseUrl: string): string {
   const base = baseUrl.trim().replace(/\/+$/, "");
   if (/\/chat\/completions$/.test(base)) return base;
   if (/\/v1$/.test(base)) return `${base}/chat/completions`;
@@ -70,30 +71,21 @@ export class OpenAICompatibleProvider implements AIProvider {
   private readonly baseUrl: string;
   private readonly defaultModel: string;
   /**
-   * Redirect policy. Default true preserves existing behavior. Self-hosted
-   * gateways pass false: following a redirect could carry the Bearer key +
-   * customer-derived prompts to an attacker-chosen host.
+   * Redirect policy. Default true preserves every existing provider's
+   * behavior byte-identically. Hermes instances pass false: a gateway that
+   * answers with a redirect is a misconfiguration, and silently following
+   * it could carry the Bearer key + customer-derived prompts to an
+   * attacker-chosen host. Redirects then fail fast (non-retryable).
    */
   private readonly followRedirects: boolean;
-  /** OpenRouter maps local gateway aliases to the configured GLM id. */
-  private readonly modelMap?: (model: string) => string;
 
-  constructor(opts: {
-    name: string;
-    apiKey: string;
-    baseUrl: string;
-    defaultModel: string;
-    delivery?: "external" | "internal";
-    followRedirects?: boolean;
-    modelMap?: (model: string) => string;
-  }) {
+  constructor(opts: { name: string; apiKey: string; baseUrl: string; defaultModel: string; delivery?: "external" | "internal"; followRedirects?: boolean }) {
     this.name = opts.name;
     this.delivery = opts.delivery ?? "external";
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl;
     this.defaultModel = opts.defaultModel;
     this.followRedirects = opts.followRedirects ?? true;
-    this.modelMap = opts.modelMap;
   }
 
   /** P6 studio: safe connection metadata (never the key itself). */
@@ -112,11 +104,7 @@ export class OpenAICompatibleProvider implements AIProvider {
   private async chat(body: Record<string, unknown>): Promise<AIResponse> {
     const started = Date.now();
     // Bounded execution: a hung provider must never hang the worker forever.
-    // Replies are latency-sensitive: 30s default (override with env).
-    const timeoutMs = Math.max(1000, parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? "30000", 10) || 30000);
-    const requestBody = this.modelMap && typeof body.model === "string"
-      ? { ...body, model: this.modelMap(body.model) }
-      : body;
+    const timeoutMs = Math.max(1000, parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? "60000", 10) || 60000);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res: Response;
@@ -127,7 +115,7 @@ export class OpenAICompatibleProvider implements AIProvider {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(body),
         signal: controller.signal,
         redirect: this.followRedirects ? "follow" : "manual",
       });
@@ -360,7 +348,11 @@ export function getAIProvider(): AIProvider {
   const env = getEnv();
   return resolveAIProvider({
     aiProvider: env.AI_PROVIDER,
+    openaiKey: env.OPENAI_API_KEY,
     openrouterKey: env.OPENROUTER_API_KEY,
+    hermesBaseUrl: env.HERMES_BASE_URL,
+    hermesKey: env.HERMES_API_KEY,
+    hermesModel: env.HERMES_MODEL,
     responseModel: env.RESPONSE_MODEL,
     nodeEnv: process.env.NODE_ENV,
     allowMockAi: env.ALLOW_MOCK_AI,
@@ -370,39 +362,66 @@ export function getAIProvider(): AIProvider {
 /**
  * Pure provider resolution (no env reads — unit-testable).
  *
- * OpenRouter is the ONLY external provider. Fail-closed:
- * - configured without a key → AI_NOT_CONFIGURED (never a silent mock);
- * - production with nothing configured → throw;
- * - mock only for explicit test/dev configuration.
+ * Fail-closed contract for production:
+ * - An explicitly configured real provider with a missing key throws
+ *   AIProviderError(AI_NOT_CONFIGURED) — NEVER a silent mock.
+ * - Production with no provider configured at all also throws.
+ * - MockAIProvider is returned ONLY for explicit test/dev configuration:
+ *   injected mock, NODE_ENV=test, ALLOW_MOCK_AI=1/true/yes, or a
+ *   non-production run with no provider configured (local DX).
  */
 export function resolveAIProvider(opts: {
   aiProvider?: string;
+  openaiKey?: string;
   openrouterKey?: string;
+  hermesBaseUrl?: string;
+  hermesKey?: string;
+  hermesModel?: string;
   responseModel?: string;
   nodeEnv?: string;
   allowMockAi?: string;
-  /** Legacy option accepted only to produce a clear migration error. */
-  openaiKey?: string;
 }): AIProvider {
   if (globalForAI.__acreMockAI) return globalForAI.__acreMockAI;
-  const aiProvider = opts.aiProvider === "openai" ? "openrouter" : opts.aiProvider;
-  if (aiProvider && aiProvider !== "openrouter" && aiProvider !== "mock") {
-    throw new AIProviderError(
-      `AI_NOT_CONFIGURED: unsupported AI_PROVIDER="${aiProvider}". Use "openrouter" with OPENROUTER_API_KEY.`
-    );
+  if (opts.aiProvider === "openai" && opts.openaiKey) {
+    return new OpenAICompatibleProvider({
+      name: "openai",
+      apiKey: opts.openaiKey,
+      baseUrl: OPENAI_URL,
+      defaultModel: opts.responseModel || "gpt-4o-mini",
+    });
   }
-  if (aiProvider === "openrouter") {
-    if (!opts.openrouterKey) {
-      throw new AIProviderError(
-        `AI_NOT_CONFIGURED: AI_PROVIDER="openrouter" is configured but OPENROUTER_API_KEY is missing. Refusing mock fallback — no fake replies will be sent.`
-      );
-    }
+  if (opts.aiProvider === "openrouter" && opts.openrouterKey) {
     return new OpenAICompatibleProvider({
       name: "openrouter",
       apiKey: opts.openrouterKey,
       baseUrl: OPENROUTER_URL,
-      defaultModel: openRouterModel(opts.responseModel),
-      modelMap: openRouterModel,
+      defaultModel: opts.responseModel || "openai/gpt-4o-mini",
+    });
+  }
+  if (opts.aiProvider === "openai" || opts.aiProvider === "openrouter") {
+    const expected = opts.aiProvider === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY";
+    throw new AIProviderError(
+      `AI_NOT_CONFIGURED: AI_PROVIDER="${opts.aiProvider}" is configured but ${expected} is missing. Refusing mock fallback — no fake replies will be sent.`
+    );
+  }
+  // Hermes Agent — OpenAI-compatible gateway (delivery "external" so the
+  // privacy gate keeps masking PII: Hermes turns may invoke external tools).
+  if (opts.aiProvider === "hermes") {
+    const base = opts.hermesBaseUrl?.trim();
+    const key = opts.hermesKey?.trim();
+    if (!base || !key) {
+      throw new AIProviderError(
+        `AI_NOT_CONFIGURED: AI_PROVIDER="hermes" is configured but HERMES_BASE_URL or HERMES_API_KEY is missing. Set both (HERMES_BASE_URL like http://127.0.0.1:8642/v1, HERMES_API_KEY = the gateway API key). Refusing mock fallback — no fake replies will be sent.`
+      );
+    }
+    return new OpenAICompatibleProvider({
+      name: "hermes",
+      apiKey: key,
+      baseUrl: normalizeHermesEndpoint(base),
+      defaultModel: opts.hermesModel?.trim() || opts.responseModel || "hermes-agent",
+      // Hermes turns may invoke tools: never follow a gateway redirect with
+      // the key + prompts (fail fast instead).
+      followRedirects: false,
     });
   }
   const mockAllowed =

@@ -33,8 +33,6 @@ export const extractionResultSchema = z.object({
         .array(
           z.object({
             name: z.string().trim().min(1).max(200),
-            /** اسم العرض/الباقة كما ذكره الزبون (يُطابق مع DB لاحقًا). */
-            offer: z.string().trim().max(200).nullish(),
             quantity: z.number().int().min(1).max(1000).nullish(),
           })
         )

@@ -203,8 +203,10 @@ export async function runExtraction(
   // Catalog resolution runs FIRST: the page's catalog scopes both the REPLY
   // candidates and — through the same allowlist — ORDER INTAKE below. One
   // resolution, one trusted source; no second round-trip later.
-  // P24 — strict: no assignment/inactive/empty catalog = NO products. There is
-  // no "workspace has no catalogs so everything is allowed" fallback.
+  // resolveCatalogForChannel short-circuits workspaces with no catalogs
+  // internally:
+  // no_catalogs → undefined (legacy: every product may answer/order),
+  // assigned+active → ids, otherwise → [] (nothing may answer/order).
   const { resolveCatalogForChannel, catalogProductIds } = await import(
     "@/modules/catalog/service"
   );
@@ -216,7 +218,9 @@ export async function runExtraction(
   const allowedProductIds =
     resolved.status === "ok"
       ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id)
-      : [];
+      : resolved.status === "no_catalogs"
+        ? undefined
+        : [];
 
   // P18 — حدود الكتالوج: أسماء المنتجات المسموحة تُحقن بتعليمات الرد كي لا
   // «يتذكّر» الذكاء منتجًا حُذف من كتالوج الصفحة (من محادثة/معرفة/ذاكرة).
@@ -269,7 +273,7 @@ export async function runExtraction(
   ];
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
-      loadMemory(db, params.workspaceId, customer.id, 10, (customer as { memoryResetAt?: Date | null }).memoryResetAt),
+      loadMemory(db, params.workspaceId, customer.id),
       resolveProductId(
         db,
         params.workspaceId,

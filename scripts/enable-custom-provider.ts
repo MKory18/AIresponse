@@ -17,7 +17,7 @@ for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
 import { prisma } from "../src/core/db/prisma";
 import { encryptSecret } from "../src/core/crypto";
 import { validateCustomEndpoint } from "../src/modules/ai/endpoint-guard";
-import { normalizeChatCompletionsEndpoint, probeProviderEndpoint } from "../src/modules/ai/provider";
+import { normalizeHermesEndpoint, probeProviderEndpoint } from "../src/modules/ai/provider";
 
 async function main() {
   const [, , baseArg, keyArg, modelArg] = process.argv;
@@ -25,7 +25,7 @@ async function main() {
     console.log("USAGE: enable-custom-provider.ts <base-url> <api-key> [model]");
     process.exit(2);
   }
-  const endpoint = normalizeChatCompletionsEndpoint(baseArg.trim());
+  const endpoint = normalizeHermesEndpoint(baseArg.trim());
   const guard = validateCustomEndpoint(endpoint);
   if (!guard.ok) {
     console.log(`GUARD_REJECTED ${guard.reason}`);
