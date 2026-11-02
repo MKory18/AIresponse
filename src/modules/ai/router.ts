@@ -320,8 +320,15 @@ export function getWorkspaceProvider(
     allowWorkspaceGatewayKeys: process.env.AI_WORKSPACE_GATEWAY_KEYS,
   };
 
-  // Removed external providers fail loudly instead of silently switching.
-  const wsChoice = settings?.provider ?? null;
+  // Legacy settings may still say "openai" from before the OpenRouter-only
+  // migration. Treat that value as a request for OpenRouter (never OpenAI);
+  // without an OpenRouter key the error below is explicit.
+  const legacyProvider = (p: string | null | undefined) => (p === "openai" ? "openrouter" : p ?? null);
+  const rawWsChoice = settings?.provider ?? null;
+  const wsChoice = legacyProvider(rawWsChoice);
+  if (rawWsChoice && rawWsChoice !== wsChoice) {
+    log.warn({ from: rawWsChoice, to: wsChoice }, "legacy_provider_mapped");
+  }
   if (wsChoice && !["openrouter", "internal", "custom", "mock"].includes(wsChoice)) {
     throw new AIProviderError(
       `AI_NOT_CONFIGURED: unsupported provider "${wsChoice}". Set the workspace provider to "openrouter".`
@@ -330,9 +337,10 @@ export function getWorkspaceProvider(
 
   // Precedence: explicit workspace provider → env → OpenRouter (the only
   // external provider). A workspace "mock"/unset defers to ENV.
+  const envChoice = legacyProvider(e.aiProvider);
   const wsWantsReal =
     wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "custom";
-  const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? "openrouter";
+  const choice = wsWantsReal ? wsChoice : envChoice ?? wsChoice ?? "openrouter";
 
   // Self-hosted/custom OpenAI-compatible endpoints stay workspace-owned and
   // never receive a platform key.
@@ -400,7 +408,7 @@ export function getWorkspaceProvider(
   }
 
   return resolveAIProvider({
-    aiProvider: e.aiProvider,
+    aiProvider: envChoice ?? undefined,
     openrouterKey: e.openrouterKey,
     responseModel: e.responseModel,
     nodeEnv: e.nodeEnv,
