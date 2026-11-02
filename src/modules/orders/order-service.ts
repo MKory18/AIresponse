@@ -6,10 +6,25 @@ import { requireWorkspaceOwner } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
-import { calculatePricing, calculateCartPricing } from "./pricing";
+import { calculatePricing, calculateIndependentOrdersPricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
+import { resolveOffer } from "./offers";
+import { enqueueJob } from "@/modules/jobs/service";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
+
+export interface CreatedOrderSummary {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  total: number;
+  currency: string;
+  productName: string;
+  offerName: string | null;
+  quantity: number;
+  /** Shared trace id for independent orders created from ONE cart confirmation. */
+  orderBatchId: string;
+}
 
 export interface CreateOrderFromDraftResult {
   orderId: string;
@@ -19,6 +34,8 @@ export interface CreateOrderFromDraftResult {
   currency: string;
   created: boolean;
   rules: RuleResult[];
+  /** Every independent order created from the cart (one per product line). */
+  orders: CreatedOrderSummary[];
 }
 
 /**
@@ -37,19 +54,34 @@ export async function createOrderFromDraft(
   const draft = (await db.orderDraft.findUnique({ where: { id: params.draftId } })) as OrderDraft | null;
   if (!draft || draft.workspaceId !== ctx.workspaceId) throw new NotFoundError("Order draft");
 
-  // Idempotency: already converted?
+  // One cart generation = one batch. Recycled drafts bump idempotencyKey, so a
+  // later order in the same conversation is a NEW batch (never deduped to old).
+  const batchId = draft.idempotencyKey ? `${draft.id}:${draft.idempotencyKey}` : draft.id;
+
+  // Idempotency: this cart already produced its independent orders.
+  const existingBatch = (await db.order.findMany({
+    where: { workspaceId: ctx.workspaceId, orderBatchId: batchId },
+    include: { items: true },
+    orderBy: { createdAt: "asc" },
+  })) as (Order & { items: OrderItem[] })[];
+  if (existingBatch.length > 0) {
+    const summaries = existingBatch.map(toOrderSummary);
+    return {
+      ...summaries[0]!,
+      created: false,
+      rules: [],
+      orders: summaries,
+    };
+  }
+  // Legacy pre-batch drafts: their single order is still the idempotent result.
   if (draft.orderId) {
-    const existing = await db.order.findUnique({ where: { id: draft.orderId } });
-    if (existing) {
-      return {
-        orderId: existing.id,
-        orderNumber: existing.orderNumber,
-        status: existing.status,
-        total: Number(existing.total),
-        currency: existing.currency,
-        created: false,
-        rules: [],
-      };
+    const legacy = (await db.order.findUnique({
+      where: { id: draft.orderId },
+      include: { items: true },
+    })) as (Order & { items: OrderItem[] }) | null;
+    if (legacy) {
+      const summary = toOrderSummary(legacy);
+      return { ...summary, created: false, rules: [], orders: [summary] };
     }
   }
 
@@ -69,7 +101,8 @@ export async function createOrderFromDraft(
     });
   }
 
-  // P22 — سلة: كل عنصر يُتحقق ويُسعّر من قاعدة البيانات (بلا أسعار من الموديل).
+  // Each cart line becomes its OWN order. Products, offers, prices and stock
+  // are read from the DB — the model never supplies money or a product id.
   const draftItems = parseDraftItems(draft);
   const itemIds = [...new Set(draftItems.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
   const products = itemIds.length
@@ -81,6 +114,7 @@ export async function createOrderFromDraft(
           sku: true,
           price: true,
           currency: true,
+          offers: true,
           isActive: true,
           isArchived: true,
           stockStatus: true,
@@ -89,6 +123,40 @@ export async function createOrderFromDraft(
       })
     : [];
   const productById = new Map(products.map((p) => [p.id, p]));
+
+  // FINAL server-side catalog gate (defence in depth, not prompt-only):
+  // a product outside the page's catalog can never become an order, even if
+  // a stale draft or a model tried to smuggle it in.
+  const { resolveCatalogForChannel, catalogProductIds } = await import("@/modules/catalog/service");
+  const resolvedCatalog = await resolveCatalogForChannel(
+    db,
+    ctx.workspaceId,
+    ((await db.conversation.findUnique({
+      where: { id: draft.conversationId },
+      select: { channelId: true },
+    })) as { channelId: string } | null)?.channelId ?? ""
+  );
+  const allowedProductIds =
+    resolvedCatalog.status === "ok"
+      ? await catalogProductIds(db, ctx.workspaceId, resolvedCatalog.catalog.id)
+      : [];
+  if (allowedProductIds.length === 0 || draftItems.some((i) => !i.productId)) {
+    throw new AppError(
+      "Product is outside this page's catalog",
+      422,
+      "ORDER_PRODUCT_OUTSIDE_CATALOG"
+    );
+  }
+  const outside = draftItems
+    .map((i) => i.productId)
+    .filter((id): id is string => Boolean(id) && !allowedProductIds.includes(id!));
+  if (outside.length > 0) {
+    throw new AppError(
+      "Product is outside this page's catalog",
+      422,
+      "ORDER_PRODUCT_OUTSIDE_CATALOG"
+    );
+  }
 
   // Rules engine decides — no exceptions, no bypasses.
   const rules = await evaluateOrderRules(db, {
@@ -131,42 +199,46 @@ export async function createOrderFromDraft(
     if (!item.quantity || item.quantity <= 0) {
       throw new AppError("Missing quantity", 422, "ORDER_MISSING_FIELDS");
     }
-    return { item, product, quantity: item.quantity };
+    const offerResult = resolveOffer(product.offers, item.offerTitle);
+    if (offerResult.status === "not_found") {
+      throw new AppError(`Offer unavailable: ${item.offerTitle ?? ""}`, 422, "OFFER_UNAVAILABLE");
+    }
+    if (offerResult.status === "ambiguous") {
+      throw new AppError("Offer label is ambiguous", 422, "OFFER_AMBIGUOUS");
+    }
+    const offer = offerResult.status === "resolved" ? offerResult.offer : null;
+    return {
+      item,
+      product,
+      quantity: item.quantity,
+      unitPrice: offer ? offer.price : Number(product.price),
+      offerName: offer ? offer.title : null,
+      offerQuantity: offer ? offer.quantity : null,
+    };
   });
   if (orderLines.length === 0) throw new AppError("Missing required fields", 422, "ORDER_MISSING_FIELDS");
   if (new Set(orderLines.map((l) => l.product.currency)).size > 1) {
     throw new AppError("Order items use different currencies", 422, "MIXED_CURRENCY");
   }
 
-  // Pricing from Product DB — AI price input does not exist in this function.
-  const breakdown = await calculateCartPricing(db, {
+  // Pricing from DB — one independent calculation per order line, with the
+  // cart's delivery fee charged ONCE (allocated to the first order).
+  const cartPricing = await calculateIndependentOrdersPricing(db, {
     workspaceId: ctx.workspaceId,
     items: orderLines.map((line) => ({
-      price: line.product.price,
+      price: line.unitPrice,
       quantity: line.quantity,
       currency: line.product.currency,
     })),
     province: draft.province,
   });
-  if (!breakdown.deliveryAvailable) {
+  if (!cartPricing.deliveryAvailable) {
     throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
   }
-  // hooks best-effort (sales events) تستخدم العنصر الأول — لا تغيّر الطلب.
-  const primary = orderLines[0];
-
-  const idempotencyKey = draft.idempotencyKey ?? `draft:${draft.id}`;
-  const existingByIdem = await db.order.findUnique({ where: { idempotencyKey } });
-  if (existingByIdem) {
-    return {
-      orderId: existingByIdem.id,
-      orderNumber: existingByIdem.orderNumber,
-      status: existingByIdem.status,
-      total: Number(existingByIdem.total),
-      currency: existingByIdem.currency,
-      created: false,
-      rules,
-    };
-  }
+  const pricedLines = orderLines.map((line, idx) => ({
+    ...line,
+    breakdown: cartPricing.lines[idx]!,
+  }));
 
   const customer = await db.customer.findUnique({ where: { id: draft.customerId } });
   if (!customer) throw new NotFoundError("Customer");
@@ -186,226 +258,258 @@ export async function createOrderFromDraft(
     throw new AppError("Customer is blacklisted — order creation refused", 422, "ORDER_CUSTOMER_BLACKLISTED");
   }
 
-  const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${randomId(3).toUpperCase()}`;
   const status = "CONFIRMED";
 
-  // Phase 1.1 — order row + draft conversion happen together. When the host
-  // provides a real transaction (Prisma) they are atomic; the unique
-  // idempotencyKey makes a concurrent confirmation resolve to one order
-  // instead of a 500.
-  const writeOrder = async (tx: Db): Promise<Order> => {
-    const created = (await tx.order.create({
-      data: {
+  // All independent orders + their Telegram jobs are written atomically:
+  // either the whole cart becomes orders (one per product line) or none does.
+  const writeOrders = async (tx: Db): Promise<Order[]> => {
+    const createdOrders: Order[] = [];
+    for (let idx = 0; idx < pricedLines.length; idx += 1) {
+      const line = pricedLines[idx]!;
+      const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${randomId(4).toUpperCase()}${idx}`;
+      const idempotencyKey = `${ctx.workspaceId}:batch:${batchId}:item:${idx}`;
+      const created = (await tx.order.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          orderNumber,
+          customerId: draft.customerId,
+          conversationId: draft.conversationId,
+          draftId: draft.id,
+          orderBatchId: batchId,
+          status,
+          confirmationStatus: "CONFIRMED_BY_CUSTOMER",
+          deliveryAddress: draft.rawAddress,
+          province: draft.province,
+          notes: draft.notes ?? null,
+          subtotal: line.breakdown.subtotal,
+          discount: line.breakdown.discount,
+          deliveryFee: line.breakdown.deliveryFee,
+          total: line.breakdown.total,
+          currency: line.breakdown.currency,
+          source: params.source ?? "AI",
+          idempotencyKey,
+          items: {
+            create: {
+              productId: line.product.id,
+              variantId: line.item.variantId,
+              productNameSnapshot: line.product.name,
+              skuSnapshot: line.product.sku,
+              offerNameSnapshot: line.offerName,
+              offerQuantity: line.offerQuantity,
+              unitPrice: line.breakdown.unitPrice,
+              quantity: line.quantity,
+              subtotal: line.breakdown.subtotal,
+            },
+          },
+        } as Prisma.OrderUncheckedCreateInput,
+      })) as Order;
+      // Durable Telegram outbox: one independent message per order. The job
+      // only sends later; order creation never waits for Telegram.
+      await enqueueJob(tx, {
         workspaceId: ctx.workspaceId,
-        orderNumber,
-        customerId: draft.customerId,
-        conversationId: draft.conversationId,
-        draftId: draft.id,
-        status,
-        confirmationStatus: "CONFIRMED_BY_CUSTOMER",
-        deliveryAddress: draft.rawAddress,
-        province: draft.province,
-        notes: draft.notes ?? null,
-        subtotal: breakdown.subtotal,
-        discount: breakdown.discount,
-        deliveryFee: breakdown.deliveryFee,
-        total: breakdown.total,
-        currency: breakdown.currency,
-        source: params.source ?? "AI",
-        idempotencyKey,
-        items: {
-          create: orderLines.map((line, idx) => ({
-            productId: line.product.id,
-            variantId: line.item.variantId,
-            productNameSnapshot: line.product.name,
-            skuSnapshot: line.product.sku,
-            unitPrice: breakdown.lines[idx].unitPrice,
-            quantity: line.quantity,
-            subtotal: breakdown.lines[idx].subtotal,
-          })),
-        },
-      } as Prisma.OrderUncheckedCreateInput,
-    })) as Order;
+        type: "notify_order_telegram",
+        payload: { orderId: created.id },
+        idempotencyKey: `telegram-order:${ctx.workspaceId}:${created.id}`,
+        maxAttempts: 8,
+      });
+      createdOrders.push(created);
+    }
     await tx.orderDraft.update({
       where: { id: draft.id },
-      data: { state: "CONVERTED", orderId: created.id, idempotencyKey },
+      data: { state: "CONVERTED", orderId: createdOrders[0]!.id },
     });
-    return created;
+    return createdOrders;
   };
 
-  let order: Order;
+  let createdOrders: Order[];
   try {
     const anyDb = db as unknown as { $transaction?: <T>(fn: (tx: Db) => Promise<T>) => Promise<T> };
-    order = typeof anyDb.$transaction === "function" ? await anyDb.$transaction(writeOrder) : await writeOrder(db);
+    createdOrders =
+      typeof anyDb.$transaction === "function"
+        ? await anyDb.$transaction(writeOrders)
+        : await writeOrders(db);
   } catch (err) {
-    // A concurrent confirmation won the race on the unique idempotencyKey.
+    // A concurrent confirmation won the race on a unique idempotency key.
     if ((err as { code?: string })?.code === "P2002") {
-      const existing = await db.order.findUnique({ where: { idempotencyKey } });
-      if (existing) {
-        return {
-          orderId: existing.id,
-          orderNumber: existing.orderNumber,
-          status: existing.status,
-          total: Number(existing.total),
-          currency: existing.currency,
-          created: false,
-          rules,
-        };
+      const existing = (await db.order.findMany({
+        where: { workspaceId: ctx.workspaceId, orderBatchId: batchId },
+        include: { items: true },
+        orderBy: { createdAt: "asc" },
+      })) as (Order & { items: OrderItem[] })[];
+      if (existing.length > 0) {
+        const summaries = existing.map(toOrderSummary);
+        return { ...summaries[0]!, created: false, rules, orders: summaries };
       }
     }
     throw err;
   }
 
-  // P8 — مصدر الإعلان: الطلب يرث مصدر العميل الموثوق (لمسة أولى) إن وُجد،
-  // ولا يُخترع أبدًا. كما تُسجَّل نتيجة عروض البيع: قبول العرض (كمية الطلب
-  // ≥ كمية العرض المعروض لنفس SKU) وإضافة المنتج المكمل (طلِب المنتج الذي
-  // قُدِّم سابقًا كمكمل في هذه المحادثة). الفشل لا يكسر إنشاء الطلب أبدًا.
-  try {
-    const { recordSalesEvent } = await import("@/modules/sales/metrics");
-    if ((customer as { adSource?: string | null }).adSource) {
-      await db.order.update({ where: { id: order.id }, data: { adSource: (customer as { adSource?: string | null }).adSource! } as never });
-    }
-    const shownRows = await (db as unknown as {
-      salesEvent: { findMany: (a: unknown) => Promise<Array<Record<string, unknown>>> };
-    }).salesEvent.findMany({
-      where: { workspaceId: ctx.workspaceId, conversationId: draft.conversationId, sku: primary.product.sku },
-    }).catch(() => [] as Array<Record<string, unknown>>);
-    if (shownRows.some((r) => r.type === "OFFER_SHOWN")) {
-      const offerQty = shownRows
-        .filter((r) => r.type === "OFFER_SHOWN")
-        .map((r) => Number((r.payload as { quantity?: number } | null)?.quantity ?? 0))
-        .reduce((a: number, b: number) => Math.max(a, b), 0);
-      if (!offerQty || primary.quantity >= offerQty) {
-        await recordSalesEvent(db, {
-          workspaceId: ctx.workspaceId,
-          type: "OFFER_ACCEPTED",
-          conversationId: draft.conversationId,
-          customerId: draft.customerId,
-          orderId: order.id,
-          productId: primary.product.id,
-          sku: primary.product.sku,
-          value: breakdown.total,
+  // P8/P12 — post-create bookkeeping runs per independent order; every step is
+  // best-effort and can never roll back an order that was already committed.
+  const { recordSalesEvent } = await import("@/modules/sales/metrics");
+  const { snapshotOrderAttribution } = await import("@/modules/integrations/attribution");
+  const conv = draft.conversationId
+    ? ((await db.conversation.findUnique({
+        where: { id: draft.conversationId },
+        select: { channelId: true },
+      })) as { channelId?: string } | null)
+    : null;
+  const channel = conv?.channelId
+    ? ((await db.channel.findUnique({
+        where: { id: conv.channelId },
+        select: { type: true },
+      })) as { type?: string } | null)
+    : null;
+
+  for (let idx = 0; idx < createdOrders.length; idx += 1) {
+    const created = createdOrders[idx]!;
+    const line = pricedLines[idx]!;
+    try {
+      if ((customer as { adSource?: string | null }).adSource) {
+        await db.order.update({
+          where: { id: created.id },
+          data: { adSource: (customer as { adSource?: string | null }).adSource! } as never,
         });
       }
+      const shownRows = await (db as unknown as {
+        salesEvent: { findMany: (a: unknown) => Promise<Array<Record<string, unknown>>> };
+      }).salesEvent
+        .findMany({
+          where: { workspaceId: ctx.workspaceId, conversationId: draft.conversationId, sku: line.product.sku },
+        })
+        .catch(() => [] as Array<Record<string, unknown>>);
+      if (shownRows.some((r) => r.type === "OFFER_SHOWN")) {
+        const offerQty = shownRows
+          .filter((r) => r.type === "OFFER_SHOWN")
+          .map((r) => Number((r.payload as { quantity?: number } | null)?.quantity ?? 0))
+          .reduce((a: number, b: number) => Math.max(a, b), 0);
+        if (!offerQty || line.quantity >= offerQty) {
+          await recordSalesEvent(db, {
+            workspaceId: ctx.workspaceId,
+            type: "OFFER_ACCEPTED",
+            conversationId: draft.conversationId,
+            customerId: draft.customerId,
+            orderId: created.id,
+            productId: line.product.id,
+            sku: line.product.sku,
+            value: line.breakdown.total,
+          });
+        }
+      }
+      if (shownRows.some((r) => r.type === "CROSS_SELL_SHOWN")) {
+        await recordSalesEvent(db, {
+          workspaceId: ctx.workspaceId,
+          type: "CROSS_SELL_ADDED",
+          conversationId: draft.conversationId,
+          customerId: draft.customerId,
+          orderId: created.id,
+          productId: line.product.id,
+          sku: line.product.sku,
+          value: line.breakdown.total,
+        });
+      }
+    } catch {
+      // sales hooks are best-effort — never break order creation
     }
-    if (shownRows.some((r) => r.type === "CROSS_SELL_SHOWN")) {
-      await recordSalesEvent(db, {
+
+    try {
+      await snapshotOrderAttribution(db, {
+        id: created.id,
         workspaceId: ctx.workspaceId,
-        type: "CROSS_SELL_ADDED",
         conversationId: draft.conversationId,
-        customerId: draft.customerId,
-        orderId: order.id,
-        productId: primary.product.id,
-        sku: primary.product.sku,
-        value: breakdown.total,
+        createdAt: (created as { createdAt?: Date }).createdAt ?? new Date(),
+        channelType: channel?.type ?? null,
       });
+    } catch {
+      // الإسناد معلومة إضافية — غيابها ما بيوقف الطلب
     }
-  } catch {
-    // sales hooks are best-effort — never break order creation
-  }
 
-  // P12 — لقطة الإسناد على الطلب (رقم الإعلان · رمز الكليبر · القناة) من
-  // الحلقة الفعّالة لحظة الإنشاء، ثم ترحيل تلقائي للـ OMS إذا مفعّل بالـ API.
-  // الاتنين best-effort: فشلهم ما بيكسر طلب انحفظ (الترحيل اليدوي متاح دايمًا).
-  try {
-    const { snapshotOrderAttribution } = await import("@/modules/integrations/attribution");
-    const conv = draft.conversationId
-      ? ((await db.conversation.findUnique({ where: { id: draft.conversationId }, select: { channelId: true } })) as { channelId?: string } | null)
-      : null;
-    const channel = conv?.channelId
-      ? ((await db.channel.findUnique({ where: { id: conv.channelId }, select: { type: true } })) as { type?: string } | null)
-      : null;
-    await snapshotOrderAttribution(db, {
-      id: order.id,
+    await recordAudit(db, {
       workspaceId: ctx.workspaceId,
-      conversationId: draft.conversationId,
-      createdAt: (order as { createdAt?: Date }).createdAt ?? new Date(),
-      channelType: channel?.type ?? null,
+      userId: ctx.userId,
+      action: "order.created",
+      entityType: "Order",
+      entityId: created.id,
+      metadata: {
+        orderNumber: created.orderNumber,
+        orderBatchId: batchId,
+        total: line.breakdown.total,
+        currency: line.breakdown.currency,
+        source: params.source ?? "AI",
+      },
     });
-  } catch {
-    // الإسناد معلومة إضافية — غيابها ما بيوقف الطلب
+    await recordAudit(db, {
+      workspaceId: ctx.workspaceId,
+      action: "price.calculated",
+      entityType: "Order",
+      entityId: created.id,
+      metadata: { ...line.breakdown, offerTitle: line.offerName },
+    });
+    await eventBus.publish(
+      makeEvent("OrderCreated", ctx.workspaceId, {
+        orderId: created.id,
+        total: line.breakdown.total,
+        customerId: draft.customerId,
+        conversationId: draft.conversationId,
+      })
+    );
+    if (created.status === "CONFIRMED") {
+      await eventBus.publish(
+        makeEvent("OrderConfirmed", ctx.workspaceId, {
+          orderId: created.id,
+          customerId: draft.customerId,
+          conversationId: draft.conversationId,
+        })
+      );
+    }
   }
-
-  await recordAudit(db, {
-    workspaceId: ctx.workspaceId,
-    userId: ctx.userId,
-    action: "order.created",
-    entityType: "Order",
-    entityId: order.id,
-    metadata: { orderNumber, total: breakdown.total, currency: breakdown.currency, source: params.source ?? "AI" },
-  });
-  await recordAudit(db, {
-    workspaceId: ctx.workspaceId,
-    action: "price.calculated",
-    entityType: "Order",
-    entityId: order.id,
-    metadata: { ...breakdown },
-  });
-  await eventBus.publish(
-    makeEvent("OrderCreated", ctx.workspaceId, { orderId: order.id, total: breakdown.total, customerId: draft.customerId, conversationId: draft.conversationId })
-  );
   await eventBus.publish(
     makeEvent("CustomerUpdated", ctx.workspaceId, { customerId: draft.customerId, type: "order.created" })
   );
-  if (order.status === "CONFIRMED") {
-    await eventBus.publish(
-      makeEvent("OrderConfirmed", ctx.workspaceId, { orderId: order.id, customerId: draft.customerId, conversationId: draft.conversationId })
-    );
-  }
 
-  // مستودع الطلبات — إشعار تلجرام (best-effort، ما يكسر إنشاء الطلب).
-  try {
-    let token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_ORDER_CHAT_ID;
-    if (!token) {
-      // Fallback: use the workspace's connected Telegram channel token.
-      try {
-        const account = await (db as any).channelAccount?.findFirst?.({
-          where: { channel: { workspaceId: ctx.workspaceId, type: "TELEGRAM", status: "CONNECTED" } },
-          select: { encryptedCredentials: true },
-        });
-        if (account?.encryptedCredentials) {
-          const { decryptSecret } = await import("@/core/crypto");
-          token = decryptSecret(account.encryptedCredentials);
-        }
-      } catch {
-        token = undefined;
-      }
-    }
-    if (token && chatId) {
-      const { getTelegramClient } = await import("@/modules/channels/telegram/client");
-      const { orderNotificationText, telegramOrderPiiEnabled } = await import("./notify");
-      const client = getTelegramClient();
-      // سيستم 1 — بلا بيانات زبون افتراضيًا؛ المالك يفعّلها صريحًا.
-      const text = orderNotificationText({
-        orderNumber,
-        // P22 — كل منتجات الطلب في سطر واحد (الكمية مدمجة بالاسم عند التعدد).
-        productName:
-          orderLines.length === 1
-            ? primary.product.name
-            : orderLines.map((l) => `${l.product.name} × ${l.quantity}`).join("، "),
-        quantity: orderLines.length === 1 ? primary.quantity : null,
-        total: breakdown.total,
-        currency: breakdown.currency,
-        status,
-        customerName: customer?.name,
-        customerPhone: customer?.phone,
-        includePii: telegramOrderPiiEnabled(),
-      });
-      await client.sendMessage(token, chatId, { text });
-    }
-  } catch {
-    // الإشعار best-effort — غيابه ما يوقف الطلب
-  }
-
+  const summaries = createdOrders.map((created, idx) => summaryFromLine(created, pricedLines[idx]!));
   return {
-    orderId: order.id,
-    orderNumber,
-    status: order.status,
-    total: breakdown.total,
-    currency: breakdown.currency,
+    ...summaries[0]!,
     created: true,
     rules,
+    orders: summaries,
+  };
+}
+
+function toOrderSummary(order: Order & { items: OrderItem[] }): CreatedOrderSummary {
+  const item = order.items[0];
+  return {
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    status: order.status,
+    total: Number(order.total),
+    currency: order.currency,
+    productName: item?.productNameSnapshot ?? "",
+    offerName: item?.offerNameSnapshot ?? null,
+    quantity: item?.quantity ?? 0,
+    orderBatchId: order.orderBatchId ?? order.id,
+  };
+}
+
+function summaryFromLine(
+  order: Order,
+  line: {
+    product: { name: string };
+    quantity: number;
+    offerName: string | null;
+    breakdown: { total: number; currency: string };
+  }
+): CreatedOrderSummary {
+  return {
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    status: order.status,
+    total: line.breakdown.total,
+    currency: line.breakdown.currency,
+    productName: line.product.name,
+    offerName: line.offerName,
+    quantity: line.quantity,
+    orderBatchId: order.orderBatchId ?? order.id,
   };
 }
 

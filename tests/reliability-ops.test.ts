@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { evaluateWorkerHealth, DEFAULT_WORKER_STALE_MS } from "@/modules/jobs/worker-health";
-import { orderNotificationText, telegramOrderPiiEnabled } from "@/modules/orders/notify";
+import { buildOrderTelegramMessage, formatOrderDate } from "@/modules/orders/notify";
 import { getOrderAnalytics } from "@/modules/analytics/service";
 
 type Db = Prisma.TransactionClient;
@@ -30,40 +30,34 @@ describe("Phase 3 — صحة العامل", () => {
   });
 });
 
-describe("Phase 3 — خصوصية إشعار تيليجرام", () => {
-  const base = {
-    orderNumber: "SY-2026-0148",
-    productName: "ماء الكمأة",
-    quantity: 3,
-    total: 450000,
-    currency: "SYP",
-    status: "CONFIRMED",
-  };
-  it("لا يرسل اسم/رقم الزبون افتراضيًا", () => {
-    const text = orderNotificationText({
-      ...base,
-      customerName: "أحمد",
-      customerPhone: "0930000000",
-      includePii: false,
+describe("Phase 3 — تنسيق إشعار تيليجرام المستقل", () => {
+  it("الرسالة تحتوي طلبًا واحدًا ومنتجًا واحدًا وبكل الحقول", () => {
+    const text = buildOrderTelegramMessage({
+      orderNumber: "ORD-28262",
+      createdAt: new Date("2026-11-01T13:55:43Z"),
+      timeZone: "Asia/Amman",
+      customerName: "بلال عربش",
+      phone: "0993958355",
+      address: "حلب مدينة الباب",
+      productName: "ماء الكمأ الأصلي",
+      offerName: "قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني",
+      price: 25,
+      quantity: 1,
     });
-    expect(text).toContain("SY-2026-0148");
-    expect(text).not.toContain("أحمد");
-    expect(text).not.toContain("0930000000");
+    expect(text).toBe([
+      "رقم الطلب: ORD-28262",
+      "تاريخ الطلب: 2026-11-01 16:55:43",
+      "إسم العميل: بلال عربش",
+      "رقم الهاتف: 0993958355",
+      "عنوان العميل: حلب مدينة الباب",
+      "إسم المنتج: ماء الكمأ الأصلي",
+      "إسم العرض: قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني",
+      "السعر: 25",
+      "الكمية: 1",
+    ].join("\n"));
   });
-  it("يرسلها فقط عند التفعيل الصريح", () => {
-    const text = orderNotificationText({
-      ...base,
-      customerName: "أحمد",
-      customerPhone: "0930000000",
-      includePii: true,
-    });
-    expect(text).toContain("أحمد");
-  });
-  it("المفتاح الافتراضي مطفأ", () => {
-    expect(telegramOrderPiiEnabled({})).toBe(false);
-    expect(telegramOrderPiiEnabled({ TELEGRAM_ORDER_PII: "1" })).toBe(true);
-    expect(telegramOrderPiiEnabled({ TELEGRAM_ORDER_PII: "true" })).toBe(true);
-    expect(telegramOrderPiiEnabled({ TELEGRAM_ORDER_PII: "0" })).toBe(false);
+  it("التاريخ 24 ساعة بمنطقة المساحة", () => {
+    expect(formatOrderDate(new Date("2026-11-01T21:05:09Z"), "Asia/Amman")).toBe("2026-11-02 00:05:09");
   });
 });
 

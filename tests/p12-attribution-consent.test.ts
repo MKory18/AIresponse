@@ -1039,8 +1039,8 @@ describe("P12 clipper — حملات إعادة التواصل (POST /api/v1/ret
     await expect(
       buildRetargetCampaign(asDb(db), {
         workspaceId: WS,
-        source: "hermes",
-        actor: "hermes",
+        source: "agent",
+        actor: "agent",
         spec: { externalRef: "x", channel: "telegram", segment: { kind: "messaged_no_order" }, templateRef: "t", approvedBy: "u" },
       })
     ).rejects.toMatchObject({ code: "RETARGET_WHATSAPP_ONLY" });

@@ -181,17 +181,7 @@ describe("no internal brand string in user-visible site text (static)", () => {
   it("8. pages render generic labels only (any provider choice is a generic one)", async () => {
     for (const f of PAGES) {
       const src = await readFile(f, "utf8");
-      const visible = src
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|\s)\/\/.*$/gm, "$1")
-        .replace(/value="hermes"/g, "")
-        .replace(/["']hermes["']/g, "")
-        .replace(/\bhermes(?=\s*:)/g, "")
-        .replace(/HERMES_[A-Z_]+/g, "")
-        .replace(/hermes-agent/g, "");
-      expect(visible, `${f} shows no internal brand`).not.toMatch(/hermes/i);
+      expect(src, `${f} shows no internal brand`).not.toMatch(/hermes/i);
     }
-    const aiSrc = await readFile("src/app/(dashboard)/settings/ai/page.tsx", "utf8");
-    expect(aiSrc).not.toMatch(/HERMES_/);
   });
 });

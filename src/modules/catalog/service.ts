@@ -254,7 +254,9 @@ export async function resolveCatalogForChannel(
   workspaceId: string,
   channelId: string
 ): Promise<CatalogResolution> {
-  if (!(await workspaceHasCatalogs(db, workspaceId))) return { status: "no_catalogs", catalog: null };
+  // P24 — NO GLOBAL FALLBACK. A page without an assigned catalog has zero
+  // products (even when the workspace has no catalogs at all). The AI may
+  // answer general questions but can never quote/order an unlisted product.
   const link = (await db.catalogPageAssignment.findUnique({ where: { channelId } })) as {
     workspaceId: string;
     catalogId: string;

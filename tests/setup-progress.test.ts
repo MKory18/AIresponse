@@ -31,14 +31,14 @@ let db: ReturnType<typeof createFakeDb>;
 const progress = (ws = WS) => getSetupProgress(db as Db, ws);
 const done = (p: SetupProgress) => Object.fromEntries(p.steps.map((s) => [s.key, s.done]));
 
-const ENV_KEYS = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "HERMES_BASE_URL", "HERMES_API_KEY", "AI_PROVIDER", "NODE_ENV"] as const;
+const ENV_KEYS = ["OPENROUTER_API_KEY", "OPENROUTER_GLM_MODEL", "AI_PROVIDER", "NODE_ENV"] as const;
 let savedEnv: Record<string, string | undefined>;
 
 beforeEach(() => {
   db = createFakeDb();
   setMockAIProvider(undefined);
   savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-  for (const k of ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "HERMES_BASE_URL", "HERMES_API_KEY", "AI_PROVIDER"]) delete process.env[k];
+  for (const k of ["OPENROUTER_API_KEY", "OPENROUTER_GLM_MODEL", "AI_PROVIDER"]) delete process.env[k];
 });
 afterEach(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
@@ -120,32 +120,32 @@ describe("تشغيل الرد الآلي — مزوّد حقيقي بمفتاح 
   });
 
   it("اخترت مزوّد حقيقي بلا مفتاح = لسا ما خلصت (الوكيل ما بيقدر يرد)", async () => {
-    await setAi({ provider: "openai", aiEnabled: true, autoRespond: true });
+    await setAi({ provider: "openrouter", aiEnabled: true, autoRespond: true });
     expect(done(await progress())["go-live"]).toBe(false);
   });
 
   it("مزوّد حقيقي + مفتاح + الذكاء والرد الآلي مفعّلين = خلصت", async () => {
-    process.env.OPENAI_API_KEY = "sk-test-key";
-    await setAi({ provider: "openai", aiEnabled: true, autoRespond: true });
+    process.env.OPENROUTER_API_KEY = "sk-or-test-key";
+    await setAi({ provider: "openrouter", aiEnabled: true, autoRespond: true });
     expect(done(await progress())["go-live"]).toBe(true);
   });
 
   it("الذكاء أو الرد الآلي مطفّي = ما خلصت حتى بمفتاح", async () => {
-    process.env.OPENAI_API_KEY = "sk-test-key";
-    await setAi({ provider: "openai", aiEnabled: false, autoRespond: true });
+    process.env.OPENROUTER_API_KEY = "sk-or-test-key";
+    await setAi({ provider: "openrouter", aiEnabled: false, autoRespond: true });
     expect(done(await progress())["go-live"]).toBe(false);
     db = createFakeDb();
-    await setAi({ provider: "openai", aiEnabled: true, autoRespond: false });
+    await setAi({ provider: "openrouter", aiEnabled: true, autoRespond: false });
     expect(done(await progress())["go-live"]).toBe(false);
   });
 });
 
 describe("الإكمال والترتيب", () => {
   it("الشخصية والمعرفة والتجربة «موصى بها» — ما بيمنعوا إكمال الخطوات الإجبارية", async () => {
-    process.env.OPENAI_API_KEY = "sk-test-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-test-key";
     await addChannel("CONNECTED");
     await addProduct();
-    await setAi({ provider: "openai", aiEnabled: true, autoRespond: true });
+    await setAi({ provider: "openrouter", aiEnabled: true, autoRespond: true });
     const p = await progress();
     expect(p.complete).toBe(true);
     expect(p.doneCount).toBe(3);
@@ -167,13 +167,13 @@ describe("الإكمال والترتيب", () => {
   });
 
   it("كل شي خلص: ولا خطوة جاية", async () => {
-    process.env.OPENAI_API_KEY = "sk-test-key";
+    process.env.OPENROUTER_API_KEY = "sk-or-test-key";
     await addChannel("CONNECTED");
     await addProduct();
     await db.persona.create({ data: { workspaceId: WS, name: "سارة", isActive: true } } as never);
     await db.faq.create({ data: { workspaceId: WS, question: "التوصيل؟", answer: "يومين", isActive: true } } as never);
     await db.playgroundSession.create({ data: { workspaceId: WS } } as never);
-    await setAi({ provider: "openai", aiEnabled: true, autoRespond: true });
+    await setAi({ provider: "openrouter", aiEnabled: true, autoRespond: true });
     const p = await progress();
     expect(p.doneCount).toBe(6);
     expect(p.nextKey).toBeNull();

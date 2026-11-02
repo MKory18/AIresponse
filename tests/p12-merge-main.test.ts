@@ -5,6 +5,7 @@ import { MockAIProvider, setMockAIProvider } from "@/modules/ai/provider";
 import { processAIMessage } from "@/modules/ai/orchestrator";
 import { processIncomingMessage } from "@/modules/conversations/service";
 import { createProduct } from "@/modules/products/service";
+import { assignPageCatalog } from "./helpers/catalog";
 import { createPlaygroundSession, sendPlaygroundMessage } from "@/modules/ai/playground-service";
 import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
 import { encryptSecret } from "@/core/crypto";
@@ -76,6 +77,7 @@ async function seedChannel() {
         }) as unknown as typeof fetch,
       })
   );
+  return ch;
 }
 
 const replySystems = () => calls.filter((c) => !c.system.includes("JSON")).map((c) => c.system);
@@ -106,7 +108,9 @@ describe("P12 × main — قواعد سيستم 1 بمسار المزوّد ال
     stubProviderFetch();
     await db.aISettings.create({ data: { workspaceId: WS, provider: "openrouter", responseModel: "openai/gpt-4o-mini", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true } } as never);
     await seedChannel();
-    await seedProductWithRules();
+    const p = await seedProductWithRules();
+    const channel = (db._stores.channel as Row[])[0]!;
+    await assignPageCatalog(db as never, WS, channel.id as string, [p.id as string]);
   });
 
   async function run(text: string, suffix: string) {
@@ -177,21 +181,11 @@ describe("P12 × main — ولا اسم مزار داخلي بأي نص مرئي
     "src/components/inbox/marketing-card.tsx",
   ];
   /** النص المرئي تقريبًا = المصدر بلا تعليقات وبلا المعرّفات التقنية المسموحة. */
-  const visible = (src: string) =>
-    src
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|\s)\/\/.*$/gm, "$1")
-      .replace(/value="hermes"/g, "")
-      .replace(/["'`]hermes(-bridge)?["'`]/g, "")
-      .replace(/\bhermes(?=\s*:)/g, "")
-      .replace(/HERMES_[A-Z_]+/g, "")
-      .replace(/hermes-agent/g, "");
-
-  it.each(P12_UI)("%s: بلا اسم العلامة", (f) => {
-    expect(visible(readFileSync(f, "utf8"))).not.toMatch(/hermes/i);
+  it.each(P12_UI)("%s: بلا أي أثر للاسم المحذوف", (f) => {
+    expect(readFileSync(f, "utf8")).not.toMatch(/hermes/i);
   });
 
-  it("أسماء الأنظمة والتوكنات المعروضة عامة بالكامل", () => {
+  it("أسماء الأنظمة والتوكنات المعروضة بلا الاسم المحذوف", () => {
     for (const spec of Object.values(SYSTEM_SPECS) as Array<Record<string, unknown>>) {
       for (const [k, v] of Object.entries(spec)) {
         if (typeof v === "string" && /Ar$/.test(k)) expect(v, k).not.toMatch(/hermes/i);

@@ -22,7 +22,7 @@ export const integrationSettingsSchema = z
     trustClipperApprovals: z.boolean(),
     /** كلفة السيرفر اليومية المبلّغة للمالية (نص عشري) — null = لا تُبلّغ. */
     serverCostUsdPerDay: z.string().regex(/^\d{1,6}\.\d{2}$/).nullable(),
-    /** زر إيقاف باب الوكلاء (Hermes): كل نداء بيرجع 401 بلا ما ينحذف التوكن. */
+    /** إيقاف استقبال مسودات الأنظمة الخارجية. */
     agentDoorPaused: z.boolean(),
   })
   .strict();

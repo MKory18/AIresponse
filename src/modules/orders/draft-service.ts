@@ -6,6 +6,7 @@ import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertDraftTransition } from "./state-machine";
 import { inferProvince, normalizePhone } from "./primitives";
 import { resolveProduct, type ResolvableProduct } from "./primitives";
+import { resolveOffer } from "./offers";
 import {
   DEFAULT_ORDER_FIELDS,
   normalizeOrderFields,
@@ -18,11 +19,14 @@ export type RequiredDraftField = OrderFieldKey;
 export interface DraftExtractionInput {
   productName?: string | null;
   productId?: string | null;
+  /** Offer/package label exactly as the customer said it (matched to DB later). */
+  offerTitle?: string | null;
   quantity?: number | null;
   /** P22 — عدة منتجات في رسالة واحدة (سلة). */
   items?: {
     productName?: string | null;
     productId?: string | null;
+    offerTitle?: string | null;
     quantity?: number | null;
     variantId?: string | null;
   }[];
@@ -38,6 +42,8 @@ export interface DraftExtractionInput {
 export interface DraftItem {
   productId: string | null;
   productName: string;
+  /** DB offer title (package). null = base product price. */
+  offerTitle: string | null;
   variantId: string | null;
   quantity: number | null;
 }
@@ -74,6 +80,7 @@ export function parseDraftItems(draft: {
       items.push({
         productId,
         productName: name,
+        offerTitle: typeof o.offerTitle === "string" && o.offerTitle.trim() ? o.offerTitle.trim() : null,
         variantId: typeof o.variantId === "string" && o.variantId ? o.variantId : null,
         quantity: q && q > 0 ? q : null,
       });
@@ -84,6 +91,7 @@ export function parseDraftItems(draft: {
     items.push({
       productId: draft.productId,
       productName: (draft.productName ?? "").trim(),
+      offerTitle: null,
       variantId: draft.variantId ?? null,
       quantity: draft.quantity && draft.quantity > 0 ? draft.quantity : null,
     });
@@ -91,20 +99,24 @@ export function parseDraftItems(draft: {
   return items;
 }
 
-/** دمج عنصر جديد: نفس المنتج = تحديث الكمية (آخر قيمة صريحة تفوز) لا تكرار. */
+/** دمج عنصر جديد: نفس المنتج + نفس العرض = تحديث الكمية؛ عرض مختلف = بند مستقل. */
 function mergeDraftItems(existing: DraftItem[], incoming: DraftItem[]): DraftItem[] {
   const result = existing.map((i) => ({ ...i }));
+  const sameOffer = (a: DraftItem, b: DraftItem) =>
+    (a.offerTitle ?? "") === (b.offerTitle ?? "");
   for (const item of incoming) {
     const idx = result.findIndex(
       (x) =>
-        (item.productId && x.productId === item.productId) ||
-        (!item.productId && item.productName && x.productName === item.productName)
+        sameOffer(x, item) &&
+        ((item.productId && x.productId === item.productId) ||
+          (!item.productId && item.productName && x.productName === item.productName))
     );
     if (idx >= 0) {
       const prev = result[idx];
       result[idx] = {
         productId: item.productId ?? prev.productId,
         productName: item.productName || prev.productName,
+        offerTitle: item.offerTitle ?? prev.offerTitle,
         variantId: item.variantId ?? prev.variantId,
         quantity: item.quantity ?? prev.quantity,
       };
@@ -124,14 +136,19 @@ export async function getOrCreateDraft(db: Db, workspaceId: string, conversation
   // بدل ما نطلبها منه من جديد كل طلب. الحقول الناقصة تبقى ناقصة (لا اختراع).
   const customer = await db.customer.findFirst({
     where: { id: customerId, workspaceId },
-    select: { name: true, phone: true, address: true, province: true },
+    select: { name: true, phone: true, address: true, province: true, memoryResetAt: true },
   });
-  const rawAddress = customer?.address ?? null;
-  const province = customer?.province ?? (rawAddress ? inferProvince(rawAddress) : null);
+  // After a memory wipe, old contact data is NOT treated as confirmed: the
+  // draft starts empty and the customer is asked again.
+  const memoryCleared = Boolean((customer as { memoryResetAt?: Date | null } | null)?.memoryResetAt);
+  const rawAddress = memoryCleared ? null : customer?.address ?? null;
+  const province = memoryCleared
+    ? null
+    : customer?.province ?? (rawAddress ? inferProvince(rawAddress) : null);
   // هاتف الملف ممكن يكون قديمًا بصيغة غير قانونية — لا نمرّره للمسودة إلا صالحًا.
-  const profilePhone = customer?.phone ? normalizePhone(customer.phone) : null;
+  const profilePhone = !memoryCleared && customer?.phone ? normalizePhone(customer.phone) : null;
   const seed = {
-    customerName: customer?.name ?? null,
+    customerName: memoryCleared ? null : customer?.name ?? null,
     phone: profilePhone?.valid ? profilePhone.canonical : null,
     rawAddress,
     province,
@@ -207,6 +224,7 @@ export async function updateDraftFromExtraction(
             {
               productName: params.extraction.productName,
               productId: params.extraction.productId,
+              offerTitle: params.extraction.offerTitle ?? null,
               quantity: params.extraction.quantity,
               variantId: null as string | null,
             },
@@ -243,21 +261,28 @@ export async function updateDraftFromExtraction(
               isArchived: false,
               ...(allowed ? { id: { in: allowed } } : {}),
             },
-            select: { id: true, name: true },
+            select: { id: true, name: true, offers: true },
           })
         : []
       ).map((p) => [p.id, p] as const)
+    );
+    const catalogById = new Map(
+      (catalogProducts as unknown as { id: string; name: string; offers?: unknown }[]).map(
+        (p) => [p.id, p] as const
+      )
     );
 
     const incoming: DraftItem[] = [];
     for (const raw of rawItems) {
       let productId: string | null = null;
       let productName = "";
+      let productRow: { id: string; name: string; offers?: unknown } | null = null;
       if (raw.productId) {
         const owned = ownedById.get(raw.productId);
         if (!owned) continue;
         productId = owned.id;
         productName = owned.name;
+        productRow = owned;
       } else if (raw.productName) {
         const resolution = resolveProduct(raw.productName, withAliases);
         if (resolution.status === "AMBIGUOUS") {
@@ -268,22 +293,50 @@ export async function updateDraftFromExtraction(
         if (resolution.status !== "RESOLVED") continue; // NOT_FOUND: لا نضيف منتجًا وهميًا
         productId = resolution.product!.id;
         productName = resolution.product!.name;
+        productRow = catalogById.get(productId) ?? null;
       } else {
         continue;
       }
+      // Package/offer label: matched to the product's DB offers only.
+      const requestedOffer = (raw.offerTitle ?? raw.variantId ?? "").trim() || null;
+      const offerResult = resolveOffer(productRow?.offers, requestedOffer);
+      if (offerResult.status === "not_found") {
+        return {
+          draft,
+          clarification: `العرض «${requestedOffer}» غير متاح لهذا المنتج. اختار من العروض المتاحة أو اطلب المنتج الأساسي.`,
+        };
+      }
+      if (offerResult.status === "ambiguous") {
+        return {
+          draft,
+          ambiguousCandidates: offerResult.candidates.map((o) => o.title),
+        };
+      }
       const quantity = raw.quantity && raw.quantity > 0 ? Math.trunc(raw.quantity) : null;
-      incoming.push({ productId, productName, variantId: raw.variantId ?? null, quantity });
+      incoming.push({
+        productId,
+        productName,
+        offerTitle: offerResult.status === "resolved" ? offerResult.offer.title : null,
+        variantId: raw.variantId ?? null,
+        quantity,
+      });
     }
 
     const merged = mergeDraftItems(existingItems, incoming);
     applyCartToDraftData(data, merged);
   } else if (params.extraction.quantity && params.extraction.quantity > 0 && existingItems.length > 0) {
-    // كمية بلا اسم منتج ("بدي 3" بعد «بدي ماء الكمأة») = تحديث آخر عنصر
-    // بالسلّة (السياق الحالي)، لا إنشاء عنصر بلا منتج.
+    // كمية بلا اسم منتج: تُحدّث البند الوحيد فقط. إذا السلة فيها أكثر من
+    // منتج/عرض، لا نخمّن أي بند — نسأل العميل.
+    if (existingItems.length !== 1) {
+      return {
+        draft,
+        ambiguousCandidates: existingItems.map((i) =>
+          i.offerTitle ? `${i.productName} — ${i.offerTitle}` : i.productName
+        ),
+      };
+    }
     const qty = Math.trunc(params.extraction.quantity);
-    const items = existingItems.map((item, idx) =>
-      idx === existingItems.length - 1 ? { ...item, quantity: qty } : item
-    );
+    const items = existingItems.map((item) => ({ ...item, quantity: qty }));
     applyCartToDraftData(data, items);
   }
 
@@ -319,9 +372,9 @@ export async function updateDraftFromExtraction(
   if (!refreshed.phone || !refreshed.rawAddress || !refreshed.province || !refreshed.customerName) {
     const customer = await db.customer.findFirst({
       where: { id: params.customerId, workspaceId: params.workspaceId },
-      select: { name: true, phone: true, address: true, province: true },
+      select: { name: true, phone: true, address: true, province: true, memoryResetAt: true },
     });
-    if (customer) {
+    if (customer && !(customer as { memoryResetAt?: Date | null }).memoryResetAt) {
       const backfill: Prisma.OrderDraftUncheckedUpdateInput = {};
       if (!refreshed.phone && customer.phone) {
         const normalized = normalizePhone(customer.phone);
@@ -364,8 +417,6 @@ export async function updateDraftFromExtraction(
   if (missing.length === 0 && final.state === "COLLECTING") {
     assertDraftTransition(final.state, "READY");
     const ready = await db.orderDraft.update({ where: { id: draft.id }, data: { state: "READY" } });
-    // P19 — إشعار تيليجرام للطلب الجاهز (مهمة مستقلة، idempotent).
-    await enqueueReadyOrderNotification(db, params.workspaceId, ready);
     await eventBus.publish(makeEvent("OrderReadyForConfirmation", params.workspaceId, { draftId: draft.id }));
     return { draft: ready, missingFields: missing, becameReady: true };
   }
@@ -430,32 +481,6 @@ export async function getRequiredOrderFields(
   });
   if (!channel || channel.workspaceId !== workspaceId) return [...DEFAULT_ORDER_FIELDS];
   return normalizeOrderFields((channel as { orderRequiredFields?: string[] }).orderRequiredFields);
-}
-
-/** P19 — إشعار تيليجرام عند جاهزية الطلب: مهمة مستقلة، لا تعطّل الرد. */
-async function enqueueReadyOrderNotification(
-  db: Db,
-  workspaceId: string,
-  draft: { id: string; idempotencyKey: string | null }
-): Promise<void> {
-  try {
-    const settings = await db.telegramOrderSettings.findUnique({
-      where: { workspaceId },
-      select: { enabled: true },
-    });
-    if (!settings?.enabled) return;
-    const { enqueueJob } = await import("@/modules/jobs/service");
-    await enqueueJob(db, {
-      workspaceId,
-      type: "notify_order_ready",
-      payload: { draftId: draft.id },
-      // يتغيّر عند إعادة تدوير المسودة لطلب جديد — طلب جديد = إشعار جديد.
-      idempotencyKey: `tg-order:${draft.id}:${draft.idempotencyKey ?? "first"}`,
-      maxAttempts: 4,
-    });
-  } catch {
-    // الإشعار تجميلي/تشغيلي: فشل التصفيف ما بيفشّل المسودة ولا الرد.
-  }
 }
 
 /**
@@ -550,7 +575,8 @@ export function buildDraftSummary(draft: {
     lines.push("المنتجات:");
     for (const item of items) {
       const qty = item.quantity ? ` × ${item.quantity}` : "";
-      lines.push(`- ${item.productName || "منتج"}${qty}`);
+      const offer = item.offerTitle ? ` (${item.offerTitle})` : "";
+      lines.push(`- ${item.productName || "منتج"}${offer}${qty}`);
     }
   } else if (draft.productName) {
     lines.push(`المنتج: ${draft.productName}`);

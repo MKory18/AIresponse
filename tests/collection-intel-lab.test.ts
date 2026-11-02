@@ -129,9 +129,9 @@ describe("COLLECTION_ONLY — لا رد آلي إطلاقًا", () => {
     expect(intel[0].data.quantity).toBe(2);
     expect(intel[0].fieldMeta.phone.sources).toContain(messageId);
 
-    // الاستدعاء الوحيد كان لـ OpenRouter — ولا شيء لفيسبوك.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("openrouter.ai");
+    // كل الاستدعاءات كانت لـ OpenRouter (استخراج العميل + خط الرد) — ولا شيء لفيسبوك.
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+    for (const call of fetchMock.mock.calls) expect(String(call[0])).toContain("openrouter.ai");
     expect(graphCalls(fetchMock)).toHaveLength(0);
 
     const before = (db._stores.message as Array<Record<string, any>>).length;
@@ -371,9 +371,9 @@ describe("OpenRouter — الإعداد والأخطاء", () => {
 
   it("المزوّد يستخدم المتغيّر البيئي والنموذج القابل للضبط", () => {
     process.env.OPENROUTER_BASE_URL = "https://gateway.example/v1";
-    process.env.INTEL_MODEL = "google/gemini-2.5-flash";
+    process.env.INTEL_MODEL = "z-ai/glm-4.7";
     const handle = getExtractionProvider();
-    expect(handle.model).toBe("google/gemini-2.5-flash");
+    expect(handle.model).toBe("z-ai/glm-4.7");
     expect((handle.provider as unknown as { endpointUrl: string }).endpointUrl).toBe("https://gateway.example/v1/chat/completions");
     delete process.env.INTEL_MODEL;
   });

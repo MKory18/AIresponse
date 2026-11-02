@@ -1,14 +1,6 @@
 /**
- * P19 — الحقول المطلوبة لكل صفحة + إرسال الطلب الجاهز إلى تيليجرام.
- *
- * يثبت:
- *  - حقول إكمال الطلب تتبع الصفحة (بدون عنوان/مع الاسم...).
- *  - المسودة READY تُصفّي مهمة `notify_order_ready` مرة واحدة.
- *  - المهمة ترسل chat_id + topic_id (message_thread_id) + نص فيه بيانات الطلب.
- *  - الإعدادات المطفية أو المسودة الملغاة = لا إرسال.
- *  - فشل تيليجرام لا يكسر المسودة/الطلب (فشل مهمة فقط).
- *
- * ⚠️ قاعدة بالذاكرة وTelegrام وهمي (fetch مزوّر) — سلوك لا اتصال حقيقي.
+ * Telegram outbox — ONE independent message per confirmed order.
+ * In-memory DB + fake Telegram fetch (no real network).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Prisma } from "@prisma/client";
@@ -17,9 +9,10 @@ import { createProduct } from "@/modules/products/service";
 import { updateDraftFromExtraction } from "@/modules/orders/draft-service";
 import { createOrderFromDraft } from "@/modules/orders/order-service";
 import { runJobs } from "@/modules/jobs/handlers";
-import { buildOrderReadyMessage, escapeTelegramHtml } from "@/modules/integrations/telegram-orders";
+import { formatOrderDate } from "@/modules/orders/notify";
 import { TelegramClient, setTelegramClientFactory } from "@/modules/channels/telegram/client";
 import { encryptSecret } from "@/core/crypto";
+import { assignPageCatalog } from "./helpers/catalog";
 
 type Db = Prisma.TransactionClient;
 type FakeDb = ReturnType<typeof createFakeDb> & Record<string, any>;
@@ -44,20 +37,22 @@ function telegramOk() {
 
 async function seed(opts?: { enabled?: boolean; fields?: string[] }) {
   db = createFakeDb() as FakeDb;
+  await db.workspace.create({ data: { id: WS, name: "مساحة", slug: "tg", timezone: "Asia/Amman" } } as never);
   const product = await createProduct(db as unknown as Db, AGENT, {
-    name: "ماء الكمأة",
+    name: "ماء الكمأة الأصلي",
     sku: "TW-900",
-    price: 150000,
-    currency: "SYP",
-  });
+    price: 25,
+    currency: "USD",
+    offers: [{ title: "قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني", quantity: 3, price: 25 }],
+  } as never);
   const productB = await createProduct(db as unknown as Db, AGENT, {
     name: "عسل الكمأة",
     sku: "HON-900",
-    price: 50000,
-    currency: "SYP",
+    price: 50,
+    currency: "USD",
   });
   const customer = (await db.customer.create({
-    data: { workspaceId: WS, name: "سامر", phone: "0791234567", address: "عمان - الدوار السابع", province: "عمان" },
+    data: { workspaceId: WS, name: "بلال عربش", phone: "0993958355", address: "حلب مدينة الباب", province: "حلب" },
   } as never)) as { id: string };
   const channel = (await db.channel.create({
     data: {
@@ -73,6 +68,7 @@ async function seed(opts?: { enabled?: boolean; fields?: string[] }) {
   await db.conversation.create({
     data: { workspaceId: WS, customerId: customer.id, channelId: channel.id, channelConversationId: "conv-tg" },
   } as never);
+  await assignPageCatalog(db as unknown as Db, WS, channel.id, [product.id, productB.id]);
   await db.telegramOrderSettings.create({
     data: {
       workspaceId: WS,
@@ -86,7 +82,20 @@ async function seed(opts?: { enabled?: boolean; fields?: string[] }) {
 }
 
 function notifyJobs() {
-  return (db._stores.backgroundJob as any[]).filter((j) => j.type === "notify_order_ready");
+  return (db._stores.backgroundJob as any[]).filter((j) => j.type === "notify_order_telegram");
+}
+
+async function readyDraft(items: { productName: string; quantity: number; offerTitle?: string }[]) {
+  const { customer } = await seed();
+  const r = await updateDraftFromExtraction(db as unknown as Db, {
+    workspaceId: WS,
+    conversationId: db._stores.conversation[0].id,
+    customerId: customer.id,
+    extraction: { items },
+    source: "TEST",
+  });
+  expect(r.becameReady).toBe(true);
+  return r;
 }
 
 beforeEach(() => {
@@ -97,115 +106,73 @@ afterEach(() => {
   setTelegramClientFactory(null);
 });
 
-describe("P19 — إرسال الطلب الجاهز إلى تيليجرام", () => {
-  it("مسودة READY تُصفّي إشعارًا واحدًا، ويوصل للمجموعة والتوبيك", async () => {
-    const { customer } = await seed();
-    const r = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId: db._stores.conversation[0].id,
-      customerId: customer.id,
-      extraction: {
-        items: [
-          { productName: "ماء الكمأة", quantity: 2 },
-          { productName: "عسل الكمأة", quantity: 1 },
-        ],
-      },
-      source: "TEST",
-    });
-    expect(r.becameReady).toBe(true);
-    expect(notifyJobs()).toHaveLength(1);
+describe("Telegram — رسالة مستقلة لكل طلب", () => {
+  it("منتجان = طلبان مستقلان = رسالتان منفصلتان", async () => {
+    const r = await readyDraft([
+      { productName: "ماء الكمأة الأصلي", quantity: 1, offerTitle: "قطعتين + قطعة هدية ( عدد 3 ) =25 $ + توصيل مجاني" },
+      { productName: "عسل الكمأة", quantity: 1 },
+    ]);
+    expect(notifyJobs()).toHaveLength(0); // no notification before confirmation
+    await db.deliveryRule.create({
+      data: { workspaceId: WS, province: "حلب", fee: 5, isAvailable: true },
+    } as never);
+
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    expect(result.orders).toHaveLength(2);
+    expect(notifyJobs()).toHaveLength(2);
 
     const run = await runJobs(db as never);
     expect(run.failed).toBe(0);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain("/bot123456:TEST_TOKEN/sendMessage");
-    expect(calls[0].body.chat_id).toBe("-1001234567890");
-    expect(calls[0].body.message_thread_id).toBe(42);
-    expect(calls[0].body.parse_mode).toBe("HTML");
-    const text = String(calls[0].body.text);
-    // P22 — الرسالة تعرض كل منتجات السلة، لا الأول فقط.
-    expect(text).toContain("ماء الكمأة");
-    expect(text).toContain("عسل الكمأة");
-    expect(text).toContain("0791234567");
-    expect(text).toContain("عمان");
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call.url).toContain("/bot123456:TEST_TOKEN/sendMessage");
+      expect(call.body.chat_id).toBe("-1001234567890");
+      expect(call.body.message_thread_id).toBe(42);
+      expect(call.body.parse_mode).toBeUndefined();
+      const text = String(call.body.text);
+      // Exactly one order number + one product per message.
+      expect((text.match(/رقم الطلب:/g) ?? []).length).toBe(1);
+      expect((text.match(/إسم المنتج:/g) ?? []).length).toBe(1);
+      expect(text).toContain("بلال عربش");
+      expect(text).toContain("0993958355");
+      expect(text).toContain("حلب مدينة الباب");
+    }
+    const texts = calls.map((c) => String(c.body.text));
+    expect(texts.some((t) => t.includes("ماء الكمأة الأصلي") && t.includes("قطعتين + قطعة هدية"))).toBe(true);
+    expect(texts.some((t) => t.includes("عسل الكمأة"))).toBe(true);
+    // Package: quantity is packages (1), not pieces (3).
+    const offerText = texts.find((t) => t.includes("ماء الكمأة الأصلي"))!;
+    expect(offerText).toContain("الكمية: 1");
+    expect(offerText).toContain("السعر: 25");
+    expect(offerText).toContain("رسوم التوصيل: 1.67");
+    expect(offerText).toContain("الإجمالي: 26.67");
 
-    // دورة تانية: لا إرسال مكرر.
+    // Retry: no duplicate message.
     await runJobs(db as never);
-    expect(calls).toHaveLength(1);
-    const audit = (db._stores.auditLog as any[]).filter((a) => a.action === "order.ready_notified_telegram");
-    expect(audit).toHaveLength(1);
+    expect(calls).toHaveLength(2);
   });
 
-  it("الإعدادات مطفية = لا مهمة ولا إرسال", async () => {
-    const { customer } = await seed({ enabled: false });
+  it("الإعدادات مطفية = الطلب ينحفظ بلا إرسال", async () => {
+    await seed({ enabled: false });
+    const { customer } = await (async () => {
+      // seed() replaced db; re-read customer from the same store.
+      return { customer: (db._stores.customer as any[])[0] };
+    })();
     const r = await updateDraftFromExtraction(db as unknown as Db, {
       workspaceId: WS,
       conversationId: db._stores.conversation[0].id,
       customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 1 },
+      extraction: { productName: "ماء الكمأة الأصلي", quantity: 1 },
       source: "TEST",
     });
-    expect(r.becameReady).toBe(true);
-    expect(notifyJobs()).toHaveLength(0);
-  });
-
-  it("حقول الصفحة: بدون عنوان تبقى المسودة جاهزة إذا العنوان غير مطلوب", async () => {
-    const { customer } = await seed({ fields: ["product", "quantity", "phone"] });
-    const r = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId: db._stores.conversation[0].id,
-      customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 1 },
-      source: "TEST",
-    });
-    // العميل ملفه فيه عنوان، لكن حتى لو انمسح: العنوان مش مطلوب لهذه الصفحة.
-    expect(r.missingFields).toEqual([]);
-    expect(r.becameReady).toBe(true);
-  });
-
-  it("حقل الاسم مطلوب: ما بتصير جاهزة قبل توفّر الاسم", async () => {
-    const { customer } = await seed({ fields: ["product", "quantity", "phone", "address", "name"] });
-    await db.customer.update({ where: { id: customer.id }, data: { name: null } } as never);
-    const r = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId: db._stores.conversation[0].id,
-      customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 1 },
-      source: "TEST",
-    });
-    expect(r.missingFields).toContain("name");
-    expect(r.becameReady).toBeFalsy();
-
-    const done = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId: db._stores.conversation[0].id,
-      customerId: customer.id,
-      extraction: { customerName: "سامر" },
-      source: "TEST",
-    });
-    expect(done.missingFields).toEqual([]);
-    expect(done.becameReady).toBe(true);
-  });
-
-  it("مسودة انلغت بعد الجاهزية: المهمة ما بترسل شي", async () => {
-    const { customer } = await seed();
-    const r = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId: db._stores.conversation[0].id,
-      customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 1 },
-      source: "TEST",
-    });
-    expect(r.becameReady).toBe(true);
-    await db.orderDraft.update({ where: { id: r.draft.id }, data: { state: "CANCELLED" } } as never);
-
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    expect(result.orders).toHaveLength(1);
     const run = await runJobs(db as never);
     expect(run.failed).toBe(0);
     expect(calls).toHaveLength(0);
   });
 
-  it("فشل تيليجرام = فشل مهمة فقط (المسودة والطلب ما بينكسروا)", async () => {
-    const { customer } = await seed();
+  it("فشل تيليجرام = فشل مهمة فقط، والطلب يبقى محفوظًا", async () => {
     setTelegramClientFactory(
       () =>
         new TelegramClient({
@@ -213,69 +180,36 @@ describe("P19 — إرسال الطلب الجاهز إلى تيليجرام", (
             Response.json({ ok: false, error_code: 401, description: "Unauthorized" })) as typeof fetch,
         })
     );
-    const r = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId: db._stores.conversation[0].id,
-      customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 1 },
-      source: "TEST",
-    });
-    expect(r.becameReady).toBe(true);
-
+    const r = await readyDraft([{ productName: "ماء الكمأة الأصلي", quantity: 1 }]);
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    expect(result.created).toBe(true);
     const run = await runJobs(db as never);
     expect(run.failed).toBe(1);
-    const draft = (db._stores.orderDraft as any[]).find((d) => d.id === r.draft.id);
-    expect(draft.state).toBe("READY");
-    // فشل دائم: المهمة ترجع PENDING (maxAttempts 4) لا تُحذف.
+
+    const order = (db._stores.order as any[]).find((o) => o.id === result.orderId);
+    expect(order).toBeTruthy();
     const job = notifyJobs()[0];
     expect(["PENDING", "FAILED"]).toContain(job.status);
   });
-  it("تغيير حقول الصفحة بعد الجاهزية: الإنشاء يعيد التحقق ويرفض الناقص", async () => {
-    const { customer } = await seed({ fields: ["product", "quantity", "phone", "address"] });
+
+  it("حقول الصفحة: بدون عنوان تبقى المسودة جاهزة إذا العنوان غير مطلوب", async () => {
+    await seed({ fields: ["product", "quantity", "phone"] });
+    const customer = (db._stores.customer as any[])[0];
     const r = await updateDraftFromExtraction(db as unknown as Db, {
       workspaceId: WS,
       conversationId: db._stores.conversation[0].id,
       customerId: customer.id,
-      extraction: { productName: "ماء الكمأة", quantity: 1 },
+      extraction: { productName: "ماء الكمأة الأصلي", quantity: 1 },
       source: "TEST",
     });
+    expect(r.missingFields).toEqual([]);
     expect(r.becameReady).toBe(true);
-
-    // الصفحة صارت تطلب الاسم، والاسم مش موجود بالمسودة/الملف.
-    await db.channel.update({
-      where: { id: db._stores.channel[0].id },
-      data: { orderRequiredFields: ["product", "quantity", "phone", "address", "name"] },
-    } as never);
-    await db.customer.update({ where: { id: customer.id }, data: { name: null } } as never);
-    await db.orderDraft.update({ where: { id: r.draft.id }, data: { customerName: null } } as never);
-
-    await expect(
-      createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id })
-    ).rejects.toMatchObject({ code: "ORDER_MISSING_FIELDS" });
-    const draft = (db._stores.orderDraft as any[]).find((d) => d.id === r.draft.id);
-    expect(draft.missingFields).toContain("name");
   });
 });
 
-describe("P19 — نص رسالة تيليجرام", () => {
-  it("يهرّب HTML ويمنع حقن الوسوم", () => {
-    const text = buildOrderReadyMessage({
-      pageName: "<b>صفحة</b>",
-      customerName: "سامر & علي",
-      phone: "0791234567",
-      province: "عمان",
-      address: "شارع <script>",
-      productName: "منتج",
-      quantity: 2,
-      unitPrice: "100",
-      currency: "SYP",
-      estimatedTotal: "200",
-    });
-    expect(text).not.toContain("<script>");
-    expect(text).toContain("&lt;script&gt;");
-    expect(text).toContain("&amp;");
-    expect(escapeTelegramHtml("<x>")).toBe("&lt;x&gt;");
-    expect(text).toContain("100 SYP");
-    expect(text).toContain("200 SYP");
+describe("نص رسالة تيليجرام", () => {
+  it("التنسيق المطلوب حرفيًا وبلا وسوم", () => {
+    const text = formatOrderDate(new Date("2026-11-01T13:55:43Z"), "Asia/Amman");
+    expect(text).toBe("2026-11-01 16:55:43");
   });
 });

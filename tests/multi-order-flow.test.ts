@@ -5,6 +5,7 @@ import { updateDraftFromExtraction } from "@/modules/orders/draft-service";
 import { createOrderFromDraft, getOwnedOrder } from "@/modules/orders/order-service";
 import { handleOrderIntent } from "@/modules/orders/intelligence";
 import { createProduct } from "@/modules/products/service";
+import { assignPageCatalog } from "./helpers/catalog";
 
 const WS_A = "ws-a";
 const AGENT = { userId: "agent-1", workspaceId: WS_A };
@@ -30,8 +31,12 @@ async function seedWorld() {
     data: { workspaceId: WS_A, name: "محمد", phone: "0930000000", status: "INTERESTED" },
   } as never);
   customerId = customer.id;
+  const channel = await db.channel.create({
+    data: { workspaceId: WS_A, type: "FACEBOOK", status: "CONNECTED", displayName: "صفحة", externalId: "page-multi-order" },
+  } as never);
+  await assignPageCatalog(db as Db, WS_A, channel.id, [productIdA, productIdB]);
   const conv = await db.conversation.create({
-    data: { workspaceId: WS_A, customerId, channelId: "ch-1", channelConversationId: "fb-conv-1" },
+    data: { workspaceId: WS_A, customerId, channelId: channel.id, channelConversationId: "fb-conv-1" },
   } as never);
   conversationId = conv.id;
 }

@@ -6,13 +6,12 @@ describe("AI settings — connection modes", () => {
     expect(aiConnectionMode("custom")).toBe("custom");
   });
 
-  it("internal and agent providers only need an endpoint", () => {
+  it("internal provider only needs an endpoint", () => {
     expect(aiConnectionMode("internal")).toBe("endpoint");
-    expect(aiConnectionMode("hermes")).toBe("endpoint");
-  });
+      });
 
   it("gateway providers keep their keys on the server environment", () => {
-    for (const provider of ["openai", "openrouter", "mock"]) {
+    for (const provider of ["openrouter", "mock"]) {
       expect(aiConnectionMode(provider)).toBe("environment");
     }
   });
