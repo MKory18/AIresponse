@@ -329,6 +329,20 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     expect((db._stores.order as any[]).filter((o) => o.customerId === customerId)).toHaveLength(0);
   });
 
+  it("التوصيل يُحسب مرة واحدة على السلة ويُخصّص لأول طلب", async () => {
+    await db.deliveryRule.create({
+      data: { workspaceId: WS, province: "عمان", fee: 10, isAvailable: true },
+    } as never);
+    const r = await merge({
+      items: [
+        { productName: "ماء الكمأة", quantity: 2 },
+        { productName: "عسل الكمأة", quantity: 1 },
+      ],
+    });
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    expect(result.orders.map((o) => o.total).sort((a, b) => a - b)).toEqual([50, 210]);
+  });
+
   it("منتج بلا كمية: quantity ناقصة لحد ما تنذكر", async () => {
     const r = await merge({ items: [{ productName: "ماء الكمأة" }] });
     expect(r.missingFields).toContain("quantity");

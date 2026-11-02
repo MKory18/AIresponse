@@ -6,7 +6,7 @@ import { requireWorkspaceOwner } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
-import { calculatePricing } from "./pricing";
+import { calculatePricing, calculateIndependentOrdersPricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
 import { resolveOffer } from "./offers";
@@ -218,22 +218,24 @@ export async function createOrderFromDraft(
     throw new AppError("Order items use different currencies", 422, "MIXED_CURRENCY");
   }
 
-  // Pricing from DB — one independent calculation per order line. Delivery is
-  // part of each independent order (same deterministic engine as before).
-  const pricedLines = await Promise.all(
-    orderLines.map(async (line) => {
-      const breakdown = await calculatePricing(db, {
-        workspaceId: ctx.workspaceId,
-        product: { price: line.unitPrice, currency: line.product.currency },
-        quantity: line.quantity,
-        province: draft.province,
-      });
-      if (!breakdown.deliveryAvailable) {
-        throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
-      }
-      return { ...line, breakdown };
-    })
-  );
+  // Pricing from DB — one independent calculation per order line, with the
+  // cart's delivery fee charged ONCE (allocated to the first order).
+  const cartPricing = await calculateIndependentOrdersPricing(db, {
+    workspaceId: ctx.workspaceId,
+    items: orderLines.map((line) => ({
+      price: line.unitPrice,
+      quantity: line.quantity,
+      currency: line.product.currency,
+    })),
+    province: draft.province,
+  });
+  if (!cartPricing.deliveryAvailable) {
+    throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
+  }
+  const pricedLines = orderLines.map((line, idx) => ({
+    ...line,
+    breakdown: cartPricing.lines[idx]!,
+  }));
 
   const customer = await db.customer.findUnique({ where: { id: draft.customerId } });
   if (!customer) throw new NotFoundError("Customer");

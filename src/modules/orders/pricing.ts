@@ -57,6 +57,56 @@ export async function calculatePricing(
   };
 }
 
+/**
+ * Pricing for N independent orders created from ONE cart confirmation.
+ * Delivery is quoted ONCE on the whole cart subtotal (never charged twice),
+ * then allocated to the first independent order only. Item prices still come
+ * from the DB rows passed by the caller.
+ */
+export interface IndependentOrderLine {
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+  discount: number;
+  deliveryFee: number;
+  total: number;
+  currency: string;
+}
+export async function calculateIndependentOrdersPricing(
+  db: Db,
+  params: {
+    workspaceId: string;
+    items: { price: Prisma.Decimal | number | string; quantity: number; currency: string }[];
+    province?: string | null;
+  }
+): Promise<{ lines: IndependentOrderLine[]; deliveryAvailable: boolean; deliveryReason?: string }> {
+  const subtotalCents = params.items.reduce(
+    (sum, item) => sum + Math.round(Number(item.price) * 100) * item.quantity,
+    0
+  );
+  const subtotal = subtotalCents / 100;
+  const delivery = await quoteDelivery(db, {
+    workspaceId: params.workspaceId,
+    province: params.province,
+    subtotal,
+  });
+  const feeCents = Math.round(delivery.fee * 100);
+  const lines = params.items.map((item, idx) => {
+    const lineCents = Math.round(Number(item.price) * 100) * item.quantity;
+    const lineFee = idx === 0 ? feeCents : 0;
+    return {
+      unitPrice: Number(item.price),
+      quantity: item.quantity,
+      subtotal: lineCents / 100,
+      discount: 0,
+      deliveryFee: lineFee / 100,
+      total: (lineCents + lineFee) / 100,
+      currency: item.currency,
+    };
+  });
+  return { lines, deliveryAvailable: delivery.available, deliveryReason: delivery.reason };
+}
+
 /** Deterministic order summary used by the AI to phrase a message. */
 export function formatOrderSummary(params: {  productName: string;
   quantity: number;
