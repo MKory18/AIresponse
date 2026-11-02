@@ -10,6 +10,7 @@ import {
 } from "@/modules/ai/router";
 import { testProviderConnection } from "@/modules/ai/provider";
 import { getCurrentEmbeddingIdentity } from "@/modules/knowledge/embeddings";
+import { openRouterModel } from "@/modules/ai/config";
 
 /**
  * P6 — GET /api/ai/status: single studio snapshot (ai.configure).
@@ -64,10 +65,12 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
 
   const tasks = AI_TASKS.map((task: AiTask) => {
     const resolved = resolveModel(settings as never, task);
-    const compat = validateTaskModel(task, resolved.model);
+    const effectiveProvider = (settings.provider as string | null) ?? env.AI_PROVIDER ?? "openrouter";
+    const model = effectiveProvider === "openrouter" ? openRouterModel(resolved.model) : resolved.model;
+    const compat = validateTaskModel(task, model);
     return {
       task,
-      model: resolved.model,
+      model,
       temperature: resolved.temperature,
       maxTokens: resolved.maxTokens,
       defaultModel: DEFAULT_MODELS[task],

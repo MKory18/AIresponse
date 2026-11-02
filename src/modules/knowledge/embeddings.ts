@@ -35,7 +35,18 @@ export class HashEmbeddingProvider implements EmbeddingProvider {
     }
     const dim = this.dimensions;
     const vec = new Array<number>(dim).fill(0);
-    const tokens = text.toLowerCase().split(/\s+/).filter(Boolean);
+    // Arabic-tolerant lexical normalization: diacritics, alef/ya/ta-marbuta
+    // variants and tatweel collapse to one token form. (This is still lexical,
+    // not semantic — see P24 report.)
+    const normalized = text
+      .toLowerCase()
+      .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+      .replace(/[إأآا]/g, "ا")
+      .replace(/ى/g, "ي")
+      .replace(/ؤ/g, "و")
+      .replace(/ئ/g, "ي")
+      .replace(/ة/g, "ه");
+    const tokens = normalized.split(/\s+/).filter(Boolean);
     for (const token of tokens) {
       let h = 2166136261;
       for (let i = 0; i < token.length; i++) {

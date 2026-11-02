@@ -5,6 +5,7 @@ import { MockAIProvider, setMockAIProvider } from "@/modules/ai/provider";
 import { processAIMessage } from "@/modules/ai/orchestrator";
 import { processIncomingMessage } from "@/modules/conversations/service";
 import { createProduct } from "@/modules/products/service";
+import { assignPageCatalog } from "./helpers/catalog";
 import { createPlaygroundSession, sendPlaygroundMessage } from "@/modules/ai/playground-service";
 import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
 import { encryptSecret } from "@/core/crypto";
@@ -76,6 +77,7 @@ async function seedChannel() {
         }) as unknown as typeof fetch,
       })
   );
+  return ch;
 }
 
 const replySystems = () => calls.filter((c) => !c.system.includes("JSON")).map((c) => c.system);
@@ -106,7 +108,9 @@ describe("P12 × main — قواعد سيستم 1 بمسار المزوّد ال
     stubProviderFetch();
     await db.aISettings.create({ data: { workspaceId: WS, provider: "openrouter", responseModel: "openai/gpt-4o-mini", temperature: 0.4, maxTokens: 500, aiEnabled: true, autoRespond: true } } as never);
     await seedChannel();
-    await seedProductWithRules();
+    const p = await seedProductWithRules();
+    const channel = (db._stores.channel as Row[])[0]!;
+    await assignPageCatalog(db as never, WS, channel.id as string, [p.id as string]);
   });
 
   async function run(text: string, suffix: string) {

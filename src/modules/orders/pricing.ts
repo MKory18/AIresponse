@@ -91,9 +91,27 @@ export async function calculateIndependentOrdersPricing(
     subtotal,
   });
   const feeCents = Math.round(delivery.fee * 100);
+  const weights = params.items.map((item) => Math.round(Number(item.price) * 100) * item.quantity);
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  // Exact proportional split in integer cents (largest remainder). The sum of
+  // every order's delivery share equals the batch fee exactly — never a full
+  // fee dumped on the first order, never a duplicated fee.
+  const rawShares =
+    totalWeight > 0
+      ? weights.map((w) => (feeCents * w) / totalWeight)
+      : params.items.map(() => feeCents / Math.max(1, params.items.length));
+  const shares = rawShares.map((v) => Math.floor(v));
+  let remainder = feeCents - shares.reduce((a, b) => a + b, 0);
+  const order = rawShares
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let k = 0; k < order.length && remainder > 0; k += 1) {
+    shares[order[k]!.i] += 1;
+    remainder -= 1;
+  }
   const lines = params.items.map((item, idx) => {
     const lineCents = Math.round(Number(item.price) * 100) * item.quantity;
-    const lineFee = idx === 0 ? feeCents : 0;
+    const lineFee = shares[idx] ?? 0;
     return {
       unitPrice: Number(item.price),
       quantity: item.quantity,

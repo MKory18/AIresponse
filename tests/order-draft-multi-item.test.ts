@@ -13,6 +13,8 @@ import { createFakeDb } from "./helpers/inmemory-db";
 import { createProduct } from "@/modules/products/service";
 import { parseDraftItems, updateDraftFromExtraction } from "@/modules/orders/draft-service";
 import { createOrderFromDraft } from "@/modules/orders/order-service";
+import { transitionOrder } from "@/modules/orders/order-service";
+import { assignPageCatalog } from "./helpers/catalog";
 import { handleOrderIntent } from "@/modules/orders/intelligence";
 
 type Db = Prisma.TransactionClient;
@@ -65,6 +67,7 @@ async function seed() {
     data: { workspaceId: WS, customerId, channelId: channel.id, channelConversationId: "conv-multi" },
   } as never)) as { id: string };
   conversationId = conversation.id;
+  await assignPageCatalog(db as unknown as Db, WS, channel.id, [productA.id, productB.id]);
 }
 
 async function draftRow() {
@@ -315,12 +318,12 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
         { productName: "عسل الكمأة", quantity: 1 },
       ],
     });
-    const catalog = (await db.catalog.create({
-      data: { workspaceId: WS, name: "كتالوج الصفحة", isActive: true },
-    } as never)) as { id: string };
-    await db.catalogProduct.create({ data: { catalogId: catalog.id, productId: productA.id } } as never);
-    await db.catalogPageAssignment.create({
-      data: { workspaceId: WS, catalogId: catalog.id, channelId: db._stores.channel[0].id },
+    // The page catalog is assigned in seed(); remove the second product from it.
+    const link = (await db.catalogPageAssignment.findUnique({
+      where: { channelId: db._stores.channel[0].id },
+    })) as { catalogId: string };
+    await db.catalogProduct.deleteMany({
+      where: { catalogId: link.catalogId, productId: productB.id },
     } as never);
 
     await expect(
@@ -329,7 +332,7 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     expect((db._stores.order as any[]).filter((o) => o.customerId === customerId)).toHaveLength(0);
   });
 
-  it("التوصيل يُحسب مرة واحدة على السلة ويُخصّص لأول طلب", async () => {
+  it("التوصيل يُوزّع بالكسور الصحيحة على الطلبات ومجموعه = الرسوم", async () => {
     await db.deliveryRule.create({
       data: { workspaceId: WS, province: "عمان", fee: 10, isAvailable: true },
     } as never);
@@ -340,7 +343,36 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
       ],
     });
     const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
-    expect(result.orders.map((o) => o.total).sort((a, b) => a - b)).toEqual([50, 210]);
+    expect(result.orders.map((o) => o.total).sort((a, b) => a - b)).toEqual([52, 208]);
+    const fees = (db._stores.order as any[])
+      .filter((o) => o.orderBatchId === result.orders[0]!.orderBatchId)
+      .map((o) => Number(o.deliveryFee));
+    expect(fees.reduce((a, b) => a + b, 0)).toBe(10);
+  });
+
+  it("صفحة بلا كتالوج: لا يمكن إنشاء أي طلب", async () => {
+    const r = await merge({ items: [{ productName: "ماء الكمأة", quantity: 1 }] });
+    await db.catalogPageAssignment.deleteMany({
+      where: { channelId: db._stores.channel[0].id },
+    } as never);
+    await expect(
+      createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id })
+    ).rejects.toMatchObject({ code: "ORDER_PRODUCT_OUTSIDE_CATALOG" });
+  });
+
+  it("إلغاء أحد الطلبين لا يلغي الآخر", async () => {
+    const r = await merge({
+      items: [
+        { productName: "ماء الكمأة", quantity: 1 },
+        { productName: "عسل الكمأة", quantity: 1 },
+      ],
+    });
+    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
+    expect(result.orders).toHaveLength(2);
+    await transitionOrder(db as unknown as Db, AGENT, result.orders[1]!.orderId, "CANCELLED");
+    const rows = (db._stores.order as any[]).filter((o) => o.orderBatchId === result.orders[0]!.orderBatchId);
+    expect(rows.filter((o) => o.status === "CANCELLED")).toHaveLength(1);
+    expect(rows.filter((o) => o.status === "CONFIRMED")).toHaveLength(1);
   });
 
   it("منتج بلا كمية: quantity ناقصة لحد ما تنذكر", async () => {

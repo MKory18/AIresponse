@@ -31,6 +31,7 @@ export type ExtractionOutcome =
   | { status: "DONE"; runId: string; intelId: string; model: string; latencyMs: number }
   | { status: "DUPLICATE"; runId: string }
   | { status: "SKIPPED"; reason: string }
+  | { status: "STALE_MEMORY"; runId: string }
   | { status: "FAILED"; runId: string; errorCode: string; retryable: boolean };
 
 function errorCodeOf(err: unknown): { code: string; retryable: boolean } {
@@ -136,6 +137,14 @@ export async function runCustomerIntelExtraction(
     where: { id: conversation.channelId },
     select: { sendMode: true },
   });
+  const customerMemory = conversation.customerId
+    ? ((await db.customer.findUnique({
+        where: { id: conversation.customerId },
+        select: { memoryVersion: true, memoryResetAt: true },
+      })) as { memoryVersion: number; memoryResetAt: Date | null } | null)
+    : null;
+  const memoryVersion = customerMemory?.memoryVersion ?? 0;
+  const memoryResetAt = customerMemory?.memoryResetAt ?? null;
   // تعمل في وضع الردّ (AUTO_REPLY) ووضع التجميع (COLLECTION_ONLY) على حد سواء:
   // الاستخراج لا يُرسل شيئًا أبدًا، فلا معنى لمنعه في وضع الردّ. الوضع المجهول
   // = رفض (فشل آمن) كما في بقية المسارات.
@@ -187,8 +196,15 @@ export async function runCustomerIntelExtraction(
       take: INTEL_MAX_MESSAGES,
       select: { id: true, text: true, createdAt: true },
     })
-    .then((rows: Array<{ id: string; text: string | null }>) =>
-      rows.filter((r) => !!r.text?.trim()).reverse().map((r) => ({ id: r.id, text: r.text as string }))
+    .then((rows: Array<{ id: string; text: string | null; createdAt: Date }>) =>
+      rows
+        .filter(
+          (r) =>
+            !!r.text?.trim() &&
+            (!memoryResetAt || new Date(r.createdAt).getTime() > new Date(memoryResetAt).getTime())
+        )
+        .reverse()
+        .map((r) => ({ id: r.id, text: r.text as string }))
     );
 
   // الحقول المطلوب تجميعها لهذه المساحة (المفعّلة فقط هي التي تُطلب وتُحفظ).
@@ -213,6 +229,23 @@ export async function runCustomerIntelExtraction(
     // لا تثق بالمزوّد: أي قيمة غير موجودة حرفيًا بالنص تُسقط.
     const sourceText = sources.map((s) => s.text).join("\n");
     const grounded = groundFields(res.value, sourceText, activeDefs);
+
+    // P24 — the memory generation may have been wiped while the model was
+    // running. A stale result must never resurrect deleted memory.
+    if (conversation.customerId) {
+      const fresh = (await db.customer.findUnique({
+        where: { id: conversation.customerId },
+        select: { memoryVersion: true },
+      })) as { memoryVersion: number } | null;
+      if ((fresh?.memoryVersion ?? 0) !== memoryVersion) {
+        await db.customerIntelRun.update({
+          where: { id: run.id },
+          data: { status: "STALE_MEMORY", finishedAt: new Date(), latencyMs: Date.now() - started },
+        });
+        log.info({ conversationId: conversation.id, messageId: message.id }, "customer_intel_stale_memory");
+        return { status: "STALE_MEMORY", runId: run.id };
+      }
+    }
 
     const existing = await db.customerIntel.findUnique({ where: { conversationId: conversation.id } });
     const current: IntelSnapshotShape | null = existing

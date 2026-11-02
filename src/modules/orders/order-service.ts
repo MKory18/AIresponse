@@ -139,20 +139,23 @@ export async function createOrderFromDraft(
   const allowedProductIds =
     resolvedCatalog.status === "ok"
       ? await catalogProductIds(db, ctx.workspaceId, resolvedCatalog.catalog.id)
-      : resolvedCatalog.status === "no_catalogs"
-        ? undefined
-        : [];
-  if (allowedProductIds !== undefined) {
-    const outside = draftItems
-      .map((i) => i.productId)
-      .filter((id): id is string => Boolean(id) && !allowedProductIds.includes(id!));
-    if (outside.length > 0 || draftItems.some((i) => !i.productId)) {
-      throw new AppError(
-        "Product is outside this page's catalog",
-        422,
-        "ORDER_PRODUCT_OUTSIDE_CATALOG"
-      );
-    }
+      : [];
+  if (allowedProductIds.length === 0 || draftItems.some((i) => !i.productId)) {
+    throw new AppError(
+      "Product is outside this page's catalog",
+      422,
+      "ORDER_PRODUCT_OUTSIDE_CATALOG"
+    );
+  }
+  const outside = draftItems
+    .map((i) => i.productId)
+    .filter((id): id is string => Boolean(id) && !allowedProductIds.includes(id!));
+  if (outside.length > 0) {
+    throw new AppError(
+      "Product is outside this page's catalog",
+      422,
+      "ORDER_PRODUCT_OUTSIDE_CATALOG"
+    );
   }
 
   // Rules engine decides — no exceptions, no bypasses.

@@ -12,6 +12,7 @@ import { encryptSecret } from "@/core/crypto";
 import { processIncomingMessage } from "@/modules/conversations/service";
 import { takeoverConversation } from "@/modules/conversations/service";
 import { createProduct } from "@/modules/products/service";
+import { assignPageCatalog } from "./helpers/catalog";
 import { createKnowledgeDocument } from "@/modules/knowledge/service";
 import { createFeedback } from "@/modules/feedback/service";
 import { chunkText } from "@/modules/knowledge/chunker";
@@ -86,6 +87,7 @@ async function seedWorld() {
   const product = await createProduct(db as Db, AGENT, {
     name: "ماء الكمأة", sku: "TW-500", price: 150000, currency: "SYP",
   });
+  await assignPageCatalog(db as Db, WS_A, ch.id, [product.id]);
   productId = product.id;
   await db.persona.create({
     data: { workspaceId: WS_A, name: "سارة", dialect: "syrian", prohibitedPhrases: ["خصم خاص"], customRules: [] },

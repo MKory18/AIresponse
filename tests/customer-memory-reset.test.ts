@@ -8,6 +8,11 @@ import { resetCustomerMemory } from "@/modules/customers/memory";
 import { loadMemory } from "@/modules/ai/memory";
 import { getOrCreateDraft } from "@/modules/orders/draft-service";
 import { hasPermission } from "@/modules/rbac/permissions";
+import { runCustomerIntelExtraction } from "@/modules/intelligence/service";
+import type { AIProvider } from "@/modules/ai/provider";
+import { MockAIProvider, setMockAIProvider } from "@/modules/ai/provider";
+import { enqueueJob } from "@/modules/jobs/service";
+import { runJobs } from "@/modules/jobs/handlers";
 
 type Db = Prisma.TransactionClient;
 type FakeDb = ReturnType<typeof createFakeDb> & Record<string, any>;
@@ -31,7 +36,7 @@ async function seed() {
   } as never)) as { id: string };
   customerId = customer.id;
   const channel = (await db.channel.create({
-    data: { workspaceId: WS, type: "FACEBOOK", status: "CONNECTED", displayName: "صفحة", externalId: "p-mem" },
+    data: { workspaceId: WS, type: "FACEBOOK", status: "CONNECTED", displayName: "صفحة", externalId: "p-mem", sendMode: "AUTO_REPLY" },
   } as never)) as { id: string };
   const conversation = (await db.conversation.create({
     data: {
@@ -106,6 +111,92 @@ describe("مسح ذاكرة العميل", () => {
     } as never);
     const rows = await loadMemory(db as unknown as Db, WS, customerId, 10, customer.memoryResetAt);
     expect(rows).toHaveLength(1);
+  });
+
+  it("مهمة استخراج بدأت قبل المسح لا تعيد بيانات قديمة", async () => {
+    const message = (await db.message.create({
+      data: {
+        workspaceId: WS,
+        conversationId,
+        senderType: "CUSTOMER",
+        direction: "INBOUND",
+        type: "TEXT",
+        text: "اسمي أحمد ورقمي 0791234567",
+      },
+    } as never)) as { id: string };
+
+    const provider: AIProvider = {
+      name: "stub",
+      delivery: "local",
+      generateText: async () => ({ text: "", promptTokens: 0, completionTokens: 0, latencyMs: 0 }),
+      generateStructured: async () => {
+        // The employee wipes memory WHILE the model is running.
+        await resetCustomerMemory(db as unknown as Db, CTX, customerId);
+        return {
+          text: "{}",
+          promptTokens: 1,
+          completionTokens: 1,
+          latencyMs: 1,
+          value: {
+            customerName: "أحمد",
+            phone: "0791234567",
+            city: null,
+            address: null,
+            products: [],
+            quantity: null,
+            budget: null,
+            purchaseIntent: "high",
+            needs: [],
+            notes: [],
+            confidence: 0.9,
+            sourceMessageIds: [message.id],
+          },
+        };
+      },
+    };
+
+    const out = await runCustomerIntelExtraction(db as unknown as Db, {
+      workspaceId: WS,
+      messageId: message.id,
+      options: { provider, model: "stub", providerName: "stub" },
+    });
+    expect(out.status).toBe("STALE_MEMORY");
+    expect(await db.customerIntel.findMany({ where: { conversationId } })).toHaveLength(0);
+    const customer = (await db.customer.findUnique({ where: { id: customerId } })) as { memoryVersion: number };
+    expect(customer.memoryVersion).toBe(1);
+  });
+
+  it("مهمة ملخص بدأت قبل المسح لا تكتب ملخصًا قديمًا", async () => {
+    const mock = new MockAIProvider();
+    let wiped = false;
+    mock.generateStructured = async () => {
+      if (!wiped) {
+        wiped = true;
+        await resetCustomerMemory(db as unknown as Db, CTX, customerId);
+      }
+      return {
+        text: "{}",
+        promptTokens: 1,
+        completionTokens: 1,
+        latencyMs: 1,
+        value: { summary: "ملخص من الذاكرة القديمة" },
+      };
+    };
+    setMockAIProvider(mock);
+    try {
+      await enqueueJob(db as unknown as Db, {
+        workspaceId: WS,
+        type: "generate_summary",
+        payload: { conversationId },
+      });
+      await runJobs(db as unknown as Db);
+    } finally {
+      setMockAIProvider(undefined);
+    }
+    const conversation = (await db.conversation.findUnique({ where: { id: conversationId } })) as {
+      summary: string | null;
+    };
+    expect(conversation.summary).toBeNull();
   });
 
   it("الصلاحية: المدير يمسح، البيعي لا", () => {

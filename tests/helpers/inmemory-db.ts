@@ -450,7 +450,7 @@ export function createFakeDb() {
       collectionFieldSetting: collectionFieldSettingRows,
       telegramOrderSettings: telegramOrderSettingsRows,
     },
-    customer: makeModel("customer", customer, { memoryResetAt: null, status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
+    customer: makeModel("customer", customer, { memoryResetAt: null, memoryVersion: 0, status: "NEW_LEAD", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null, leadScore: 0, marketingConsent: "UNKNOWN", marketingOptOutAt: null, marketingConsentAt: null }),
     conversation: makeModel("conversation", conversation, { status: "OPEN", aiState: "AI_ACTIVE", aiEnabled: true, priority: "NORMAL", unreadCount: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     message: makeModel("message", message, { deliveryStatus: "PENDING", isNote: false, metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     channelIdentity: makeModel("channelIdentity", channelIdentity, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),

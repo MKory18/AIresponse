@@ -56,7 +56,7 @@ export async function resetCustomerMemory(
       : { count: 0 };
     await tx.customer.update({
       where: { id: customerId },
-      data: { memoryResetAt: resetAt },
+      data: { memoryResetAt: resetAt, memoryVersion: { increment: 1 } },
     });
     return { memories: memories.count, intel: intel.count, summaries: summaries.count };
   };

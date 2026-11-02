@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import crypto from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
+import { assignPageCatalog } from "./helpers/catalog";
 import { verifyWebhookSignature, verifyWebhookChallenge, normalizeFacebookWebhook, deriveEventId } from "@/modules/channels/facebook/normalizer";
 import { canSendToCustomer } from "@/modules/channels/facebook/policy";
 import { FacebookClient, setFacebookClientFactory } from "@/modules/channels/facebook/client";
@@ -92,7 +93,7 @@ function installMockMeta() {
 
 async function seedWorld() {
   db = createFakeDb();
-  await createProduct(db as Db, { userId: "agent-1", workspaceId: WS_A }, {
+  const product = await createProduct(db as Db, { userId: "agent-1", workspaceId: WS_A }, {
     name: "ماء الكمأة", sku: "TW-500", price: 150000, currency: "SYP",
   });
   // Connected Facebook Page → workspace A
@@ -105,6 +106,7 @@ async function seedWorld() {
       encryptedCredentials: encryptSecret("page-access-token-test"), lastCustomerMessageAt: null,
     },
   } as never);
+  await assignPageCatalog(db as Db, WS_A, (ch as any).id, [product.id]);
 }
 
 beforeEach(() => {

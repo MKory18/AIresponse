@@ -12,6 +12,7 @@ import { runJobs } from "@/modules/jobs/handlers";
 import { formatOrderDate } from "@/modules/orders/notify";
 import { TelegramClient, setTelegramClientFactory } from "@/modules/channels/telegram/client";
 import { encryptSecret } from "@/core/crypto";
+import { assignPageCatalog } from "./helpers/catalog";
 
 type Db = Prisma.TransactionClient;
 type FakeDb = ReturnType<typeof createFakeDb> & Record<string, any>;
@@ -67,6 +68,7 @@ async function seed(opts?: { enabled?: boolean; fields?: string[] }) {
   await db.conversation.create({
     data: { workspaceId: WS, customerId: customer.id, channelId: channel.id, channelConversationId: "conv-tg" },
   } as never);
+  await assignPageCatalog(db as unknown as Db, WS, channel.id, [product.id, productB.id]);
   await db.telegramOrderSettings.create({
     data: {
       workspaceId: WS,
@@ -111,6 +113,9 @@ describe("Telegram — رسالة مستقلة لكل طلب", () => {
       { productName: "عسل الكمأة", quantity: 1 },
     ]);
     expect(notifyJobs()).toHaveLength(0); // no notification before confirmation
+    await db.deliveryRule.create({
+      data: { workspaceId: WS, province: "حلب", fee: 5, isAvailable: true },
+    } as never);
 
     const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
     expect(result.orders).toHaveLength(2);

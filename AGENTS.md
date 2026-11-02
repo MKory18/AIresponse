@@ -77,8 +77,8 @@ npm run build
 | الكليبر · القدرة · الامتثال · الإشارات | `clipper.ts` · `capacity.ts` · `compliance.ts` · `ops-signals.ts` · `scheduler.ts` |
 | الإسناد والموافقة | `attribution.ts` (حلقات · «بداية المحادثة بتحكم») · `consent.ts` |
 | الـ OMS | `src/modules/oms/` — `app-webhook.ts` (أحداث التطبيقات الحقيقية) · `manual.ts` (نص الإدخال + الربط) · `handoff.ts` · `auto-handoff.ts` (8 محاولات + كنس ساعي) · `client.ts` (legacy · v1) |
-| الطلبات المستقلة | `orders/order-service.ts` — تأكيد سلة = **طلب مستقل لكل منتج** (`orderBatchId` مشترك للتتبع فقط) · `orders/offers.ts` (باقة/عرض من DB) · `orders/notify.ts` + `notify_order_telegram` (رسالة لكل طلب) |
-| مسح ذاكرة العميل | `customers/memory.ts` + `POST /api/customers/[id]/memory/reset` + `Customer.memoryResetAt` — يمسح الذاكرة/الملخصات/الاستخراج ويترك الطلبات والسجل والهوية |
+| الطلبات المستقلة | `orders/order-service.ts` — تأكيد سلة = **طلب مستقل لكل منتج** (`orderBatchId` مشترك للتتبع فقط) · `orders/offers.ts` (باقة/عرض من DB) · `orders/notify.ts` + `notify_order_telegram` (رسالة لكل طلب) · التوصيل يُوزّع بالكسور الصحيحة ومجموع الحصص = الرسوم |
+| مسح ذاكرة العميل | `customers/memory.ts` + `POST /api/customers/[id]/memory/reset` + `Customer.memoryResetAt/memoryVersion` — يمسح الذاكرة/الملخصات/الاستخراج، وأي مهمة بدأت على إصدار قديم تُهمَل |
 | المزوّد الخارجي | `src/modules/ai/provider.ts` · `router.ts` · `config.ts` — **OpenRouter فقط** للذكاء الخارجي، وموديل GLM مركزي (`OPENROUTER_GLM_MODEL`) · الشخصيات المحلية بتقود الصوت · مزوّد داخلي/مخصص لسيرفر المالك |
 | وسائط القنوات الواردة | `src/modules/channels/whatsapp/media-download.ts` (معرّف ميتا ← رابط مؤقت ← بايتات ← مخزننا) · الصف من `channels/inbound-job.ts` بمفتاح `wa-media:مساحة:wamid` · الحذف بـ `media-retention.ts` |
 | خصوصية وسيط الزبون | تصنيف `CUSTOMER_INBOUND` + `MediaAsset.messageId` · `excludeCustomerInbound()` بـ `media/service.ts` **لازم ينضاف لأي استعلام وسائط جديد** · الاسم معتم دايمًا |
@@ -106,10 +106,13 @@ npm run build
 - عدم تكرار الإرسال: SENT · DELIVERED · READ نهائية لنفس المفتاح.
 - قواعد سيستم 1 (المسموح · الممنوع) بتوصل لكل مسار بيكتب رد: كل المزوّدين · التجربة اليدوية (`tests/p12-merge-main.test.ts`).
 - **مزوّد ذكاء خارجي واحد: OpenRouter**، وموديل GLM واحد مركزي (`OPENROUTER_GLM_MODEL`). ممنوع إضافة مزوّد خارجي ثانٍ أو fallback صامت — الفشل يظهر ويُعاد بأمان (`tests/openrouter-only.test.ts`).
+- **الكتالوج إلزامي**: الصفحة بلا كتالوج = صفر منتجات (لا fallback لكل منتجات المساحة). التحقق خادمي في السياق والاستخراج والمسودة وإنشاء الطلب (`ORDER_PRODUCT_OUTSIDE_CATALOG`) — لا Prompt فقط.
+- **كل منتج = Order مستقل**، وإشعار Telegram job داخل نفس معاملة الطلبات؛ لا HTTP داخل transaction. رسالة تيليجرام واحدة لكل طلب، وسعرها سعر المنتج لا إجمالي التوصيل.
+- **مسح الذاكرة بإصدار**: `memoryVersion` يرتفع عند المسح؛ مهام intel/summary القديمة لا تكتب نتائجها.
 
 ## المعلّق
 
-- ترحيلات `20261101115033_telegram_order_ready` + `20261101142509_order_draft_items` + `20261102162825_independent_orders_memory_reset` بانتظار `migrate deploy` على الإنتاج.
+- ترحيلات `20261101115033_telegram_order_ready` + `20261101142509_order_draft_items` + `20261102162825_independent_orders_memory_reset` + `20261102172427_memory_version` بانتظار `migrate deploy` على الإنتاج.
 - باب `/api/v1` بالـ OMS (برومبت GLM جاهز بـ `docs/OMS-DOOR-V1.md`) ← بعده بالإعدادات: «API · v1» + توكن.
 - ⚠️ إدخال الطلبات بالذكاء بالـ OMS (`src/app/api/orders/ai-intake/route.ts`) بيبعت نص الطلب كامل (اسم · رقم · عنوان) لـ OpenRouter وبموديل مجاني افتراضيًا، وبيتخطّى إعدادات الذكاء بالـ OMS نفسه.
   🔧 يمرّ عبر `aiChat` بإعدادات الـ OMS بمزوّد `LOCAL` (GLM على سيرفراتك) — أو شيل `OPENROUTER_API_KEY` من بيئة الـ OMS لحد ما ينصلح.

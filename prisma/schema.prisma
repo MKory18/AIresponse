@@ -275,6 +275,9 @@ model Customer {
   // When set, the AI must not read any memory/summary/intel created before
   // this instant. Historical orders, audit rows and channel identities stay.
   memoryResetAt     DateTime?
+  // Monotonic memory generation: reset increments it; stale background jobs
+  // (intel/summary) must discard results captured on an older version.
+  memoryVersion     Int            @default(0)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 

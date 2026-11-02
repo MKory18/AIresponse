@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb } from "./helpers/inmemory-db";
+import { assignPageCatalog } from "./helpers/catalog";
 import { encryptSecret } from "@/core/crypto";
 import type { Db } from "@/modules/customers/service";
 import { saveIntegrationConnection, setIntegrationDnsLookup } from "@/modules/integrations/connections";
@@ -559,6 +560,7 @@ describe("P12 AI pipeline — الادعاء الممنوع لا يصل للزب
     );
     await db.aISettings.create({ data: { workspaceId: WS, provider: "mock", temperature: 0.4, maxTokens: 500 } } as never);
     const p = (await createProduct(asDb(db), ctx, { name: "ماء الكمأة", sku: "TW-500", price: 150000, currency: "SYP" } as never)) as Row;
+    await assignPageCatalog(asDb(db), WS, ch.id as string, [p.id as string]);
     db._stores.productCompliance.push({ id: "pc1", workspaceId: WS, productId: p.id, productRef: "pf_1", verdict: "restricted", allowedClaims: ["مكونات طبيعية"], bannedClaims: ["نتيجة مضمونة"], adRules: [], fetchedAt: new Date() });
     await db.persona.create({ data: { workspaceId: WS, name: "سارة", dialect: "syrian", prohibitedPhrases: [], customRules: [] } } as never);
     const r = await processIncomingMessage(asDb(db), {

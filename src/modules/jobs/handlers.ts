@@ -289,31 +289,37 @@ async function handleGenerateSummary(db: HandlerDb, payload: Record<string, unkn
     where: { conversationId, deletedAt: null },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 20,
-    select: { direction: true, senderType: true, text: true },
+    select: { direction: true, senderType: true, text: true, createdAt: true },
   });
 
-  const { getAIProvider } = await import("@/modules/ai/provider");
-  const { resolveModel, loadAISettings, withRetry, logUsage } = await import("@/modules/ai/router");
+  const { getWorkspaceProvider, resolveModel, loadAISettings, withRetry, logUsage } = await import("@/modules/ai/router");
   const { coreSystemRules, wrapUntrustedCustomerContent, summaryInstruction, PROMPT_VERSIONS } = await import("@/modules/ai/prompts");
   const { summaryResultSchema, validateStructured } = await import("@/modules/ai/structured");
   const { heuristicIntent } = await import("@/modules/ai/intent");
 
   const settings = (await loadAISettings(db, conversation.workspaceId)) as never;
   const cfg = resolveModel(settings, "SUMMARY");
-  const provider = getAIProvider();
+  const provider = getWorkspaceProvider(settings);
+  const summaryCustomer = (await db.customer.findUnique({
+    where: { id: conversation.customerId },
+    select: { name: true, phone: true, email: true, address: true, memoryVersion: true, memoryResetAt: true },
+  }).catch(() => null)) as {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    memoryVersion?: number;
+    memoryResetAt?: Date | null;
+  } | null;
+  const memoryVersion = summaryCustomer?.memoryVersion ?? 0;
+  const resetAt = summaryCustomer?.memoryResetAt ?? null;
   const transcript = messages
+    .filter((m) => !resetAt || new Date(m.createdAt).getTime() > new Date(resetAt).getTime())
     .reverse()
     .map((m) => `${m.direction === "INBOUND" ? "العميل" : "المتجر"}: ${m.text ?? "[وسائط]"}`)
     .join("\n");
 
-  // P1 privacy gate: the transcript carries raw customer turns — the
-  // external SUMMARY model receives tokens only; the stored summary is
-  // restored locally (internal DB content, never re-sent).
   const { sendProtectedStructured } = await import("@/modules/ai/privacy-gate");
-  const summaryCustomer = (await db.customer.findUnique({
-    where: { id: conversation.customerId },
-    select: { name: true, phone: true, email: true, address: true },
-  }).catch(() => null)) as { name?: string | null; phone?: string | null; email?: string | null; address?: string | null } | null;
 
   try {
     const res = await withRetry(() =>
@@ -326,6 +332,16 @@ async function handleGenerateSummary(db: HandlerDb, payload: Record<string, unkn
         validate: (raw) => validateStructured(summaryResultSchema, raw),
       }, { pii: summaryCustomer ?? {}, purpose: "SUMMARY" })
     );
+    // P24 — discard a summary produced for a memory generation that was wiped
+    // while the model was running.
+    const fresh = (await db.customer.findUnique({
+      where: { id: conversation.customerId },
+      select: { memoryVersion: true },
+    })) as { memoryVersion: number } | null;
+    if ((fresh?.memoryVersion ?? 0) !== memoryVersion) {
+      log.info({ conversationId }, "summary_stale_memory");
+      return { success: true };
+    }
     await db.conversation.update({ where: { id: conversationId }, data: { summary: res.value.summary } });
     await logUsage(db, {
       workspaceId: conversation.workspaceId,
@@ -641,7 +657,7 @@ async function handleNotifyOrderTelegram(
     address,
     productName: item.productNameSnapshot,
     offerName: item.offerNameSnapshot,
-    price: order.total.toString(),
+    price: order.subtotal.toString(),
     quantity: item.quantity,
   });
 
