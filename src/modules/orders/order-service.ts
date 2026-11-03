@@ -9,6 +9,7 @@ import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
 import { calculatePricing, calculateCartPricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
+import { telegramNotifiedOrderIds } from "./telegram-status";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 export interface CreateOrderFromDraftResult {
@@ -353,29 +354,28 @@ export async function createOrderFromDraft(
     );
   }
 
-  // مستودع الطلبات — إشعار تلجرام (best-effort، ما يكسر إنشاء الطلب).
+  // ترحيل الطلب لتلجرام — مرة واحدة عند إنشاء الطلب الرسمي (المسودة ما بتترحّل).
+  // المصدر الأول: إعدادات المساحة (نفس اللي تنحفظ من الواجهة)، وبعدها متغيرات البيئة.
   try {
-    let token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_ORDER_CHAT_ID;
-    if (!token) {
-      // Fallback: use the workspace's connected Telegram channel token.
-      try {
-        const account = await (db as any).channelAccount?.findFirst?.({
-          where: { channel: { workspaceId: ctx.workspaceId, type: "TELEGRAM", status: "CONNECTED" } },
-          select: { encryptedCredentials: true },
-        });
-        if (account?.encryptedCredentials) {
-          const { decryptSecret } = await import("@/core/crypto");
-          token = decryptSecret(account.encryptedCredentials);
-        }
-      } catch {
-        token = undefined;
-      }
+    const tg = await (db as any).telegramOrderSettings?.findUnique?.({
+      where: { workspaceId: ctx.workspaceId },
+      select: { enabled: true, botTokenEnc: true, chatId: true, topicId: true },
+    });
+    let token: string | undefined;
+    let chatId: string | undefined;
+    let topicId: string | undefined;
+    if (tg?.enabled && tg.botTokenEnc && tg.chatId) {
+      const { decryptSecret } = await import("@/core/crypto");
+      token = decryptSecret(tg.botTokenEnc);
+      chatId = tg.chatId;
+      topicId = tg.topicId ?? undefined;
+    } else {
+      token = process.env.TELEGRAM_BOT_TOKEN;
+      chatId = process.env.TELEGRAM_ORDER_CHAT_ID;
     }
     if (token && chatId) {
       const { getTelegramClient } = await import("@/modules/channels/telegram/client");
       const { orderNotificationText, telegramOrderPiiEnabled } = await import("./notify");
-      const client = getTelegramClient();
       // سيستم 1 — بلا بيانات زبون افتراضيًا؛ المالك يفعّلها صريحًا.
       const text = orderNotificationText({
         orderNumber,
@@ -392,10 +392,23 @@ export async function createOrderFromDraft(
         customerPhone: customer?.phone,
         includePii: telegramOrderPiiEnabled(),
       });
-      await client.sendMessage(token, chatId, { text });
+      const thread = topicId ? Number(topicId) : NaN;
+      const result = await getTelegramClient().sendMessage(token, chatId, {
+        text,
+        ...(Number.isInteger(thread) && thread > 0 ? { messageThreadId: thread } : {}),
+      });
+      // سجل الإرسال = مصدر شعار «تم ترحيله للتلجرام» بالقائمة.
+      await recordAudit(db, {
+        workspaceId: ctx.workspaceId,
+        userId: ctx.userId,
+        action: "order.telegram_notified",
+        entityType: "Order",
+        entityId: order.id,
+        metadata: { orderNumber, chatId, messageId: result.messageId },
+      });
     }
   } catch {
-    // الإشعار best-effort — غيابه ما يوقف الطلب
+    // الإشعار best-effort — غيابه ما يوقف إنشاء الطلب
   }
 
   return {
@@ -665,7 +678,9 @@ export async function listOrders(
   const hasMore = orders.length > limit;
   const page = hasMore ? orders.slice(0, limit) : orders;
   // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع بأي قائمة.
-  const items = page.map((o) => withoutClickSecrets(o));
+  // + شعار «تم ترحيله للتلجرام» من سجل الإرسال الفعلي لكل طلب.
+  const notified = await telegramNotifiedOrderIds(db, params.workspaceId, page.map((o) => o.id));
+  const items = page.map((o) => ({ ...withoutClickSecrets(o), telegramNotified: notified.has(o.id) }));
   return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
 }
 

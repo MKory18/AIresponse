@@ -1,17 +1,16 @@
 /**
- * حذف ذاكرة المحادثة + شعار «تم ترحيله للتلجرام» للطلبات الجاهزة.
+ * حذف ذاكرة المحادثة.
  *
  * يثبت:
  *  - الحذف يمسّ فقط الذاكرة اللي مصدرها رسائل هالمحادثة (مش ذاكرة العميل كلها).
  *  - ملخّص المحادثة ينمسح، والرسائل والطلبات بتضل.
  *  - محادثة مساحة تانية = «غير موجود» (عزل).
- *  - الشعار يتبع سجل الإرسال الفعلي: اللي انبعت فقط، وبعزل المساحة.
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { resetConversationMemory } from "@/modules/customers/memory";
-import { telegramNotifiedDraftIds } from "@/modules/orders/ready-drafts";
+import { telegramNotifiedOrderIds } from "@/modules/orders/telegram-status";
 
 const WS = "ws-memory";
 type Db = Prisma.TransactionClient;
@@ -72,20 +71,20 @@ describe("resetConversationMemory", () => {
   });
 });
 
-describe("telegramNotifiedDraftIds", () => {
-  it("يرجّع فقط المسودات اللي إلها سجل إرسال ناجح", async () => {
+describe("telegramNotifiedOrderIds", () => {
+  it("يرجّع فقط الطلبات اللي إلها سجل إرسال ناجح، وبعزل المساحة", async () => {
     (db._stores.auditLog as any[]).push(
-      { id: "a1", workspaceId: WS, action: "order.ready_notified_telegram", entityType: "OrderDraft", entityId: "d1", metadata: {} },
-      { id: "a2", workspaceId: "ws-other", action: "order.ready_notified_telegram", entityType: "OrderDraft", entityId: "d2", metadata: {} },
-      { id: "a3", workspaceId: WS, action: "order.created", entityType: "Order", entityId: "d3", metadata: {} }
+      { id: "a1", workspaceId: WS, action: "order.telegram_notified", entityType: "Order", entityId: "o1", metadata: {} },
+      { id: "a2", workspaceId: "ws-other", action: "order.telegram_notified", entityType: "Order", entityId: "o2", metadata: {} },
+      { id: "a3", workspaceId: WS, action: "order.ready_notified_telegram", entityType: "OrderDraft", entityId: "o3", metadata: {} }
     );
 
-    const ids = await telegramNotifiedDraftIds(db as Db, WS, ["d1", "d2", "d3"]);
-    expect([...ids]).toEqual(["d1"]);
+    const ids = await telegramNotifiedOrderIds(db as Db, WS, ["o1", "o2", "o3"]);
+    expect([...ids]).toEqual(["o1"]);
   });
 
-  it("بلا مسودات = مجموعة فاضية بلا استعلام", async () => {
-    const ids = await telegramNotifiedDraftIds(db as Db, WS, []);
+  it("بلا طلبات = مجموعة فاضية بلا استعلام", async () => {
+    const ids = await telegramNotifiedOrderIds(db as Db, WS, []);
     expect(ids.size).toBe(0);
   });
 });

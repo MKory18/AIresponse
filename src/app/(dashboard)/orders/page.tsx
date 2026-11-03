@@ -21,38 +21,15 @@ type Order = {
   total: string;
   currency: string;
   createdAt: string;
+  telegramNotified?: boolean;
   customer: { id: string; name: string | null; phone: string | null };
   items: { productNameSnapshot: string; quantity: number }[];
 };
 
 const STATUSES = ["NEW", "CONFIRMATION_PENDING", "CONFIRMED", "PROCESSING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "FAILED", "RETURNED"];
 
-/**
- * مسودة طلب جاهزة: بياناتها اكتملت، وبُعتت (أو بتنتظر) لمجموعة تلجرام.
- * مش Order بعد — ما إلها رقم طلب ولا بتدخل المالية، وبتظهر هون عشان ما تضيع.
- */
-type ReadyDraft = {
-  id: string;
-  conversationId: string;
-  productName: string | null;
-  quantity: number | null;
-  items: { productName?: string | null; quantity?: number | null }[];
-  updatedAt: string;
-  customer: { name: string | null; phone: string | null } | null;
-  telegramNotified: boolean;
-};
-
-function draftLabel(draft: ReadyDraft): string {
-  const names = (draft.items ?? [])
-    .map((i) => i.productName?.trim())
-    .filter((n): n is string => Boolean(n));
-  if (names.length > 0) return names.join("، ");
-  return draft.productName ?? "—";
-}
-
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [drafts, setDrafts] = useState<ReadyDraft[]>([]);
   const [status, setStatus] = useState("");
   const [confirmationStatus, setConfirmationStatus] = useState("");
   const [q, setQ] = useState("");
@@ -68,11 +45,7 @@ export default function OrdersPage() {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (confirmationStatus) params.set("confirmationStatus", confirmationStatus);
-    const [res, draftRes] = await Promise.all([
-      fetch(`/api/orders?${params}`),
-      // المسودات الجاهزة تظهر دائمًا — ما بتتأثر بفلتر حالة الطلبات.
-      fetch("/api/order-drafts?state=READY&limit=100"),
-    ]);
+    const res = await fetch(`/api/orders?${params}`);
     if (!res.ok) {
       setError("تعذّر تحميل الطلبات، حاول مجددًا.");
       return;
@@ -80,13 +53,6 @@ export default function OrdersPage() {
     const data = await res.json();
     setOrders(data.items);
     setCanDelete(Boolean(data.canDelete));
-    if (draftRes.ok) {
-      const draftData = (await draftRes.json()) as { items: ReadyDraft[] };
-      // اللي انحوّل لطلب ما بينعرض مرتين.
-      setDrafts((draftData.items ?? []).filter((d) => (d as ReadyDraft & { orderId?: string | null }).orderId == null));
-    } else {
-      setDrafts([]);
-    }
     setError(null);
   }, [status, confirmationStatus]);
 
@@ -127,12 +93,6 @@ export default function OrdersPage() {
           .includes(q.trim())
       )
     : orders;
-
-  const visibleDrafts = q.trim()
-    ? drafts.filter((d) =>
-        [d.customer?.name ?? "", d.customer?.phone ?? "", draftLabel(d)].join(" ").includes(q.trim())
-      )
-    : drafts;
 
   return (
     <div className="page-wrap">
@@ -175,36 +135,6 @@ export default function OrdersPage() {
         </Select>
       </GlassCard>
 
-      {/* طلبات جاهزة — مسودات مكتملة (قبل ما تصير Order) */}
-      {!loading && visibleDrafts.length > 0 && (
-        <GlassCard className="overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
-            <p className="text-sm font-bold text-ink">طلبات جاهزة (مسودات)</p>
-            <p className="text-[11px] text-ink-subtle">
-              بياناتها اكتملت — بتنرحّل لمجموعة تلجرام، وبتصير طلب رسمي بعد تأكيد الزبون.
-            </p>
-          </div>
-          <div className="divide-y divide-line">
-            {visibleDrafts.map((d) => (
-              <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3">
-                <span className="text-xs font-bold text-ink">{d.customer?.name ?? "—"}</span>
-                {d.customer?.phone && <span className="num text-[11px] text-ink-muted" dir="ltr">{d.customer.phone}</span>}
-                <span className="min-w-0 flex-1 truncate text-[11px] text-ink-muted">{draftLabel(d)}</span>
-                <span className="text-[10px] text-ink-subtle">{new Date(d.updatedAt).toLocaleDateString("ar")}</span>
-                {d.telegramNotified ? (
-                  <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
-                ) : (
-                  <Badge tone="PENDING" dot>لم يُرحّل بعد</Badge>
-                )}
-                <Link href="/conversations" className="text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-400">
-                  افتح المحادثة
-                </Link>
-              </div>
-            ))}
-          </div>
-        </GlassCard>
-      )}
-
       {error && (
         <GlassCard className="p-2">
           <EmptyState title="تعذّر تحميل الطلبات" description={error} action={<Button size="sm" variant="secondary" onClick={load}>{t.common.retry}</Button>} />
@@ -235,6 +165,7 @@ export default function OrdersPage() {
                   <th>{t.orders.quantity}</th>
                   <th>{t.orders.total}</th>
                   <th>{t.orders.status}</th>
+                  <th>تلجرام</th>
                   <th>{t.orders.date}</th>
                   {canDelete && <th aria-label="إجراءات" />}
                 </tr>
@@ -255,6 +186,13 @@ export default function OrdersPage() {
                       {Number(o.total).toLocaleString()} {o.currency}
                     </td>
                     <td><StatusBadge value={o.status} dot /></td>
+                    <td>
+                      {o.telegramNotified ? (
+                        <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
+                      ) : (
+                        <Badge tone="PENDING" dot>لم يُرحّل</Badge>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap text-xs text-ink-muted">{new Date(o.createdAt).toLocaleDateString("ar")}</td>
                     {canDelete && (
                       <td>
@@ -283,6 +221,13 @@ export default function OrdersPage() {
                   <span className="truncate font-medium text-ink">{o.customer.name ?? o.customer.phone ?? "—"}</span>
                   <span className="num text-end font-bold text-ink">{Number(o.total).toLocaleString()} {o.currency}</span>
                   <span className="col-span-2 truncate">{o.items[0]?.productNameSnapshot ?? "—"}</span>
+                </div>
+                <div className="mt-2">
+                  {o.telegramNotified ? (
+                    <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
+                  ) : (
+                    <Badge tone="PENDING" dot>لم يُرحّل للتلجرام</Badge>
+                  )}
                 </div>
                 {canDelete && (
                   <div className="mt-2.5 flex justify-end">
