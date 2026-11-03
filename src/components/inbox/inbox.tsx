@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import { ConfirmDialog, ErrorState } from "../ui/confirm";
 import { Dialog, Drawer } from "../ui/dialog";
 import { EmptyState } from "../ui/empty-state";
+import { useRealtime } from "../realtime/use-realtime";
 import { Input, Select } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
@@ -184,16 +185,34 @@ export default function Inbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchList]);
 
-  // 20s polling
+  // ── Realtime: SSE يجيب الرسائل لحظيًا؛ polling بطيء احتياطي فقط ──
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+  const [realtimeOpen, setRealtimeOpen] = useState(false);
+  useRealtime(
+    (change) => {
+      void fetchList();
+      const current = selectedIdRef.current;
+      if (current && (!change.conversationId || change.conversationId === current)) {
+        void refreshMessages(current);
+        if (change.type === "message.inbound") void loadDraft(current);
+      }
+    },
+    { onStatus: (status) => setRealtimeOpen(status === "open") }
+  );
+
+  // احتياطي: 60 ثانية إذا SSE شغّال، و5 ثوانٍ إذا انقطع.
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchList();
-      if (selectedId) refreshMessages(selectedId);
-    }, 20000);
+    const interval = setInterval(
+      () => {
+        fetchList();
+        if (selectedId) refreshMessages(selectedId);
+      },
+      realtimeOpen ? 60000 : 5000
+    );
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchList, selectedId]);
-
+  }, [fetchList, selectedId, realtimeOpen]);
   const refreshMessages = useCallback(async (conversationId: string) => {
     const seq = ++msgSeq.current;
     const res = await fetch(`/api/conversations/${conversationId}/messages`);
