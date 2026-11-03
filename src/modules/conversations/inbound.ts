@@ -3,6 +3,7 @@ import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import { resolveCustomerByChannelIdentity, type Db } from "@/modules/customers/service";
 import { childLogger } from "@/core/logger";
+import { publishRealtime } from "@/modules/realtime/events";
 
 // ---- Incoming pipeline (AI hooks in Phase 4 at the documented point) ----
 
@@ -273,6 +274,14 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
   await db.customer.update({
     where: { id: customerId },
     data: { lastContactAt: now },
+  });
+
+  // Realtime: رسالة الزبون تظهر عند الوكيل فورًا (بلا تحديث الصفحة).
+  void publishRealtime(db, {
+    workspaceId: input.workspaceId,
+    type: "message.inbound",
+    conversationId: conversation.id,
+    entityId: message.id,
   });
 
   // P12 — الإسناد (إعلان/رمز) وإلغاء الاشتراك بكلمة صريحة — بعد الحفظ،

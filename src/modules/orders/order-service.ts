@@ -2,6 +2,7 @@ import { randomId } from "@/core/crypto";
 import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
+import { publishRealtime } from "@/modules/realtime/events";
 import { requireWorkspaceOwner } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
@@ -348,6 +349,13 @@ export async function createOrderFromDraft(
   await eventBus.publish(
     makeEvent("CustomerUpdated", ctx.workspaceId, { customerId: draft.customerId, type: "order.created" })
   );
+  // Realtime: قائمة الطلبات تتحدّث لحظيًا.
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "order.created",
+    conversationId: draft.conversationId ?? undefined,
+    entityId: order.id,
+  });
   if (order.status === "CONFIRMED") {
     await eventBus.publish(
       makeEvent("OrderConfirmed", ctx.workspaceId, { orderId: order.id, customerId: draft.customerId, conversationId: draft.conversationId })
@@ -405,6 +413,12 @@ export async function createOrderFromDraft(
         entityType: "Order",
         entityId: order.id,
         metadata: { orderNumber, chatId, messageId: result.messageId },
+      });
+      // Realtime: شعار «تم ترحيله للتلجرام» يظهر فورًا.
+      void publishRealtime(db, {
+        workspaceId: ctx.workspaceId,
+        type: "order.telegram",
+        entityId: order.id,
       });
     }
   } catch {

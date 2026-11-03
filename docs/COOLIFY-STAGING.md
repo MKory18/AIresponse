@@ -129,6 +129,25 @@ Dockerfile:
 
 The worker must never share the Next.js process — it polls `BackgroundJob` and claims jobs atomically via `lockedAt`/`lockedBy`.
 
+### Capacity (200 concurrent customers)
+
+- **AI concurrency per worker:** `AI_JOB_CONCURRENCY` (default 8, max 16).
+- **Total capacity = workers × concurrency.** For ~10 messages/sec with a 3s
+  reply, run **2–4 worker containers** at 16 (`docker compose up --scale` or
+  duplicate the Coolify service).
+- Multiple workers are safe: claiming is atomic and per-conversation order is
+  preserved. Each worker writes its own `WorkerHeartbeat` row (health reports
+  `workers`).
+- **PostgreSQL connections:** web + every worker open their own pool. Keep
+  `max_connections` above `(web + workers) × pool + 20`, or put PgBouncer in
+  front and set `?connection_limit=` on `DATABASE_URL`.
+- **Realtime (SSE):** `GET /api/events` holds one long-lived response per open
+  inbox; it opens **one** `pg` LISTEN connection per web container, not per
+  browser. No proxy buffering (`X-Accel-Buffering: no` + 15s heartbeat). If the
+  connection drops, the inbox falls back to polling automatically.
+- **Storage:** if you run more than one web container, media must live on a
+  shared volume or S3 — a per-container local disk is not shared.
+
 **Env parity is mandatory, not optional.** The worker validates its environment
 at runtime (`src/core/env.ts` throws unless `DATABASE_URL`, `JWT_SECRET` (32+),
 and `ENCRYPTION_KEY` (32+) are set). A worker service missing any of these

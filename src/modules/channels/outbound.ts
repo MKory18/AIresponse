@@ -1,6 +1,7 @@
 import { childLogger } from "@/core/logger";
 import { decryptSecret } from "@/core/crypto";
 import { AppError } from "@/core/errors";
+import { publishRealtime } from "@/modules/realtime/events";
 import { getFacebookClient } from "./facebook/client";
 import { FacebookApiError } from "./facebook/types";
 import { FacebookChannelAdapter } from "./facebook/adapter";
@@ -322,6 +323,13 @@ export async function dispatchOutbound(
     { messageId: message.id, conversationId: params.conversationId, provider: "facebook" },
     "facebook_outbound_started"
   );
+  // Realtime: الفقاعة تظهر عند الوكيل فورًا (الحالة PENDING ثم SENT).
+  void publishRealtime(db, {
+    workspaceId: params.workspaceId,
+    type: "message.outbound",
+    conversationId: params.conversationId,
+    entityId: message.id,
+  });
 
   // 3. Load channel + account + recipient from trusted state.
   // Any unexpected throw below must FAIL the row (never leave PENDING forever —
@@ -592,6 +600,12 @@ export async function dispatchOutbound(
       where: { id: params.conversationId },
       data: { lastAgentMessageAt: new Date() },
     });
+    void publishRealtime(db, {
+      workspaceId: params.workspaceId,
+      type: "message.outbound",
+      conversationId: params.conversationId,
+      entityId: message.id,
+    });
     try {
       const { incrementUsage } = await import("@/core/analytics/usage-service");
       await incrementUsage(db as never, params.workspaceId, { messagesOutbound: 1 });
@@ -829,6 +843,12 @@ async function dispatchChannelSend(db: Db, s: ChannelSendContext): Promise<Dispa
     await db.conversation.update({
       where: { id: s.params.conversationId },
       data: { lastAgentMessageAt: new Date() },
+    });
+    void publishRealtime(db, {
+      workspaceId: s.params.workspaceId,
+      type: "message.outbound",
+      conversationId: s.params.conversationId,
+      entityId: s.messageId,
     });
     try {
       const { incrementUsage } = await import("@/core/analytics/usage-service");

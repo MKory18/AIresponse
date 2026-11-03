@@ -27,12 +27,23 @@ export async function GET() {
 
   // Queue depth (only meaningful if DB is reachable)
   if (status.database === "APP_HEALTHY") {
+    const staleRaw = Number(process.env.WORKER_STALE_MS ?? 120_000);
+    const staleMs = Number.isFinite(staleRaw) && staleRaw >= 5_000 ? staleRaw : 120_000;
     try {
       const failed = await prisma.backgroundJob.count({ where: { status: "FAILED" } });
       const pending = await prisma.backgroundJob.count({ where: { status: "PENDING" } });
-      status.queue = failed > 50 ? "QUEUE_UNHEALTHY" : "APP_HEALTHY";
+      // عمر أقدم مهمة معلّقة = مقياس «هل الردود متأخرة؟»
+      const oldest = await prisma.backgroundJob.findFirst({
+        where: { status: "PENDING" },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
+      });
+      const oldestAgeSec = oldest ? Math.max(0, Math.floor((Date.now() - oldest.createdAt.getTime()) / 1000)) : 0;
+      status.queue = failed > 50 || oldestAgeSec > 120 ? "QUEUE_UNHEALTHY" : "APP_HEALTHY";
       status.queueDepth = String(pending);
       status.failedJobs = String(failed);
+      status.oldestJobAgeSec = String(oldestAgeSec);
+      if (status.queue === "QUEUE_UNHEALTHY") httpStatus = 503;
     } catch {
       status.queue = "QUEUE_UNHEALTHY";
     }
@@ -43,8 +54,11 @@ export async function GET() {
         orderBy: { lastCycleAt: "desc" },
         select: { lastCycleAt: true, workerId: true },
       });
-      const staleRaw = Number(process.env.WORKER_STALE_MS ?? 120_000);
-      const staleMs = Number.isFinite(staleRaw) && staleRaw >= 5_000 ? staleRaw : 120_000;
+      // عدد العمال الأحياء (نبضة حديثة) — للتوسّع الأفقي.
+      const workers = await prisma.workerHeartbeat.count({
+        where: { lastCycleAt: { gte: new Date(Date.now() - staleMs) } },
+      });
+      status.workers = String(workers);
       const health = evaluateWorkerHealth(heartbeat?.lastCycleAt ?? null, Date.now(), staleMs);
       status.worker = health.status;
       if (health.ageMs != null) status.workerAgeMs = String(health.ageMs);
