@@ -364,8 +364,8 @@ export async function updateDraftFromExtraction(
   if (missing.length === 0 && final.state === "COLLECTING") {
     assertDraftTransition(final.state, "READY");
     const ready = await db.orderDraft.update({ where: { id: draft.id }, data: { state: "READY" } });
-    // P19 — إشعار تيليجرام للطلب الجاهز (مهمة مستقلة، idempotent).
-    await enqueueReadyOrderNotification(db, params.workspaceId, ready);
+    // المسودة الجاهزة **ما** بتنرحّل لتلجرام — الترحيل للطلبات فقط (بعد الإنشاء).
+    await eventBus.publish(makeEvent("OrderReadyForConfirmation", params.workspaceId, { draftId: draft.id }));
     await eventBus.publish(makeEvent("OrderReadyForConfirmation", params.workspaceId, { draftId: draft.id }));
     return { draft: ready, missingFields: missing, becameReady: true };
   }
@@ -432,31 +432,10 @@ export async function getRequiredOrderFields(
   return normalizeOrderFields((channel as { orderRequiredFields?: string[] }).orderRequiredFields);
 }
 
-/** P19 — إشعار تيليجرام عند جاهزية الطلب: مهمة مستقلة، لا تعطّل الرد. */
-async function enqueueReadyOrderNotification(
-  db: Db,
-  workspaceId: string,
-  draft: { id: string; idempotencyKey: string | null }
-): Promise<void> {
-  try {
-    const settings = await db.telegramOrderSettings.findUnique({
-      where: { workspaceId },
-      select: { enabled: true },
-    });
-    if (!settings?.enabled) return;
-    const { enqueueJob } = await import("@/modules/jobs/service");
-    await enqueueJob(db, {
-      workspaceId,
-      type: "notify_order_ready",
-      payload: { draftId: draft.id },
-      // يتغيّر عند إعادة تدوير المسودة لطلب جديد — طلب جديد = إشعار جديد.
-      idempotencyKey: `tg-order:${draft.id}:${draft.idempotencyKey ?? "first"}`,
-      maxAttempts: 4,
-    });
-  } catch {
-    // الإشعار تجميلي/تشغيلي: فشل التصفيف ما بيفشّل المسودة ولا الرد.
-  }
-}
+/**
+ * ملاحظة سلوكية (قرار المالك): المسودة الجاهزة **ما بتنرحّل** لتلجرام.
+ * الترحيل يصير مرة واحدة عند إنشاء الطلب الرسمي (order-service).
+ */
 
 /**
  * MULTI-ORDER PER CONVERSATION — MANY orders per conversation.

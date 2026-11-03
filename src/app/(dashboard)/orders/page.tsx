@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ClipboardList, Printer, Search, Trash2 } from "lucide-react";
 import { formatNumber, label, t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/input";
@@ -21,6 +21,7 @@ type Order = {
   total: string;
   currency: string;
   createdAt: string;
+  telegramNotified?: boolean;
   customer: { id: string; name: string | null; phone: string | null };
   items: { productNameSnapshot: string; quantity: number }[];
 };
@@ -164,6 +165,7 @@ export default function OrdersPage() {
                   <th>{t.orders.quantity}</th>
                   <th>{t.orders.total}</th>
                   <th>{t.orders.status}</th>
+                  <th>تلجرام</th>
                   <th>{t.orders.date}</th>
                   {canDelete && <th aria-label="إجراءات" />}
                 </tr>
@@ -184,6 +186,13 @@ export default function OrdersPage() {
                       {Number(o.total).toLocaleString()} {o.currency}
                     </td>
                     <td><StatusBadge value={o.status} dot /></td>
+                    <td>
+                      {o.telegramNotified ? (
+                        <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
+                      ) : (
+                        <Badge tone="PENDING" dot>لم يُرحّل</Badge>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap text-xs text-ink-muted">{new Date(o.createdAt).toLocaleDateString("ar")}</td>
                     {canDelete && (
                       <td>
@@ -212,6 +221,13 @@ export default function OrdersPage() {
                   <span className="truncate font-medium text-ink">{o.customer.name ?? o.customer.phone ?? "—"}</span>
                   <span className="num text-end font-bold text-ink">{Number(o.total).toLocaleString()} {o.currency}</span>
                   <span className="col-span-2 truncate">{o.items[0]?.productNameSnapshot ?? "—"}</span>
+                </div>
+                <div className="mt-2">
+                  {o.telegramNotified ? (
+                    <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
+                  ) : (
+                    <Badge tone="PENDING" dot>لم يُرحّل للتلجرام</Badge>
+                  )}
                 </div>
                 {canDelete && (
                   <div className="mt-2.5 flex justify-end">

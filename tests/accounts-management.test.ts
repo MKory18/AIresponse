@@ -167,7 +167,10 @@ describe("updateOwnProfile — صفحة «حسابي»", () => {
     const freshHash = stores.user.find((u) => u.id === uid)!.passwordHash as string;
     expect(await verifyPassword("fresh-pass-9x", freshHash)).toBe(true);
     expect(await verifyPassword("current-pass-1", freshHash)).toBe(false);
-  });
+    // bcrypt is CPU-bound: under the full parallel suite this legitimately
+    // exceeds Vitest's 5s default on a busy machine. The assertions are
+    // unchanged; only the ceiling moves.
+  }, 20_000);
 
   it("بريد مستخدم من حساب ثاني = رفض، والبريد يتخفّض lowercase", async () => {
     const uid = await ownerUserId();

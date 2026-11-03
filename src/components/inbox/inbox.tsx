@@ -424,6 +424,16 @@ export default function Inbox() {
     }
   }
 
+  async function resetConversationMemory() {
+    if (!selectedId) return;
+    const res = await fetch(`/api/conversations/${selectedId}/memory/reset`, { method: "POST" });
+    if (!res.ok) {
+      toast.show("تعذّر حذف ذاكرة المحادثة", "error");
+      return;
+    }
+    toast.show("انحذفت ذاكرة المحادثة", "info");
+  }
+
   async function loadCoach(conversationId: string) {    setCoachLoading(true);
     setCoachError(false);
     try {
@@ -819,6 +829,7 @@ export default function Inbox() {
           orderDraft={orderDraftCard}
           pageName={selected ? pageNameOf(selected) : null}
           onRefreshProfile={refreshCustomerProfile}
+          onResetMemory={resetConversationMemory}
         />
       </aside>
       <Drawer open={panelOpen} onClose={() => setPanelOpen(false)} side="end" until="xl" title="ملف العميل">
@@ -827,6 +838,7 @@ export default function Inbox() {
             customer={customer}
             orderDraft={orderDraftCard}
             pageName={selected ? pageNameOf(selected) : null}
+            onResetMemory={resetConversationMemory}
           />
         </div>
       </Drawer>
