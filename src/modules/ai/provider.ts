@@ -519,3 +519,71 @@ export async function probeProviderEndpoint(
     clearTimeout(timer);
   }
 }
+
+/**
+ * Fast link/auth probe — measures the network round-trip only.
+ *
+ * A full chat-completions probe answers "is the model generating?", but it pays
+ * the model's own latency (seconds). This probe answers "is the endpoint
+ * reachable and is the key accepted?" in ~one RTT:
+ *  - OpenRouter: `GET /api/v1/key` (small JSON) instead of `/models` (≈800 KB).
+ *  - Any OpenAI-compatible endpoint: `GET …/models` (a tiny list for the
+ *    gateway, one request, no generation).
+ *
+ * The result is a connectivity number, NOT a reply-latency number; the UI
+ * labels it accordingly. A 2xx = link + key accepted; 401/403 = key rejected.
+ */
+export async function probeProviderLink(
+  endpointUrl: string,
+  apiKey: string,
+  opts?: { fetchFn?: typeof fetch; timeoutMs?: number }
+): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
+  const started = Date.now();
+  const fetchFn = opts?.fetchFn ?? fetch;
+  const timeoutMs = opts?.timeoutMs ?? 4000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = linkProbeUrl(endpointUrl);
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  try {
+    const res = await fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+      redirect: "manual",
+    });
+    // Drain nothing: these payloads are small; aborting keeps the socket free.
+    // 404/405 means the server answered but has no `/models` route (some
+    // gateways) — that still proves the link, so it is not a failure.
+    const reachable = res.ok || res.status === 404 || res.status === 405;
+    const detail = res.ok
+      ? "LINK_OK"
+      : res.status === 401 || res.status === 403
+        ? `AUTH_REJECTED_${res.status}`
+        : res.status === 404 || res.status === 405
+          ? "LINK_OK_NO_MODELS_ROUTE"
+          : `HTTP_${res.status}`;
+    return { ok: reachable, latencyMs: Date.now() - started, detail };
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - started, detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Derives the cheapest endpoint that proves reachability (+ auth when available). */
+export function linkProbeUrl(endpointUrl: string): string {
+  const url = endpointUrl.trim();
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = "";
+  }
+  if (host === "openrouter.ai") return "https://openrouter.ai/api/v1/key";
+  const base = url.replace(/\/+$/, "");
+  if (/\/chat\/completions$/.test(base)) return base.replace(/\/chat\/completions$/, "/models");
+  if (/\/v1$/.test(base)) return `${base}/models`;
+  return `${base}/v1/models`;
+}

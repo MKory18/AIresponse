@@ -47,6 +47,12 @@ const log = childLogger("orchestrator");
 const MEDIA_FAST_PATH_BLOCKERS =
   /طلب|طلبي|طلبية|أطلب|اطلب|سعر|بكم|كم\s|توصيل|شحن|عنوان|هاتف|رقم|دفع|تحويل|موظف|شكوى|إلغاء|الغاء|تعديل|إرجاع|ارجاع|اسمي/i;
 
+// Pure small-talk only. A whitelist (not "anything unknown") keeps dialect
+// buying verbs («أبغى»، «بدي»، «ناوي») on the normal extraction path — a short
+// message can still be an order.
+const SMALL_TALK =
+  /^(?:شكرا|شكرًا|مشكور|مشكورة|يسلمو|تسلم|تسلمي|تمام|أوكي|اوكي|أوك|ok|okay|حلو|ممتاز|رائع|كيفك|كيف حالك|شو أخبارك|شو الاخبار|صباح الخير|مساء الخير|مع السلامة|باي|thanks|thank you)[\s!.,،؟?❤️🌹🙏]*$/iu;
+
 
 export async function runExtraction(
   db: Db,
@@ -110,8 +116,19 @@ export async function runExtraction(
     !/\d/.test(customerText) &&
     !MEDIA_FAST_PATH_BLOCKERS.test(customerText) &&
     !looksLikeInjection(customerText);
+  // Speed: pure small-talk ("شكراً"، "تمام"، "كيفك") has no entities to
+  // extract. Skipping the extraction call removes one full blocking model
+  // round-trip. The whitelist is deliberate: any other short message keeps the
+  // normal path so orders/prices/addresses (in any dialect) are never guessed.
+  const generalFastPath =
+    heuristicPre.intent === "UNKNOWN" &&
+    customerText.trim().length > 0 &&
+    customerText.trim().length <= 40 &&
+    SMALL_TALK.test(customerText.trim()) &&
+    !/\d/.test(customerText) &&
+    !looksLikeInjection(customerText);
   try {
-    if (fastPathGreeting || mediaFastPath) {
+    if (fastPathGreeting || mediaFastPath || generalFastPath) {
       extraction = {
         intent: mediaFastPath ? "PRODUCT_QUESTION" : heuristicPre.intent,
         confidence: heuristicPre.confidence,

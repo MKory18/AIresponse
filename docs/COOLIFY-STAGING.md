@@ -71,11 +71,25 @@ Set on the Coolify application (Values marked SECRET must be generated, never co
 | `LOG_LEVEL` | `info`. |
 | `AI_PROVIDER` | `openai` (or the provider used in staging). |
 | `OPENAI_API_KEY` / other provider keys | SECRET — as configured. |
+| `RESPONSE_MODEL` / `EXTRACTION_MODEL` | Optional per-task overrides. Speed lever: a smaller/faster model for `EXTRACTION` cuts one of the two serial model calls per reply. |
 | `META_APP_ID`, `META_APP_SECRET` | SECRET — required for the real Meta flow; health reports `FACEBOOK_CONFIGURATION_MISSING` without them. |
 | `META_WEBHOOK_VERIFY_TOKEN` | SECRET — the token entered in the Meta App webhook UI. |
 | `META_REDIRECT_URI`, `META_GRAPH_VERSION` | Optional; defaults derive from `APP_URL` / `v21.0`. |
 
 `REDIS_URL` is optional and unused by the current queue architecture.
+
+### Reply latency vs link latency
+
+- **«فحص الاتصال»** measures one network round-trip + key acceptance
+  (`GET /api/v1/key` on OpenRouter, `GET …/models` on any OpenAI-compatible
+  gateway). It answers "is the provider reachable?", not "how fast is a reply?".
+- **«فحص التوليد»** runs a real 5-token completion: its number is the model's
+  own latency and is always seconds, not milliseconds.
+- A real reply costs `extraction + response` serial model calls. Levers, in
+  order of impact: (1) a local/self-hosted GLM gateway near the server,
+  (2) a faster `EXTRACTION_MODEL`, (3) shorter persona/context (the RESPONSE
+  call carries the full persona), (4) pure small-talk skips extraction
+  automatically.
 
 ## 5. Build / Start Commands
 
