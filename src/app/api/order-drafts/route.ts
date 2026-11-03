@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { normalizeOrderFields } from "@/modules/orders/required-fields";
+import { telegramNotifiedDraftIds } from "@/modules/orders/ready-drafts";
 
 const listQuerySchema = z.object({
   conversationId: z.string().cuid().optional(),
@@ -39,15 +40,30 @@ export const GET = createHandler(
     const channelById = new Map(channels.map((c) => [c.id, c]));
     const channelIdByConversation = new Map(conversations.map((c) => [c.id, c.channelId]));
 
+    // اسم/رقم العميل + هل انرحّلت المسودة لتلجرام فعلًا (سجل تدقيق الإرسال).
+    const customerIds = [...new Set(drafts.map((d) => d.customerId).filter(Boolean))];
+    const customers = customerIds.length
+      ? await prisma.customer.findMany({
+          where: { id: { in: customerIds }, workspaceId: auth!.workspaceId },
+          select: { id: true, name: true, phone: true },
+        })
+      : [];
+    const customerById = new Map(customers.map((c) => [c.id, c]));
+    const draftIds = drafts.map((d) => d.id);
+    const notifiedIds = await telegramNotifiedDraftIds(prisma, auth!.workspaceId, draftIds);
+
     return ok({
       items: drafts.map((d) => {
         const channelId = channelIdByConversation.get(d.conversationId);
         const channel = channelId ? channelById.get(channelId) : null;
+        const customer = customerById.get(d.customerId) ?? null;
         return {
           ...d,
           requiredFields: normalizeOrderFields(
             (channel as { orderRequiredFields?: string[] } | null | undefined)?.orderRequiredFields
           ),
+          customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone } : null,
+          telegramNotified: notifiedIds.has(d.id),
         };
       }),
     });
