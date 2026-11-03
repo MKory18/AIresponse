@@ -69,7 +69,10 @@ function mockStack() {
   mock.intentHandler = () => ({
     intent: "PRODUCT_QUESTION", confidence: 0.9, entities: {}, missingFields: [], memories: [], requestedAction: "ANSWER",
   });
-  mock.responseHandler = () => "أهلاً فيك، العسل الطبيعي متوفر بسعر 100 دولار.";
+  mock.responseHandler = (user: string) =>
+    user.includes("بكم")
+      ? "أهلاً فيك، العسل الطبيعي متوفر بسعر 100 دولار."
+      : "أهلاً فيك، كيف بقدر أساعدك؟";
   setMockAIProvider(mock);
   // Instant Graph stub: profiles + message sends.
   const origFetch = globalThis.fetch;

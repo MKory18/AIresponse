@@ -63,29 +63,41 @@ export function validateResponse(params: {
     violations.push("INJECTION_ECHO");
   }
 
-  // 3. Price fidelity: numbers with currency context must match the trusted
-  //    product price when a product is in context.
+  // 3. Price/currency fidelity: what the DB says is what the reply may say.
+  //    (أ) أي عملة غير عملة المنتج = رفض حتى لو الرقم صحيح.
+  //    (ب) أي رقم ملاصق لعملة لازم يكون سعر المنتج/البديل/سعر مسمّى/من خطة البيع.
+  //    القديم كان يتجاهل أي رقم ≤ 1000 ولم يعرف «درهم/ريال/دينار» — فسعر غلط
+  //    مثل 25 درهم بدل 10 دولار كان يمرّ بصمت.
+  const allowedPriceValues = new Set<string>();
+  const addAllowed = (v: string | number | null | undefined) => {
+    const n = normalizeNumber(String(v ?? ""));
+    if (n) allowedPriceValues.add(n);
+  };
+  for (const n of allowedNumbers) addAllowed(n);
   if (context?.product) {
-    const expected = normalizeNumber(context.product.price);
-    const numbers = response.match(/\d[\d.,،٬]*/g) ?? [];
-    const currencies = /(ل\.س|SYP|\$|USD|دولار|ليرة)/i;
-    if (currencies.test(response)) {
-      for (const n of numbers) {
-        const val = normalizeNumber(n);
-        if (
-          val &&
-          val !== expected &&
-          val !== normalizeNumber(context.product.compareAtPrice ?? "")
-        ) {
-          // allow small unrelated integers (quantities)
-          if (Number(val) > 1000) violations.push("PRICE_MISMATCH");
+    addAllowed(context.product.price);
+    addAllowed(context.product.compareAtPrice ?? "");
+    for (const tier of context.product.priceTiers ?? []) addAllowed(tier.price);
+  }
+
+  const mentionedCurrencies = detectCurrencies(response);
+  const productCurrency = context?.product ? canonicalCurrency(context.product.currency) : null;
+  if (mentionedCurrencies.size > 0 && productCurrency) {
+    if (!mentionedCurrencies.has(productCurrency)) violations.push("CURRENCY_MISMATCH");
+  }
+
+  const priced = numbersAdjacentToCurrency(response);
+  if (priced.length > 0) {
+    if (!context?.product) {
+      // بلا منتج موثوق: أي سعر مذكور = اختراع.
+      violations.push("UNSUPPORTED_PRICE");
+    } else {
+      for (const raw of priced) {
+        if (!allowedPriceValues.has(normalizeNumber(raw))) {
+          violations.push("PRICE_MISMATCH");
+          break;
         }
       }
-    }
-  } else if (context === null) {
-    // No product context: refuse confident price claims about products.
-    if (/السعر|بكم/.test(response) && /\d{3,}/.test(response)) {
-      violations.push("UNSUPPORTED_PRICE");
     }
   }
 
@@ -150,6 +162,76 @@ export function validateResponse(params: {
     violations,
     fallback: undefined,
   };
+}
+
+/** لهجات العملات → مجموعة موحّدة للمقارنة (عربي + ISO). */
+const CURRENCY_PATTERNS: { canonical: string; re: RegExp }[] = [
+  { canonical: "USD", re: /(?:\$|USD|دولار|دولارات)/i },
+  { canonical: "SYP", re: /(?:SYP|ل\.?\s?س|لير[ةه]|ليرات)/i },
+  { canonical: "DIRHAM", re: /(?:MAD|AED|درهم|دراهم)/i },
+  { canonical: "RIYAL", re: /(?:SAR|QAR|OMR|YER|ريال|ريالات)/i },
+  { canonical: "DINAR", re: /(?:JOD|IQD|KWD|BHD|LYD|TND|DZD|دينار|دنانير)/i },
+  { canonical: "EGP", re: /(?:EGP|جنيه|جنيهات)/i },
+];
+
+const CURRENCY_WORDS =
+  "(?:USD|SYP|MAD|AED|SAR|QAR|OMR|YER|JOD|IQD|KWD|BHD|LYD|TND|DZD|EGP|\\$|ل\\.?\\s?س|دولار|دولارات|درهم|دراهم|ريال|ريالات|دينار|دنانير|لير[ةه]|ليرات|جنيه|جنيهات)";
+
+const CURRENCY_ALIASES: Record<string, string> = {
+  USD: "USD",
+  SYP: "SYP",
+  MAD: "DIRHAM",
+  AED: "DIRHAM",
+  SAR: "RIYAL",
+  QAR: "RIYAL",
+  OMR: "RIYAL",
+  YER: "RIYAL",
+  JOD: "DINAR",
+  IQD: "DINAR",
+  KWD: "DINAR",
+  BHD: "DINAR",
+  LYD: "DINAR",
+  TND: "DINAR",
+  DZD: "DINAR",
+  EGP: "EGP",
+};
+
+/** رمز عملة المنتج → مجموعته الموحّدة. */
+export function canonicalCurrency(code: string | null | undefined): string | null {
+  const raw = (code ?? "").trim();
+  if (!raw) return null;
+  // العملة قد تُخزَّن عربية («ل.س») أو كرمز ISO — نوحّدها عبر كشف اللهجات.
+  const detected = detectCurrencies(raw);
+  if (detected.size === 1) return [...detected][0];
+  const key = raw.toUpperCase();
+  return CURRENCY_ALIASES[key] ?? key;
+}
+
+/** كل العائلات النقدية المذكورة بالنص. */
+export function detectCurrencies(text: string): Set<string> {
+  const found = new Set<string>();
+  for (const { canonical, re } of CURRENCY_PATTERNS) {
+    if (re.test(text)) found.add(canonical);
+  }
+  return found;
+}
+
+/**
+ * الأرقام الملاصقة لعملة (قبل أو بعد) — هذي أسعار، مش كميات.
+ * «بدي 3 حبات» ما بتتأثر؛ «25 درهم» بتنكشف.
+ */
+export function numbersAdjacentToCurrency(text: string): string[] {
+  const re = new RegExp(
+    `([0-9٠-٩۰-۹][0-9٠-٩۰-۹.,٬]*)\\s*${CURRENCY_WORDS}|${CURRENCY_WORDS}\\s*([0-9٠-٩۰-۹][0-9٠-٩۰-۹.,٬]*)`,
+    "gi"
+  );
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const value = m[1] ?? m[2];
+    if (value) out.push(value);
+  }
+  return out;
 }
 
 function normalizeNumber(s: string): string {
