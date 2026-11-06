@@ -2,7 +2,7 @@ import type { Db } from "@/modules/customers/service";
 import { AppError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { parseQuantity, parseConfirmation, normalizePhone, type ResolvableProduct } from "./primitives";
-import { getOrCreateDraft, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, recycleDraftForNewOrder, parseDraftItems } from "./draft-service";
+import { listOpenDrafts, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, parseDraftItems, type DraftItem } from "./draft-service";
 import { evaluateOrderRules, aggregateVerdict, publishDuplicateEvent, detectDuplicate } from "./rules";
 import { createOrderFromDraft, mergeCustomerData, updateOrderFromChat, cancelLatestOrderFromConversation } from "./order-service";
 import type { ExtractionResult } from "@/modules/ai/structured";
@@ -65,21 +65,33 @@ export async function handleOrderIntent(
   const { extraction } = params;
   const intent = extraction.intent;
 
-  // 1. Explicit cancel.
+  // 1. Explicit cancel — مسودة واحدة فقط، ولو في أكثر من وحدة نسأل.
   if (intent === "ORDER_CANCEL") {
-    const draft = await db.orderDraft.findUnique({ where: { conversationId: params.conversationId } });
-    if (draft && draft.state !== "CANCELLED" && draft.state !== "CONVERTED") {
-      await db.orderDraft.update({ where: { id: draft.id }, data: { state: "CANCELLED" } });
+    const open = await listOpenDrafts(db, params.workspaceId, params.conversationId);
+    if (open.length > 0) {
+      const target = open.length === 1 ? open[0] : matchDraftFromText(params.customerText, open);
+      if (!target) {
+        return {
+          handled: true,
+          action: "ASK_MISSING_FIELD",
+          summaryText: `عندك أكثر من طلب: ${open.map((d) => draftLabel(d)).join("، ")}. أي واحد بدك تلغي؟`,
+        };
+      }
+      await db.orderDraft.update({ where: { id: target.id }, data: { state: "CANCELLED" } });
       await recordAudit(db, {
         workspaceId: params.workspaceId,
         action: "order_draft.cancelled",
         entityType: "OrderDraft",
-        entityId: draft.id,
+        entityId: target.id,
       });
-      return { handled: true, action: "ORDER_CANCELLED", summaryText: "تم إلغاء الطلب." };
+      return { handled: true, action: "ORDER_CANCELLED", summaryText: `تم إلغاء طلب ${draftLabel(target)}.` };
     }
-    // Closed draft (order already placed) → the cancel targets the ORDER.
-    if (draft && draft.state === "CONVERTED") {
+    // لا مسودة مفتوحة → يمكن يلغي آخر طلب منشأ.
+    const converted = await db.orderDraft.findFirst({
+      where: { workspaceId: params.workspaceId, conversationId: params.conversationId, state: "CONVERTED", orderId: { not: null } },
+      orderBy: { sequence: "desc" },
+    });
+    if (converted) {
       const actor = { userId: params.actorUserId ?? "ai-agent", workspaceId: params.workspaceId };
       const cancelled = await cancelLatestOrderFromConversation(db, actor, params.conversationId);
       if (cancelled) {
@@ -95,63 +107,73 @@ export async function handleOrderIntent(
     return { handled: true, action: "NONE" };
   }
 
-  // 2. Confirmation handling — only when a READY/CONFIRMING draft exists.
+  // 2. Confirmation — مسودة واحدة تتأكد مباشرة، وأكثر من واحدة = سؤال.
   if (intent === "ORDER_CREATE" || intent === "ORDER_UPDATE" || intent === "UNKNOWN") {
-    const draft = await db.orderDraft.findUnique({ where: { conversationId: params.conversationId } });
-    const confirmationRelevant =
-      draft && (draft.state === "READY" || draft.state === "CONFIRMING") && parseDraftItems(draft).length > 0;
-    if (confirmationRelevant) {
+    const open = await listOpenDrafts(db, params.workspaceId, params.conversationId);
+    const ready = open.filter(
+      (d) => (d.state === "READY" || d.state === "CONFIRMING") && parseDraftItems(d).length > 0
+    );
+    if (ready.length > 0) {
       const signal = parseConfirmation(params.customerText);
-      if (signal.signal === "NO") {
-        await db.orderDraft.update({
-          where: { id: draft.id },
-          data: { state: "CANCELLED" },
-        });
-        await recordAudit(db, {
-          workspaceId: params.workspaceId,
-          action: "order_draft.cancelled",
-          entityType: "OrderDraft",
-          entityId: draft.id,
-          metadata: { reason: "CUSTOMER_DECLINED" },
-        });
-        return { handled: true, action: "ORDER_CANCELLED", summaryText: "تم إلغاء الطلب. في شي ثاني بقدر ساعدك فيه؟" };
-      }
-      if (signal.signal === "YES") {
-        // Rules run inside createOrderFromDraft — the AI cannot bypass them.
-        const actor = { userId: params.actorUserId ?? "ai-agent", workspaceId: params.workspaceId };
-        try {
-          const result = await createOrderFromDraft(db, actor, {
-            draftId: draft.id,
-            source: params.source ?? "AI",
-          });
+      const target = ready.length === 1 ? ready[0] : matchDraftFromText(params.customerText, ready);
+
+      if (!target) {
+        if (signal.signal === "YES" || signal.signal === "NO") {
           return {
             handled: true,
-            action: "ORDER_CONFIRMED",
-            orderId: result.orderId,
-            orderNumber: result.orderNumber,
-            total: result.total,
-            currency: result.currency,
-            summaryText: `تم تأكيد طلبك ✅ رقم الطلب: ${result.orderNumber}`,
+            action: "ASK_MISSING_FIELD",
+            summaryText: `عندك ${ready.length} طلبات جاهزة: ${ready.map((d) => draftLabel(d)).join("، ")}. أي واحد تقصد؟`,
           };
-        } catch (err) {
-          if (err instanceof AppError && err.code === "ORDER_REQUIRES_HUMAN") {
-            return { handled: true, action: "RULES_BLOCKED", needsHumanReview: true };
-          }
-          if (err instanceof AppError && err.code === "ORDER_MISSING_FIELDS") {
-            const refreshed = await getOwnedDraft(db, params.workspaceId, draft.id);
+        }
+        // كلام عادي وسط جمع الطلب: نكمل عادي.
+      } else {
+        if (signal.signal === "NO") {
+          await db.orderDraft.update({ where: { id: target.id }, data: { state: "CANCELLED" } });
+          await recordAudit(db, {
+            workspaceId: params.workspaceId,
+            action: "order_draft.cancelled",
+            entityType: "OrderDraft",
+            entityId: target.id,
+            metadata: { reason: "CUSTOMER_DECLINED" },
+          });
+          return { handled: true, action: "ORDER_CANCELLED", summaryText: "تم إلغاء الطلب. في شي ثاني بقدر ساعدك فيه؟" };
+        }
+        if (signal.signal === "YES") {
+          const actor = { userId: params.actorUserId ?? "ai-agent", workspaceId: params.workspaceId };
+          try {
+            const result = await createOrderFromDraft(db, actor, {
+              draftId: target.id,
+              source: params.source ?? "AI",
+            });
             return {
               handled: true,
-              action: "ASK_MISSING_FIELD",
-              missingFields: refreshed.missingFields as string[],
-              summaryText: buildDraftSummary(refreshed),
+              action: "ORDER_CONFIRMED",
+              orderId: result.orderId,
+              orderNumber: result.orderNumber,
+              total: result.total,
+              currency: result.currency,
+              summaryText: `تم تأكيد طلبك ✅ رقم الطلب: ${result.orderNumber}`,
             };
+          } catch (err) {
+            if (err instanceof AppError && err.code === "ORDER_REQUIRES_HUMAN") {
+              return { handled: true, action: "RULES_BLOCKED", needsHumanReview: true };
+            }
+            if (err instanceof AppError && err.code === "ORDER_MISSING_FIELDS") {
+              const refreshed = await getOwnedDraft(db, params.workspaceId, target.id);
+              return {
+                handled: true,
+                action: "ASK_MISSING_FIELD",
+                missingFields: refreshed.missingFields as string[],
+                summaryText: buildDraftSummary(refreshed),
+              };
+            }
+            throw err;
           }
-          throw err;
         }
-      }
-      // Ambiguous confirmation in an active draft context → keep collecting.
-      if (intent === "ORDER_UPDATE" || intent === "UNKNOWN") {
-        return { handled: true, action: "NONE" };
+        // تأكيد ملتبس داخل سياق مسودة نشطة → نكمل الجمع.
+        if (intent === "ORDER_UPDATE" || intent === "UNKNOWN") {
+          return { handled: true, action: "NONE" };
+        }
       }
     }
   }
@@ -200,15 +222,23 @@ export async function handleOrderIntent(
       }
     }
 
-    const draft = await getOrCreateDraft(db, params.workspaceId, params.conversationId, params.customerId);
-
-    // MULTI-ORDER: a closed draft (order placed or cart cancelled) is either
-    // edited (update of the PLACED order) or recycled into a fresh cart for a
-    // new order in the same conversation.
-    if (draft.state === "CONVERTED" || draft.state === "CANCELLED") {
-      const wantsNewProduct = multiItems.length > 0 || Boolean(draftInput.productName || draftInput.productId);
-      const wantsEdit = Boolean(draftInput.quantity || draftInput.rawAddress || draftInput.province || draftInput.notes);
-      if (intent === "ORDER_UPDATE" && !wantsNewProduct) {
+    // قرار المالك: لا recycle — كل طلب جديد مسودة جديدة.
+    // التعديل يخصّ آخر طلب منشأ فقط، وفقط إذا ما في منتج جديد بالرسالة.
+    const wantsNewProduct = multiItems.length > 0 || Boolean(draftInput.productName || draftInput.productId);
+    if (intent === "ORDER_UPDATE" && !wantsNewProduct) {
+      const latestConverted = await db.orderDraft.findFirst({
+        where: {
+          workspaceId: params.workspaceId,
+          conversationId: params.conversationId,
+          state: "CONVERTED",
+          orderId: { not: null },
+        },
+        orderBy: { sequence: "desc" },
+      });
+      if (latestConverted) {
+        const wantsEdit = Boolean(
+          draftInput.quantity || draftInput.rawAddress || draftInput.province || draftInput.notes || draftInput.phone
+        );
         if (!wantsEdit) return { handled: false, action: "NONE" };
         const actor = { userId: params.actorUserId ?? "ai-agent", workspaceId: params.workspaceId };
         const edit = await updateOrderFromChat(db, actor, {
@@ -246,13 +276,7 @@ export async function handleOrderIntent(
             summaryText: `الطلب رقم ${edit.orderNumber} فيه أكثر من منتج — رح يراجع الفريق التعديل المطلوب قبل تطبيقه.`,
           };
         }
-        // NO_ORDER → fall through: open a fresh cart with the given fields.
-      } else {
-        // A bare confirmation on an empty new cart is chatter, not a new order.
-        if (!wantsNewProduct && !wantsEdit && parseConfirmation(params.customerText).signal !== "UNKNOWN") {
-          return { handled: false, action: "NONE" };
-        }
-        await recycleDraftForNewOrder(db, params.workspaceId, draft);
+        // NO_ORDER → نكمل: مسودة جديدة بالحقول المذكورة.
       }
     }
 
@@ -313,7 +337,8 @@ export async function handleOrderIntent(
 
   // 4. Not an order intent — but if an active draft exists and the message
   //    is a bare quantity/product continuation, still collect it.
-  const draft = await db.orderDraft.findUnique({ where: { conversationId: params.conversationId } });
+  const openForContext = await listOpenDrafts(db, params.workspaceId, params.conversationId);
+  const draft = openForContext[0] ?? null;
   if (draft && (draft.state === "COLLECTING" || draft.state === "READY")) {
     const q = parseQuantity(params.customerText);
     if (q.value && isProductCandidate(params.customerText) === false) {
@@ -350,3 +375,25 @@ export async function listResolvableProducts(
 }
 
 export { evaluateOrderRules, aggregateVerdict };
+
+
+/** اسم مقروء للمسودة من عنصرها الوحيد. */
+function draftLabel(draft: { items?: unknown; productName?: string | null }): string {
+  const item: DraftItem | undefined = parseDraftItems(draft as never)[0];
+  const name = item?.productName || draft.productName || "";
+  if (!name) return "بدون منتج";
+  return item?.quantity ? `${name} × ${item.quantity}` : name;
+}
+
+/** يطابق مسودة بذكر اسم منتجها داخل نص العميل — ولا يخمّن عند التعدد. */
+function matchDraftFromText<T extends { items?: unknown; productName?: string | null }>(
+  customerText: string,
+  drafts: T[]
+): T | null {
+  const text = customerText.toLowerCase();
+  const matches = drafts.filter((d) => {
+    const name = (parseDraftItems(d as never)[0]?.productName || d.productName || "").trim();
+    return name.length >= 3 && text.includes(name.toLowerCase());
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
