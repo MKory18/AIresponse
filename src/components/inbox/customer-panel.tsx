@@ -14,13 +14,13 @@ import { CHANNEL_LABELS, type CustomerDetail, type DraftInfo } from "./types";
 
 export function CustomerPanel({
   customer,
-  orderDraft,
+  orderDrafts,
   pageName,
   onRefreshProfile,
   onResetMemory,
 }: {
   customer: CustomerDetail | null;
-  orderDraft: DraftInfo | null;
+  orderDrafts: DraftInfo[];
   pageName?: string | null;
   onRefreshProfile?: () => Promise<{ ok: boolean; message: string }>;
   onResetMemory?: () => Promise<void>;
@@ -171,8 +171,14 @@ export function CustomerPanel({
         )}
       </GlassCard>
 
-      {/* Order draft */}
-      {orderDraft && <OrderDraftCard draft={orderDraft} />}
+      {/* طلبات مفتوحة — كل منتج مسودة مستقلة */}
+      {orderDrafts.length > 0 && (
+        <div className="space-y-2">
+          {orderDrafts.map((draft) => (
+            <OrderDraftCard key={draft.id} draft={draft} />
+          ))}
+        </div>
+      )}
 
       {/* حذف ذاكرة المحادثة — المدير فما فوق */}
       {onResetMemory && (
