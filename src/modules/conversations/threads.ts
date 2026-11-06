@@ -390,6 +390,35 @@ export async function postNote(
   return note;
 }
 
+/** يضيف اسم المرسل للعرض الداخلي (بلا أي تغيير على نصوص الرسائل). */
+async function withSenderNames<T extends { senderType: string; senderId?: string | null }>(
+  db: Db,
+  items: T[]
+): Promise<Array<T & { senderName: string | null }>> {
+  const ids = [...new Set(items.filter((m) => m.senderType === "HUMAN" && m.senderId).map((m) => m.senderId as string))];
+  const names = new Map<string, string>();
+  if (ids.length > 0) {
+    try {
+      const users = (await db.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+      })) as Array<{ id: string; name: string }>;
+      for (const u of users) names.set(u.id, u.name);
+    } catch {
+      // اسم الموظف تحسين عرض — غيابه ما يوقف الرسائل.
+    }
+  }
+  return items.map((m) => ({
+    ...m,
+    senderName:
+      m.senderType === "AI"
+        ? "الذكاء الاصطناعي"
+        : m.senderType === "HUMAN"
+          ? names.get(m.senderId ?? "") ?? null
+          : null,
+  }));
+}
+
 export async function listMessages(
   db: Db,
   ctx: ActorContext,
@@ -411,7 +440,7 @@ export async function listMessages(
     const page = window.slice(-limit);
     const hasMore = window.length > limit;
     return {
-      items: page,
+      items: await withSenderNames(db, page),
       nextCursor: hasMore && page.length ? page[0].id : null,
     };
   }
@@ -427,7 +456,7 @@ export async function listMessages(
     const hasMore = messages.length > limit;
     const items = hasMore ? messages.slice(0, limit) : messages;
     return {
-      items,
+      items: await withSenderNames(db, items),
       nextCursor: hasMore ? items[items.length - 1].id : null,
     };
   }
@@ -435,7 +464,7 @@ export async function listMessages(
   const page = older.slice(-limit);
   const hasMore = older.length > limit;
   return {
-    items: page,
+    items: await withSenderNames(db, page),
     nextCursor: hasMore && page.length ? page[0].id : null,
   };
 }

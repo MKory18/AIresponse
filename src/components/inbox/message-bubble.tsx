@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Check, CheckCheck, RotateCcw } from "lucide-react";
+import { Bot, Check, CheckCheck, RotateCcw, UserRound } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatTime, label, t } from "@/lib/i18n";
 import type { MessageItem } from "./types";
@@ -37,12 +37,6 @@ export function MessageBubble({ message, onRetry }: { message: MessageItem; onRe
     // RTL: رسالة الموظف الصادرة إلى اليسار (نهاية السطر) ورسالة العميل إلى اليمين — عرف تطبيقات المحادثة العربية
     <div className={cn("flex w-full animate-fade-in", outbound ? "justify-end" : "justify-start")}>
       <div className={cn("max-w-[78%] sm:max-w-[62%]", outbound ? "bubble-out" : "bubble-in")}>
-        {m.senderType === "AI" && !outbound && (
-          <p className="mb-1 flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-300">
-            <Bot size={11} />
-            {t.roles.ai}
-          </p>
-        )}
         {m.type !== "TEXT" && (
           <p className={cn("mb-1 text-[10px] font-semibold", outbound ? "text-white/75" : "text-ink-subtle")}>
             {m.mediaUrl ? t.inbox.attachment : label(m.type)}
@@ -86,6 +80,20 @@ export function MessageBubble({ message, onRetry }: { message: MessageItem; onRe
             </span>
           )}
         </p>
+        {/* ختم داخلي: مين كتب الرسالة — يظهر بالنظام فقط، ما بينبعت للعميل */}
+        {outbound && (
+          <p className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-white/80">
+            {m.senderType === "AI" ? (
+              <>
+                <Bot size={10} /> الذكاء الاصطناعي
+              </>
+            ) : (
+              <>
+                <UserRound size={10} /> {m.senderName ?? "الموظف"}
+              </>
+            )}
+          </p>
+        )}
       </div>
     </div>
   );

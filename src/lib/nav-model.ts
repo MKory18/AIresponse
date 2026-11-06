@@ -64,7 +64,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/orders", label: "الطلبات", permission: "orders.read" },
       { href: "/products", label: "المنتجات", permission: "products.read" },
       { href: "/catalogs", label: "الكتالوجات", permission: "catalogs.read" },
-      { href: "/campaigns", label: "الحملات", permission: "campaigns.read" },
     ],
   },
   {
@@ -80,16 +79,6 @@ export const NAV_GROUPS: NavGroup[] = [
       // الترتيب = طريق الإعداد: علّمه ← جرّبه ← شغّله.
       { href: "/ai/playground", label: "التجربة", permission: "ai.configure" },
       { href: "/settings/ai", label: "التشغيل", permission: "ai.configure" },
-    ],
-  },
-  {
-    key: "automation",
-    label: "الأتمتة",
-    icon: "Workflow",
-    placement: "main",
-    pages: [
-      { href: "/automation", label: "القواعد", permission: "automation.read" },
-      { href: "/follow-ups", label: "المتابعات", permission: "followups.read" },
     ],
   },
   {
@@ -122,10 +111,14 @@ export const NAV_GROUPS: NavGroup[] = [
 export const NAV_REDIRECTS: Record<string, string> = {
   "/order-warehouse": "/orders",
   "/ai/studio": "/settings/ai",
-  "/workflows": "/automation",
   "/analytics/ai": "/analytics?tab=ai",
   "/analytics/products": "/analytics?tab=products",
   "/settings": "/settings/account",
+  // صفحات انشالت بقرار المالك (تركيز على الردود والطلبات فقط).
+  "/campaigns": "/dashboard",
+  "/automation": "/dashboard",
+  "/follow-ups": "/dashboard",
+  "/workflows": "/dashboard",
 };
 
 /** شكل خفيف بيمرّ من الخادم للعميل — بلا صلاحيات. */
