@@ -1,9 +1,6 @@
 import { redirectToMerged } from "@/lib/nav-redirect";
 
-/**
- * «سير العمل» كانت نفس جدول «القواعد» بقائمة تانية — اندمجت بـ`/automation`
- * (زر «قاعدة بخطوات»). الرابط القديم بيحوّل لهناك.
- */
+/** صفحة انشالت بقرار المالك (تركيز على الردود والطلبات) — الرابط القديم بيحوّل. */
 export default function WorkflowsPage() {
   redirectToMerged("/workflows");
 }

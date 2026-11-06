@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
-import { probeProviderEndpoint, normalizeHermesEndpoint } from "@/modules/ai/provider";
+import { probeProviderEndpoint, probeProviderLink, normalizeHermesEndpoint } from "@/modules/ai/provider";
 import { decryptSecret } from "@/core/crypto";
 import { resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed, assertCustomEndpointResolves, isCustomPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
@@ -10,6 +10,11 @@ import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPri
 const testSchema = z.object({
   /** Which configured provider to probe. Defaults to the workspace choice. */
   provider: z.enum(["openai", "openrouter", "internal", "hermes", "custom", "mock"]).optional(),
+  /**
+   * link     — reachability + key acceptance in ~one round-trip (default).
+   * generate — real 5-token generation; proves the model, costs its latency.
+   */
+  mode: z.enum(["link", "generate"]).optional(),
 });
 
 /**
@@ -30,6 +35,13 @@ export const POST = createHandler(
     })) ?? null) as unknown as Record<string, unknown> | null;
 
     const env = getEnv();
+    const mode = body.mode ?? "link";
+    // Fast by default: one round-trip for reachability+auth. `generate` keeps
+    // the old full model probe for diagnostics.
+    const runProbe = (endpoint: string, key: string, model: string, opts?: { followRedirects?: boolean }) =>
+      mode === "generate"
+        ? probeProviderEndpoint(endpoint, key, model, { followRedirects: opts?.followRedirects })
+        : probeProviderLink(endpoint, key);
     const choice =
       (body.provider as string | undefined) ?? (settings?.provider as string | undefined) ?? env.AI_PROVIDER ?? "mock";
 
@@ -57,12 +69,13 @@ export const POST = createHandler(
       }
       endpoint = normalizeHermesEndpoint(base);
       model = (env.HERMES_MODEL as string | undefined)?.trim() || resolveModel(settings as never, "RESPONSE").model || "hermes-agent";
-      const probe = await probeProviderEndpoint(endpoint, hermesKey, model, { followRedirects: false });
+      const probe = await runProbe(endpoint, hermesKey, model, { followRedirects: false });
       return ok({
         provider: "hermes",
         status: probe.ok ? "working" : "failed",
         latencyMs: probe.latencyMs,
         detail: probe.detail,
+        mode,
         endpoint,
         model,
       });
@@ -83,12 +96,14 @@ export const POST = createHandler(
       model = resolveModel(settings as never, "RESPONSE").model;
       // Internal endpoints are tested INDEPENDENTLY of external models; a
       // success here proves the self-hosted route, never an external one.
-      const probe = await probeProviderEndpoint(endpoint, "internal-probe", model);
+      // Link mode sends no key: a self-hosted gateway is not required to auth.
+      const probe = await runProbe(endpoint, mode === "generate" ? "internal-probe" : "", model);
       return ok({
         provider: "internal",
         status: probe.ok ? "working" : "failed",
         latencyMs: probe.latencyMs,
         detail: probe.detail,
+        mode,
         endpoint,
         model,
       });
@@ -114,12 +129,13 @@ export const POST = createHandler(
       endpoint = normalizeHermesEndpoint(base);
       model = resolveModel(settings as never, "RESPONSE").model;
       // المفتاح المخصص ما بيرجع بالنتيجة — بس الحالة والتأخير والسبب.
-      const probe = await probeProviderEndpoint(endpoint, key, model, { followRedirects: false });
+      const probe = await runProbe(endpoint, key, model, { followRedirects: false });
       return ok({
         provider: "custom",
         status: probe.ok ? "working" : "failed",
         latencyMs: probe.latencyMs,
         detail: probe.detail,
+        mode,
         endpoint,
         model,
       });
@@ -132,12 +148,13 @@ export const POST = createHandler(
         ? "https://api.openai.com/v1/chat/completions"
         : "https://openrouter.ai/api/v1/chat/completions";
     model = resolveModel(settings as never, "RESPONSE").model;
-    const probe = await probeProviderEndpoint(endpoint, key, model);
+    const probe = await runProbe(endpoint, key, model);
     return ok({
       provider: choice,
       status: probe.ok ? "working" : "failed",
       latencyMs: probe.latencyMs,
       detail: probe.detail,
+      mode,
       endpoint,
       model,
     });

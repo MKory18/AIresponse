@@ -2,6 +2,8 @@
 const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  // pg بيفتح اتصال LISTEN طويل الأمد — يضل خارج حزمة Next.
+  experimental: { serverComponentsExternalPackages: ["pg"] },
   async headers() {
     return [
       {

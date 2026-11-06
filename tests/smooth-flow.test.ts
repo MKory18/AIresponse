@@ -68,19 +68,6 @@ describe("صفحة الطلب", () => {
   });
 });
 
-describe("الحملات: شريحة ← حملة", () => {
-  it("في زر إنشاء شريحة بيبعت لـ POST /api/segments", () => {
-    const dialog = read("src/app/(dashboard)/campaigns/segment-dialog.tsx");
-    expect(dialog).toContain('fetch("/api/segments"');
-    expect(dialog).toContain('method: "POST"');
-    expect(page("campaigns/page.tsx")).toContain("SegmentDialog");
-  });
-
-  it("ولا نص بيحوّل على «واجهة الشرائح» الي مش موجودة", () => {
-    expect(page("campaigns/page.tsx")).not.toContain("عبر واجهة الشرائح");
-  });
-});
-
 describe("قائمة الحساب", () => {
   it("«الفريق» بتظهر بس لمين بيقدر يفتحها", () => {
     const shell = code(read("src/components/app-shell.tsx"));
@@ -88,15 +75,3 @@ describe("قائمة الحساب", () => {
   });
 });
 
-describe("خيارات الشريحة الجاهزة", () => {
-  it("كل خيار شرط صالح بمخطط الخادم — وأي توليفة مسموحة بتنحفظ", async () => {
-    const { SEGMENT_PRESETS } = await import("@/app/(dashboard)/campaigns/segment-dialog");
-    const { segmentCreateSchema } = await import("@/modules/campaigns/segment-schemas");
-    for (const p of SEGMENT_PRESETS) {
-      const r = segmentCreateSchema.safeParse({ name: p.label, definition: { version: 1, match: "ALL", conditions: [p.condition] } });
-      expect(r.success, p.key).toBe(true);
-    }
-    const all = SEGMENT_PRESETS.map((p) => p.condition);
-    expect(segmentCreateSchema.safeParse({ name: "كل", definition: { version: 1, match: "ALL", conditions: all } }).success).toBe(true);
-  });
-});

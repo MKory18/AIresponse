@@ -77,9 +77,13 @@ describe("multi-order flow — a conversation holds many orders", () => {
       customerText: "بدي زيت زيتون كمان 2",
     });
     expect(second.action).toBe("REQUEST_CONFIRMATION");
-    const draft = await db.orderDraft.findUniqueOrThrow({ where: { conversationId } }) as never as {
-      state: string; productId: string | null; orderId: string | null; quantity: number | null;
-    };
+    // قرار المالك: طلب جديد = مسودة جديدة. نقرأ المسودة المفتوحة (الأحدث).
+    const allDrafts = (await db.orderDraft.findMany({ where: { conversationId } })) as Array<{
+      state: string; productId: string | null; orderId: string | null; quantity: number | null; sequence?: number;
+    }>;
+    const draft = allDrafts
+      .filter((d) => d.state !== "CONVERTED")
+      .sort((a, b) => (b.sequence ?? 0) - (a.sequence ?? 0))[0];
     expect(draft.state).toBe("READY");
     expect(draft.productId).toBe(productIdB);
     expect(draft.quantity).toBe(2);
@@ -128,9 +132,13 @@ describe("multi-order flow — a conversation holds many orders", () => {
       customerText: "بدي زيت زيتون",
     });
     expect(second.action).toBe("REQUEST_CONFIRMATION");
-    const draft = await db.orderDraft.findUniqueOrThrow({ where: { conversationId } }) as never as {
-      phone: string | null; rawAddress: string | null; province: string | null; customerName: string | null;
-    };
+    // قرار المالك: مسودة جديدة للمنتج الجديد — لكنها ترث بيانات التواصل.
+    const allDrafts = (await db.orderDraft.findMany({ where: { conversationId } })) as Array<{
+      id: string; state: string; sequence?: number; phone: string | null; rawAddress: string | null; province: string | null; customerName: string | null;
+    }>;
+    const draft = allDrafts
+      .filter((d) => d.state !== "CONVERTED")
+      .sort((a, b) => (b.sequence ?? 0) - (a.sequence ?? 0))[0];
     expect(draft.phone).toBe("0930000000");
     expect(draft.rawAddress).toBe("دويلعة");
     expect(draft.province).toBe("دمشق");

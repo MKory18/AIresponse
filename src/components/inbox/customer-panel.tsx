@@ -2,31 +2,47 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Facebook, MapPin, Package, Phone, RefreshCw, Sparkles } from "lucide-react";
+import { Facebook, MapPin, Package, Phone, RefreshCw, Trash2 } from "lucide-react";
 import { formatNumber, label, t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { ConfirmDialog } from "../ui/confirm";
 import { GlassCard } from "../ui/card";
 import { EmptyState } from "../ui/empty-state";
 import { CHANNEL_LABELS, type CustomerDetail, type DraftInfo } from "./types";
-import { MarketingCard } from "./marketing-card";
 
 export function CustomerPanel({
   customer,
-  orderDraft,
+  orderDrafts,
   pageName,
   onRefreshProfile,
+  onResetMemory,
 }: {
   customer: CustomerDetail | null;
-  orderDraft: DraftInfo | null;
+  orderDrafts: DraftInfo[];
   pageName?: string | null;
   onRefreshProfile?: () => Promise<{ ok: boolean; message: string }>;
+  onResetMemory?: () => Promise<void>;
 }) {
   const [refreshingProfile, setRefreshingProfile] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   if (!customer) {
     return <EmptyState title={t.customer.noSelection} className="h-full" />;
+  }
+
+  async function resetMemory() {
+    if (!onResetMemory) return;
+    setResetting(true);
+    try {
+      await onResetMemory();
+    } finally {
+      setResetting(false);
+      setResetOpen(false);
+    }
   }
 
   async function refreshProfile() {
@@ -127,9 +143,6 @@ export function CustomerPanel({
         )}
       </GlassCard>
 
-      {/* P12 — موافقة الرسائل التسويقية ومصدر الزبون */}
-      <MarketingCard customerId={customer.id} />
-
       {/* Orders */}
       <GlassCard level="glass-subtle" className="p-3.5">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-ink">
@@ -158,18 +171,23 @@ export function CustomerPanel({
         )}
       </GlassCard>
 
-      {/* Order draft */}
-      {orderDraft && <OrderDraftCard draft={orderDraft} />}
+      {/* طلبات مفتوحة — كل منتج مسودة مستقلة */}
+      {orderDrafts.length > 0 && (
+        <div className="space-y-2">
+          {orderDrafts.map((draft) => (
+            <OrderDraftCard key={draft.id} draft={draft} />
+          ))}
+        </div>
+      )}
 
-      {/* AI summary */}
-      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-b from-sky-500/10 to-sky-500/5 p-3.5 dark:border-sky-400/20">
-        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-300">
-          <Sparkles aria-hidden size={13} /> {t.inbox.aiSummary}
-        </p>
-        <p className="text-[11px] leading-relaxed text-sky-900/80 dark:text-sky-200/80">
-          {customer.aiSummary ?? t.inbox.aiSummaryEmpty}
-        </p>
-      </div>
+      {/* حذف ذاكرة المحادثة — المدير فما فوق */}
+      {onResetMemory && (
+        <div className="px-1">
+          <Button size="sm" variant="ghost" className="w-full justify-center text-ink-subtle" onClick={() => setResetOpen(true)}>
+            <Trash2 size={12} /> حذف ذاكرة المحادثة
+          </Button>
+        </div>
+      )}
 
       {/* Timeline */}
       {customer.conversations.length > 1 && (
@@ -186,6 +204,17 @@ export function CustomerPanel({
           </ol>
         </GlassCard>
       )}
+
+      <ConfirmDialog
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        onConfirm={() => void resetMemory()}
+        title="حذف ذاكرة المحادثة؟"
+        body="بينمسح اللي تعلّمه الذكاء من هالمحادثة: الذاكرة المستخرجة وملخّص المحادثة. الرسائل والطلبات وملاحظات الفريق بتضل. ما بيرجع."
+        confirmLabel="حذف الذاكرة"
+        busy={resetting}
+        danger
+      />
     </div>
   );
 }

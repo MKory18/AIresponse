@@ -71,11 +71,25 @@ Set on the Coolify application (Values marked SECRET must be generated, never co
 | `LOG_LEVEL` | `info`. |
 | `AI_PROVIDER` | `openai` (or the provider used in staging). |
 | `OPENAI_API_KEY` / other provider keys | SECRET — as configured. |
+| `RESPONSE_MODEL` / `EXTRACTION_MODEL` | Optional per-task overrides. Speed lever: a smaller/faster model for `EXTRACTION` cuts one of the two serial model calls per reply. |
 | `META_APP_ID`, `META_APP_SECRET` | SECRET — required for the real Meta flow; health reports `FACEBOOK_CONFIGURATION_MISSING` without them. |
 | `META_WEBHOOK_VERIFY_TOKEN` | SECRET — the token entered in the Meta App webhook UI. |
 | `META_REDIRECT_URI`, `META_GRAPH_VERSION` | Optional; defaults derive from `APP_URL` / `v21.0`. |
 
 `REDIS_URL` is optional and unused by the current queue architecture.
+
+### Reply latency vs link latency
+
+- **«فحص الاتصال»** measures one network round-trip + key acceptance
+  (`GET /api/v1/key` on OpenRouter, `GET …/models` on any OpenAI-compatible
+  gateway). It answers "is the provider reachable?", not "how fast is a reply?".
+- **«فحص التوليد»** runs a real 5-token completion: its number is the model's
+  own latency and is always seconds, not milliseconds.
+- A real reply costs `extraction + response` serial model calls. Levers, in
+  order of impact: (1) a local/self-hosted GLM gateway near the server,
+  (2) a faster `EXTRACTION_MODEL`, (3) shorter persona/context (the RESPONSE
+  call carries the full persona), (4) pure small-talk skips extraction
+  automatically.
 
 ## 5. Build / Start Commands
 
@@ -114,6 +128,25 @@ Dockerfile:
     `worker_started` / `worker_stopped_cleanly` logs).
 
 The worker must never share the Next.js process — it polls `BackgroundJob` and claims jobs atomically via `lockedAt`/`lockedBy`.
+
+### Capacity (200 concurrent customers)
+
+- **AI concurrency per worker:** `AI_JOB_CONCURRENCY` (default 8, max 16).
+- **Total capacity = workers × concurrency.** For ~10 messages/sec with a 3s
+  reply, run **2–4 worker containers** at 16 (`docker compose up --scale` or
+  duplicate the Coolify service).
+- Multiple workers are safe: claiming is atomic and per-conversation order is
+  preserved. Each worker writes its own `WorkerHeartbeat` row (health reports
+  `workers`).
+- **PostgreSQL connections:** web + every worker open their own pool. Keep
+  `max_connections` above `(web + workers) × pool + 20`, or put PgBouncer in
+  front and set `?connection_limit=` on `DATABASE_URL`.
+- **Realtime (SSE):** `GET /api/events` holds one long-lived response per open
+  inbox; it opens **one** `pg` LISTEN connection per web container, not per
+  browser. No proxy buffering (`X-Accel-Buffering: no` + 15s heartbeat). If the
+  connection drops, the inbox falls back to polling automatically.
+- **Storage:** if you run more than one web container, media must live on a
+  shared volume or S3 — a per-container local disk is not shared.
 
 **Env parity is mandatory, not optional.** The worker validates its environment
 at runtime (`src/core/env.ts` throws unless `DATABASE_URL`, `JWT_SECRET` (32+),

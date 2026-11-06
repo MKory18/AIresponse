@@ -60,9 +60,9 @@ const OLD_NAV_HREFS = [
 ];
 
 describe("هيكل القائمة", () => {
-  it("٧ مجموعات بمفاتيح فريدة", () => {
-    expect(NAV_GROUPS).toHaveLength(7);
-    expect(new Set(NAV_GROUPS.map((g) => g.key)).size).toBe(7);
+  it("٦ مجموعات بمفاتيح فريدة", () => {
+    expect(NAV_GROUPS).toHaveLength(6);
+    expect(new Set(NAV_GROUPS.map((g) => g.key)).size).toBe(6);
   });
 
   it("ولا صفحة بتتكرر بأكتر من مجموعة", () => {
@@ -94,8 +94,8 @@ describe("هيكل القائمة", () => {
     }
   });
 
-  it("ولا تكرار: الـ٢٦ تبويب صاروا ٢١ (الصفحات الي كانت نسخة من غيرها اندمجت)", () => {
-    expect(NAV_GROUPS.flatMap((g) => g.pages)).toHaveLength(21);
+  it("ولا تكرار: بعد تركيز النظام على الردود والطلبات، القائمة ١٨ تبويب", () => {
+    expect(NAV_GROUPS.flatMap((g) => g.pages)).toHaveLength(18);
   });
 
   it("كل صفحة بالقائمة موجودة فعلًا (ولا تبويب بيودّي لـ ٤٠٤)", () => {
@@ -135,7 +135,7 @@ describe("مطابقة المسار بالصفحة", () => {
     expect(hit("/settings/ai")?.group.key).toBe("ai");
     expect(hit("/settings")?.page.href).toBe("/settings/account");
     expect(hit("/ai/studio")?.page.href).toBe("/settings/ai");
-    expect(hit("/workflows")?.page.href).toBe("/automation");
+    expect(hit("/workflows")?.page.href).toBe("/dashboard");
     expect(hit("/analytics/ai")?.group.key).toBe("reports");
     expect(hit("/analytics/products")?.page.href).toBe("/analytics");
   });

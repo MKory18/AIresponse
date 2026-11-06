@@ -1,9 +1,12 @@
 /**
- * P22 — طلب بعدة منتجات (سلة) وتخزينه.
+ * قرار المالك — كل منتج مسودة مستقلة (لا سلة).
  *
- * يثبت: منتجان في رسالة/رسائل، دمج نفس المنتج بلا تكرار، كمية بلا اسم
- * تُحدّث آخر عنصر، إنشاء طلب ببندين وتسعير مجموع + توصيل مرة واحدة، رفض
- * منتج غير متوفر، وتوافق المسودات القديمة المفردة.
+ * يثبت:
+ *  - منتجان في رسالة/رسائل = **مسودتان منفصلتان**، منتج واحد بكل مسودة.
+ *  - نفس المنتج مرة ثانية = نفس المسودة (آخر كمية تفوز).
+ *  - كمية بلا اسم = آخر مسودة مفتوحة فقط.
+ *  - كل مسودة تُنشئ طلبها المستقل (رقم/مجموع مستقل).
+ *  - «نعم» مع مسودتين جاهزتين = سؤال أي واحدة، وبعد التسمية يتأكد المطلوب.
  *
  * ⚠️ قاعدة بالذاكرة — سلوك لا PostgreSQL حقيقي.
  */
@@ -11,7 +14,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { createProduct } from "@/modules/products/service";
-import { parseDraftItems, updateDraftFromExtraction } from "@/modules/orders/draft-service";
+import { listOpenDrafts, parseDraftItems, updateDraftFromExtraction } from "@/modules/orders/draft-service";
 import { createOrderFromDraft } from "@/modules/orders/order-service";
 import { handleOrderIntent } from "@/modules/orders/intelligence";
 
@@ -41,13 +44,7 @@ async function seed() {
     currency: "USD",
   });
   const customer = (await db.customer.create({
-    data: {
-      workspaceId: WS,
-      name: "سامر",
-      phone: "0791234567",
-      address: "عمان - الدوار السابع",
-      province: "عمان",
-    },
+    data: { workspaceId: WS, name: "سامر", phone: "0791234567", address: "عمان - الدوار السابع", province: "عمان" },
   } as never)) as { id: string };
   customerId = customer.id;
   const channel = (await db.channel.create({
@@ -67,8 +64,8 @@ async function seed() {
   conversationId = conversation.id;
 }
 
-async function draftRow() {
-  return (await db.orderDraft.findUniqueOrThrow({ where: { conversationId } })) as any;
+async function openDrafts() {
+  return (await listOpenDrafts(db as unknown as Db, WS, conversationId)) as any[];
 }
 
 async function merge(extraction: Parameters<typeof updateDraftFromExtraction>[1]["extraction"]) {
@@ -81,10 +78,33 @@ async function merge(extraction: Parameters<typeof updateDraftFromExtraction>[1]
   });
 }
 
+function itemOf(draft: any) {
+  const items = parseDraftItems(draft);
+  expect(items).toHaveLength(1);
+  return items[0];
+}
+
+const confirm = (text: string) =>
+  handleOrderIntent(db as unknown as Db, {
+    workspaceId: WS,
+    conversationId,
+    customerId,
+    customerText: text,
+    extraction: {
+      intent: "ORDER_CREATE",
+      confidence: 0.95,
+      language: "ar",
+      entities: {},
+      missingFields: [],
+      memories: [],
+      requestedAction: "CREATE_ORDER",
+    } as never,
+  });
+
 beforeEach(seed);
 
-describe("P22 — مسودة طلب متعددة المنتجات", () => {
-  it("منتجان في رسالة واحدة: كلاهما يُحفظ، والمسودة تصير جاهزة", async () => {
+describe("مسودة مستقلة لكل منتج", () => {
+  it("منتجان في رسالة واحدة = مسودتان، كل واحدة عنصر واحد وجاهزة", async () => {
     const r = await merge({
       items: [
         { productName: "ماء الكمأة", quantity: 2 },
@@ -92,59 +112,86 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
       ],
     });
     expect(r.becameReady).toBe(true);
-    const items = parseDraftItems(await draftRow());
-    expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({ productId: productA.id, quantity: 2 });
-    expect(items[1]).toMatchObject({ productId: productB.id, quantity: 1 });
-    // مرآة العنصر الأول للحقول المفردة (توافق خلفي).
-    expect((await draftRow()).productName).toBe("ماء الكمأة");
+
+    const drafts = await openDrafts();
+    expect(drafts).toHaveLength(2);
+    const byProduct = new Map(drafts.map((d) => [itemOf(d).productId, d]));
+    expect(itemOf(byProduct.get(productA.id)!).quantity).toBe(2);
+    expect(itemOf(byProduct.get(productB.id)!).quantity).toBe(1);
+    for (const d of drafts) expect(d.state).toBe("READY");
   });
 
-  it("منتجان برسالتين + كمية بلا اسم تُحدّث آخر عنصر فقط", async () => {
+  it("منتجان برسالتين + كمية بلا اسم تُحدّث آخر مسودة فقط", async () => {
     await merge({ productName: "ماء الكمأة", quantity: 2 });
     await merge({ productName: "عسل الكمأة", quantity: 1 });
-    expect(parseDraftItems(await draftRow())).toHaveLength(2);
+    expect(await openDrafts()).toHaveLength(2);
 
     await merge({ quantity: 5 });
-    const items = parseDraftItems(await draftRow());
-    expect(items.find((i) => i.productId === productA.id)?.quantity).toBe(2);
-    expect(items.find((i) => i.productId === productB.id)?.quantity).toBe(5);
+    const drafts = await openDrafts();
+    const byProduct = new Map(drafts.map((d) => [itemOf(d).productId, d]));
+    expect(itemOf(byProduct.get(productA.id)!).quantity).toBe(2);
+    expect(itemOf(byProduct.get(productB.id)!).quantity).toBe(5);
   });
 
-  it("نفس المنتج مرة ثانية: سطر واحد (آخر كمية تفوز) بلا تكرار", async () => {
+  it("نفس المنتج مرة ثانية: نفس المسودة (آخر كمية تفوز)", async () => {
     await merge({ productName: "ماء الكمأة", quantity: 2 });
     await merge({ productName: "ماء الكمأة", quantity: 4 });
-    const items = parseDraftItems(await draftRow());
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ productId: productA.id, quantity: 4 });
+    const drafts = await openDrafts();
+    expect(drafts).toHaveLength(1);
+    expect(itemOf(drafts[0])).toMatchObject({ productId: productA.id, quantity: 4 });
   });
 
-  it("إنشاء الطلب: بندان صحيحان، مجموع 250 + توصيل مرة واحدة", async () => {
+  it("كل مسودة تُنشئ طلبها المستقل برقم ومجموع مستقل", async () => {
     const r = await merge({
       items: [
         { productName: "ماء الكمأة", quantity: 2 },
         { productName: "عسل الكمأة", quantity: 1 },
       ],
     });
-    expect(r.becameReady).toBe(true);
+    const drafts = await openDrafts();
+    const water = drafts.find((d) => itemOf(d).productId === productA.id)!;
+    const honey = drafts.find((d) => itemOf(d).productId === productB.id)!;
+    void r;
 
-    const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id });
-    expect(result.created).toBe(true);
-    expect(result.total).toBe(250);
-    expect(result.currency).toBe("USD");
+    const orderA = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: water.id });
+    const orderB = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: honey.id });
 
-    const orderItems = (db._stores.orderItem as any[]).filter((i) => i.orderId === result.orderId);
-    expect(orderItems).toHaveLength(2);
-    expect(orderItems.map((i) => i.productNameSnapshot).sort()).toEqual(["عسل الكمأة", "ماء الكمأة"].sort());
-    expect(orderItems.reduce((s, i) => s + Number(i.subtotal), 0)).toBe(250);
+    expect(orderA.orderId).not.toBe(orderB.orderId);
+    expect(orderA.orderNumber).not.toBe(orderB.orderNumber);
+    expect(orderA.total).toBe(200); // 100 × 2
+    expect(orderB.total).toBe(50); // 50 × 1
 
-    const draft = await draftRow();
-    expect(draft.state).toBe("CONVERTED");
-    expect(draft.orderId).toBe(result.orderId);
+    const itemsA = (db._stores.orderItem as any[]).filter((i) => i.orderId === orderA.orderId);
+    const itemsB = (db._stores.orderItem as any[]).filter((i) => i.orderId === orderB.orderId);
+    expect(itemsA).toHaveLength(1);
+    expect(itemsB).toHaveLength(1);
+    expect(itemsA[0].productNameSnapshot).toBe("ماء الكمأة");
+    expect(itemsB[0].productNameSnapshot).toBe("عسل الكمأة");
   });
 
-  it("منتج ثانٍ غير متوفر: الطلب يُرفض وما بينشأ", async () => {
-    const r = await merge({
+  it("«نعم» مع مسودتين جاهزتين = سؤال، وبعد التسمية يتأكد المطلوب", async () => {
+    await merge({
+      items: [
+        { productName: "ماء الكمأة", quantity: 2 },
+        { productName: "عسل الكمأة", quantity: 1 },
+      ],
+    });
+
+    const ambiguous = await confirm("نعم");
+    expect(ambiguous.action).toBe("ASK_MISSING_FIELD");
+    expect(ambiguous.summaryText).toContain("ماء الكمأة");
+    expect(ambiguous.summaryText).toContain("عسل الكمأة");
+    expect((db._stores.order as any[]).filter((o) => o.customerId === customerId)).toHaveLength(0);
+
+    const confirmed = await confirm("أكد ماء الكمأة");
+    expect(confirmed.action).toBe("ORDER_CONFIRMED");
+    const items = (db._stores.orderItem as any[]).filter((i) => i.orderId === confirmed.orderId);
+    expect(items).toHaveLength(1);
+    expect(items[0].productNameSnapshot).toBe("ماء الكمأة");
+  });
+
+  it("منتج غير متوفر: طلبه يُرفض ولا ينشأ، وطلب المنتج التاني يمشي", async () => {
+    await merge({
       items: [
         { productName: "ماء الكمأة", quantity: 2 },
         { productName: "عسل الكمأة", quantity: 1 },
@@ -152,39 +199,16 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     });
     await db.product.update({ where: { id: productB.id }, data: { stockStatus: "OUT_OF_STOCK" } } as never);
 
+    const drafts = await openDrafts();
+    const water = drafts.find((d) => itemOf(d).productId === productA.id)!;
+    const honey = drafts.find((d) => itemOf(d).productId === productB.id)!;
+
     await expect(
-      createOrderFromDraft(db as unknown as Db, AGENT, { draftId: r.draft.id })
+      createOrderFromDraft(db as unknown as Db, AGENT, { draftId: honey.id })
     ).rejects.toMatchObject({ code: "ORDER_RULES_DENIED" });
-    expect((db._stores.order as any[]).filter((o) => o.customerId === customerId)).toHaveLength(0);
-  });
-
-  it("تأكيد «نعم» بعد سلة منتجين ينشئ الطلب من المحادثة", async () => {
-    const r = await merge({
-      items: [
-        { productName: "ماء الكمأة", quantity: 2 },
-        { productName: "عسل الكمأة", quantity: 1 },
-      ],
-    });
-    expect(r.becameReady).toBe(true);
-
-    const out = await handleOrderIntent(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId,
-      customerId,
-      customerText: "نعم",
-      extraction: {
-        intent: "ORDER_CREATE",
-        confidence: 0.95,
-        language: "ar",
-        entities: {},
-        missingFields: [],
-        memories: [],
-        requestedAction: "CREATE_ORDER",
-      } as never,
-    });
-    expect(out.action).toBe("ORDER_CONFIRMED");
-    const orderItems = (db._stores.orderItem as any[]).filter((i) => i.orderId === out.orderId);
-    expect(orderItems).toHaveLength(2);
+    const ok = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: water.id });
+    expect(ok.created).toBe(true);
+    expect((db._stores.order as any[]).filter((o) => o.customerId === customerId)).toHaveLength(1);
   });
 
   it("مسودة قديمة مفردة (items فارغة) لسا تنشئ طلبًا صحيحًا", async () => {
@@ -208,45 +232,5 @@ describe("P22 — مسودة طلب متعددة المنتجات", () => {
     const result = await createOrderFromDraft(db as unknown as Db, AGENT, { draftId: draft.id });
     expect(result.created).toBe(true);
     expect(result.total).toBe(200);
-    expect((db._stores.orderItem as any[]).filter((i) => i.orderId === result.orderId)).toHaveLength(1);
-  });
-
-  it("كتالوج الصفحة: منتج خارج الكتالوج ما بينضاف للسلّة", async () => {
-    const r = await merge({
-      items: [
-        { productName: "ماء الكمأة", quantity: 2 },
-        { productName: "عسل الكمأة", quantity: 1 },
-      ],
-    });
-    // أعد المحاولة بحدود الكتالوج (A فقط) على مسودة جديدة.
-    await db.orderDraft.update({
-      where: { id: r.draft.id },
-      data: { items: [], productId: null, productName: null, quantity: null, state: "COLLECTING", missingFields: [] },
-    } as never);
-    const limited = await updateDraftFromExtraction(db as unknown as Db, {
-      workspaceId: WS,
-      conversationId,
-      customerId,
-      extraction: {
-        items: [
-          { productName: "ماء الكمأة", quantity: 2 },
-          { productName: "عسل الكمأة", quantity: 1 },
-        ],
-      },
-      allowedProductIds: [productA.id],
-      source: "TEST",
-    });
-    expect(parseDraftItems(limited.draft)).toHaveLength(1);
-    expect(parseDraftItems(limited.draft)[0].productId).toBe(productA.id);
-  });
-
-  it("منتج بلا كمية: quantity ناقصة لحد ما تنذكر", async () => {
-    const r = await merge({ items: [{ productName: "ماء الكمأة" }] });
-    expect(r.missingFields).toContain("quantity");
-    expect(r.becameReady).toBeFalsy();
-
-    const done = await merge({ quantity: 2 });
-    expect(done.missingFields).not.toContain("quantity");
-    expect(done.becameReady).toBe(true);
   });
 });

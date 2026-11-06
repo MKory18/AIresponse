@@ -387,12 +387,13 @@ export function shouldRunMaintenance(cycle: number, every: number): boolean {
  * sequential order: they are cheap DB/bookkeeping work and reordering them
  * would change the meaning of the queue.
  *
- * Default 4, clamped to 1..16. Setting it to 1 restores the old serial
+ * Default 8, clamped to 1..16. Setting it to 1 restores the old serial
  * behaviour exactly (useful for debugging or a constrained host).
+ * Actual capacity = this × number of Worker containers.
  */
 export const AI_JOB_CONCURRENCY = Math.min(
   16,
-  Math.max(1, Math.trunc(Number(process.env.AI_JOB_CONCURRENCY ?? 4)) || 4)
+  Math.max(1, Math.trunc(Number(process.env.AI_JOB_CONCURRENCY ?? 8)) || 8)
 );
 
 function createSemaphore(max: number) {
