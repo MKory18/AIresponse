@@ -71,8 +71,12 @@ export async function buildCoachSuggestions(
     const draft = await (db as unknown as {
       orderDraft: { findFirst: (a: unknown) => Promise<Record<string, unknown> | null> };
     }).orderDraft.findFirst({
-      where: { workspaceId: ctx.workspaceId, conversationId: input.conversationId },
-      orderBy: { updatedAt: "desc" },
+      where: {
+        workspaceId: ctx.workspaceId,
+        conversationId: input.conversationId,
+        state: { in: ["EMPTY", "COLLECTING", "READY", "CONFIRMING"] },
+      },
+      orderBy: { sequence: "desc" },
     });
     if (draft?.productId) {
       const row = await db.product.findUnique({ where: { id: String(draft.productId) } });

@@ -89,16 +89,12 @@ function notifyJobs() {
 }
 
 async function readyDraft(customerId: string) {
+  // قرار المالك: منتج واحد لكل مسودة.
   return updateDraftFromExtraction(db as unknown as Db, {
     workspaceId: WS,
     conversationId: db._stores.conversation[0].id,
     customerId,
-    extraction: {
-      items: [
-        { productName: "ماء الكمأة", quantity: 2 },
-        { productName: "عسل الكمأة", quantity: 1 },
-      ],
-    },
+    extraction: { items: [{ productName: "ماء الكمأة", quantity: 2 }] },
     source: "TEST",
   });
 }
@@ -134,7 +130,6 @@ describe("الترحيل لتلجرام — الطلبات فقط", () => {
     expect(calls[0].body.message_thread_id).toBe(42);
     const text = String(calls[0].body.text);
     expect(text).toContain("ماء الكمأة");
-    expect(text).toContain("عسل الكمأة");
     expect(text).toContain(created.orderNumber);
 
     const audit = (db._stores.auditLog as any[]).filter((a) => a.action === "order.telegram_notified");

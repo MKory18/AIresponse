@@ -85,7 +85,7 @@ export default function Inbox() {
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
-  const [orderDraftCard, setOrderDraftCard] = useState<DraftInfo | null>(null);
+  const [orderDrafts, setOrderDrafts] = useState<DraftInfo[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
@@ -130,9 +130,13 @@ export default function Inbox() {
     const res = await fetch(`/api/order-drafts?conversationId=${conversationId}`);
     if (res.ok) {
       const data = await res.json();
-      setOrderDraftCard(data.items[0] ?? null);
+      // كل منتج مسودة مستقلة — نعرض المفتوحة كلها (الأحدث أولًا من الخادم).
+      const open = (data.items ?? []).filter((d: DraftInfo) =>
+        ["EMPTY", "COLLECTING", "READY", "CONFIRMING"].includes(d.state)
+      );
+      setOrderDrafts(open);
     } else {
-      setOrderDraftCard(null);
+      setOrderDrafts([]);
     }
   }
 
@@ -377,7 +381,7 @@ export default function Inbox() {
       setSelectedId(null);
       setMessages([]);
       setCustomer(null);
-      setOrderDraftCard(null);
+      setOrderDrafts([]);
       setConfirmDelete(false);
       toast.show(t.inbox.deleteConversationDone, "success");
     } catch {
@@ -845,7 +849,7 @@ export default function Inbox() {
       <aside className="glass hidden w-72 shrink-0 overflow-y-auto rounded-2xl xl:block">
         <CustomerPanel
           customer={customer}
-          orderDraft={orderDraftCard}
+          orderDrafts={orderDrafts}
           pageName={selected ? pageNameOf(selected) : null}
           onRefreshProfile={refreshCustomerProfile}
           onResetMemory={resetConversationMemory}
@@ -855,7 +859,7 @@ export default function Inbox() {
         <div className="overflow-y-auto">
           <CustomerPanel
             customer={customer}
-            orderDraft={orderDraftCard}
+            orderDrafts={orderDrafts}
             pageName={selected ? pageNameOf(selected) : null}
             onResetMemory={resetConversationMemory}
           />
