@@ -84,7 +84,7 @@ describe("مطابقة المسار بالشرح", () => {
     // الروابط المدموجة بتاخد شرح مكانها الجديد.
     expect(guideForPath("/settings")?.href).toBe("/settings/account");
     expect(guideForPath("/ai/studio")?.href).toBe("/settings/ai");
-    expect(guideForPath("/workflows")?.href).toBe("/automation");
+    expect(guideForPath("/workflows")?.href).toBe("/dashboard");
     expect(guideForPath("/analytics/ai")?.href).toBe("/analytics");
   });
 

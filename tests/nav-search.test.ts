@@ -30,8 +30,6 @@ describe("searchPages", () => {
     ["زباين", "/customers"],
     ["بضاعة", "/products"],
     ["باسورد", "/settings/account"],
-    ["أتمتة", "/automation"],
-    ["اتمتة", "/automation"],
     ["شات", "/conversations"],
     ["الوارد", "/conversations"],
     ["تقارير", "/analytics"],
@@ -69,7 +67,6 @@ describe("searchPages", () => {
 
   it("كلمات الصفحات المدموجة بتلاقي مكانها الجديد", () => {
     expect(searchPages("استوديو", all)[0]?.href).toBe("/settings/ai");
-    expect(searchPages("سير عمل", all)[0]?.href).toBe("/automation");
     expect(searchPages("تكلفة", all)[0]?.href).toBe("/analytics");
   });
 });

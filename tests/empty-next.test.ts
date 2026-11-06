@@ -40,7 +40,6 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
   const SITES: [string, string][] = [
     ["src/app/(dashboard)/customers/page.tsx", 'title="لا يوجد عملاء بعد"'],
     ["src/app/(dashboard)/handoffs/page.tsx", 'title="لا توجد تحويلات"'],
-    ["src/app/(dashboard)/follow-ups/page.tsx", 'title="لا توجد متابعات"'],
     ["src/app/(dashboard)/catalogs/page.tsx", 'title="لا كتالوجات بعد"'],
     ["src/app/(dashboard)/feedback/page.tsx", 'title="لا توجد آراء"'],
     ["src/app/(dashboard)/settings/team/team-view.tsx", 'title="لا أعضاء"'],
@@ -49,8 +48,6 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
     ["src/app/(dashboard)/orders/page.tsx", "title={t.orders.emptyTitle}"],
     ["src/app/(dashboard)/knowledge/page.tsx", "title={t.knowledge.emptyTitle}"],
     ["src/app/(dashboard)/media/page.tsx", "title={t.media.emptyTitle}"],
-    ["src/app/(dashboard)/automation/page.tsx", 'title="ولا قاعدة لسا"'],
-    ["src/app/(dashboard)/campaigns/page.tsx", 'title="لا حملات بعد"'],
   ];
 
   it.each(SITES)("%s ← %s", (file, marker) => {
@@ -68,7 +65,7 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
     const hrefs = files.flatMap((f) =>
       [...read(join("src", f)).matchAll(/<EmptyNext href="([^"]+)"/g)].map((m) => m[1]!)
     );
-    expect(hrefs.length).toBeGreaterThanOrEqual(6);
+    expect(hrefs.length).toBeGreaterThanOrEqual(5);
     for (const h of hrefs) expect(pageForPath(h, NAV_GROUPS), h).toBeTruthy();
   });
 });

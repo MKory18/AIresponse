@@ -44,6 +44,8 @@ export type MessageItem = {
   /** P4: internal team note — rendered distinctly, never sent or retried. */
   isNote?: boolean;
   senderId?: string | null;
+  /** اسم مرسل الرسالة (الموظف أو الذكاء) — للعرض الداخلي فقط. */
+  senderName?: string | null;
 };
 
 export type CustomerDetail = {
