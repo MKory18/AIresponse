@@ -2,6 +2,7 @@ import type { Prisma, MessageType, ConversationStatus } from "@prisma/client";
 import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
+import { publishRealtime } from "@/modules/realtime/events";
 import { type Db, type ActorContext, type Paginated } from "@/modules/customers/service";
 
 // ---- Guards ----
@@ -517,6 +518,12 @@ export async function postOutboundMessage(
       senderType: "HUMAN",
     })
   );
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "message.outbound",
+    conversationId,
+    entityId: message.id,
+  });
 
   return message;
 }
@@ -530,6 +537,11 @@ export async function markConversationRead(db: Db, ctx: ActorContext, conversati
     data: { unreadCount: 0 },
   });
   await eventBus.publish(makeEvent("MessageRead", ctx.workspaceId, { conversationId, unreadCount: 0 }));
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "conversation.updated",
+    conversationId,
+  });
   return updated;
 }
 
@@ -538,6 +550,11 @@ export async function markConversationUnread(db: Db, ctx: ActorContext, conversa
   const updated = await db.conversation.update({
     where: { id: conversationId },
     data: { unreadCount: { increment: 1 } },
+  });
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "conversation.updated",
+    conversationId,
   });
   return updated;
 }
@@ -590,6 +607,11 @@ export async function deleteConversation(db: Db, ctx: ActorContext, conversation
   await eventBus.publish(
     makeEvent("ConversationUpdated", ctx.workspaceId, { conversationId, type: "ConversationDeleted" })
   );
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "conversation.updated",
+    conversationId,
+  });
   return updated;
 }
 
