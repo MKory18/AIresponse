@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ClipboardList, Printer, Search, Trash2 } from "lucide-react";
 import { formatNumber, label, t } from "@/lib/i18n";
@@ -12,6 +12,7 @@ import { Input, Select } from "@/components/ui/input";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { useRealtime } from "@/components/realtime/use-realtime";
 
 type Order = {
   id: string;
@@ -59,6 +60,20 @@ export default function OrdersPage() {
   useEffect(() => {
     setLoading(true);
     load().finally(() => setLoading(false));
+  }, [load]);
+
+  // لحظي: طلب جديد أو ترحيل تلجرام يظهر فورًا بلا تحديث. واحتياطي كل دقيقة.
+  const lastLive = useRef(0);
+  useRealtime((change) => {
+    if (!change.type.startsWith("order")) return;
+    const now = Date.now();
+    if (now - lastLive.current < 4000) return;
+    lastLive.current = now;
+    void load();
+  });
+  useEffect(() => {
+    const interval = setInterval(() => void load(), 60000);
+    return () => clearInterval(interval);
   }, [load]);
 
   async function removeOrder(order: Order) {

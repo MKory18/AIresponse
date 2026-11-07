@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
+import { publishRealtime } from "@/modules/realtime/events";
 import type { ActorContext, Db } from "@/modules/customers/service";
 
 export type HandoffReason =
@@ -77,6 +78,12 @@ export async function createHandoff(
   await eventBus.publish(
     makeEvent("ConversationUpdated", params.workspaceId, { type: "HumanHandoffCreated", handoffId: handoff.id, reason: params.reason })
   );
+  void publishRealtime(db, {
+    workspaceId: params.workspaceId,
+    type: "conversation.updated",
+    conversationId: params.conversationId,
+    entityId: handoff.id,
+  });
   return handoff;
 }
 
@@ -107,6 +114,12 @@ export async function claimHandoff(db: Db, ctx: ActorContext, handoffId: string)
     entityType: "HumanHandoff",
     entityId: handoff.id,
   });
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "conversation.updated",
+    conversationId: handoff.conversationId,
+    entityId: handoff.id,
+  });
   return db.humanHandoff.findUniqueOrThrow({ where: { id: handoff.id } });
 }
 
@@ -129,6 +142,12 @@ export async function releaseHandoff(db: Db, ctx: ActorContext, handoffId: strin
     userId: ctx.userId,
     action: "human.handoff_released",
     entityType: "HumanHandoff",
+    entityId: handoff.id,
+  });
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "conversation.updated",
+    conversationId: handoff.conversationId,
     entityId: handoff.id,
   });
   return updated;
@@ -154,6 +173,12 @@ export async function resolveHandoff(db: Db, ctx: ActorContext, handoffId: strin
   await eventBus.publish(
     makeEvent("ConversationUpdated", ctx.workspaceId, { type: "HumanHandoffResolved", handoffId: handoff.id })
   );
+  void publishRealtime(db, {
+    workspaceId: ctx.workspaceId,
+    type: "conversation.updated",
+    conversationId: handoff.conversationId,
+    entityId: handoff.id,
+  });
   return updated;
 }
 
