@@ -652,6 +652,9 @@ export default function Inbox() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tone={realtimeOpen ? "DELIVERED" : "PENDING"} dot>
+                  {realtimeOpen ? "مباشر" : "غير متصل"}
+                </Badge>
                 <Badge tone={aiMode ? "AI_ACTIVE" : "HUMAN_ACTIVE"} dot>
                   <Bot size={11} />
                   {aiMode ? t.inbox.replyWithAi : t.inbox.replyManually}
