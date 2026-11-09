@@ -1,7 +1,7 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { listParamsSchema, productInputSchema } from "@/modules/products/schemas";
-import { createProduct, listProducts } from "@/modules/products/service";
+import { createProduct, listProducts, redactProductForActor } from "@/modules/products/service";
 
 export const GET = createHandler(
   { query: listParamsSchema, permission: "products.read" },
@@ -14,7 +14,7 @@ export const GET = createHandler(
       cursor: query.cursor,
       limit: query.limit,
     });
-    return ok(result);
+    return ok({ ...result, items: result.items.map((p) => redactProductForActor(p, auth!)) });
   }
 );
 
@@ -22,6 +22,6 @@ export const POST = createHandler(
   { body: productInputSchema, permission: "products.write" },
   async ({ auth, body }) => {
     const product = await createProduct(prisma, auth!, body);
-    return ok(product, 201);
+    return ok(redactProductForActor(product, auth!), 201);
   }
 );

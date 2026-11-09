@@ -248,7 +248,7 @@ export async function runExtraction(
     const names =
       ids.length > 0
         ? ((await db.product.findMany({
-            where: { workspaceId: params.workspaceId, id: { in: ids } },
+            where: { workspaceId: params.workspaceId, id: { in: ids }, isActive: true, isArchived: false },
             select: { name: true },
           })) as { name: string }[]).map((p) => p.name)
         : [];

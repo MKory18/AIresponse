@@ -110,8 +110,24 @@ export async function updateCatalog(
  * else in the schema points at catalogs (orders point at products), so no
  * historical row loses its meaning; the audit row records who did it.
  */
-export async function deleteCatalog(db: Db, workspaceId: string, catalogId: string) {
+export async function deleteCatalog(
+  db: Db,
+  workspaceId: string,
+  catalogId: string,
+  opts: { force?: boolean } = {}
+) {
   await ownCatalog(db, workspaceId, catalogId);
+  // آخر كتالوج + صفحات مربوطة فيه: حذفه بيرجّع النظام للوضع القديم (كل المنتجات
+  // مفتوحة على كل الصفحات). ما بنسمح إلا بتأكيد صريح.
+  if (!opts.force) {
+    const total = await db.catalog.count({ where: { workspaceId } });
+    const assigned = await db.catalogPageAssignment.count({ where: { catalogId } });
+    if (total === 1 && assigned > 0) {
+      throw new ConflictError(
+        "هذا آخر كتالوج وفيه صفحات مربوطة — حذفه بيفتح كل المنتجات على كل الصفحات. أعد الطلب بـ force=1 للتأكيد."
+      );
+    }
+  }
   // Links first, then the catalog: explicit on every database (the schema
   // also cascades, as a second guarantee). Products are never touched.
   await db.catalogProduct.deleteMany({ where: { catalogId } });

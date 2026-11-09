@@ -36,10 +36,10 @@ export const PATCH = createHandler(
 );
 
 export const DELETE = createHandler(
-  { permission: "catalogs.write" },
-  async ({ auth, params }) => {
+  { permission: "catalogs.write", query: z.object({ force: z.enum(["1", "true"]).optional() }) },
+  async ({ auth, params, query }) => {
     const { id } = params as { id: string };
-    await deleteCatalog(prisma, auth!.workspaceId, id);
+    await deleteCatalog(prisma, auth!.workspaceId, id, { force: Boolean(query.force) });
     await recordAudit(prisma, {
       workspaceId: auth!.workspaceId,
       userId: auth!.userId,

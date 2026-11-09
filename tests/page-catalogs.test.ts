@@ -286,3 +286,28 @@ describe("wiring — routes, permissions, audit, AI gate", () => {
     expect(catalogBlock + linkBlock).not.toMatch(/price/i);
   });
 });
+
+describe("حذف آخر كتالوج مربوط بصفحة", () => {
+  it("يُرفض بدون force ويُسمح مع force", async () => {
+    const channel = (await db.channel.create({
+      data: { workspaceId: WS, type: "FACEBOOK", status: "CONNECTED", displayName: "P", externalId: "pg-last" },
+    } as never)) as any;
+    const c = (await createCatalog(db as Db, WS, { name: "Only" })) as any;
+    await assignCatalogPage(db as Db, WS, { catalogId: c.id, channelId: channel.id });
+    await expect(deleteCatalog(db as Db, WS, c.id)).rejects.toThrow(/آخر كتالوج/);
+    expect(await listCatalogs(db as Db, WS)).toHaveLength(1);
+    await deleteCatalog(db as Db, WS, c.id, { force: true });
+    expect(await listCatalogs(db as Db, WS)).toHaveLength(0);
+  });
+
+  it("كتالوج ثانٍ موجود = حذف عادي بلا force", async () => {
+    const channel = (await db.channel.create({
+      data: { workspaceId: WS, type: "FACEBOOK", status: "CONNECTED", displayName: "P2", externalId: "pg-two" },
+    } as never)) as any;
+    const a = (await createCatalog(db as Db, WS, { name: "A" })) as any;
+    await createCatalog(db as Db, WS, { name: "B" });
+    await assignCatalogPage(db as Db, WS, { catalogId: a.id, channelId: channel.id });
+    await deleteCatalog(db as Db, WS, a.id);
+    expect(await listCatalogs(db as Db, WS)).toHaveLength(1);
+  });
+});

@@ -117,8 +117,13 @@ export default function CatalogsPage() {
   async function remove() {
     if (!deleting) return;
     try {
-      const res = await fetch(`/api/catalogs/${deleting.id}`, { method: "DELETE" });
-      const json = await res.json().catch(() => ({}));
+      let res = await fetch(`/api/catalogs/${deleting.id}`, { method: "DELETE" });
+      let json = await res.json().catch(() => ({}));
+      // آخر كتالوج وفيه صفحات: نطلب تأكيداً صريحاً قبل ما تنفتح كل المنتجات على كل الصفحات.
+      if (res.status === 409 && window.confirm(`${json.message || "هذا آخر كتالوج وفيه صفحات مربوطة."}`)) {
+        res = await fetch(`/api/catalogs/${deleting.id}?force=1`, { method: "DELETE" });
+        json = await res.json().catch(() => ({}));
+      }
       if (!res.ok) throw new Error(json.error || "تعذر الحذف");
       toast.show("حُذف الكتالوج — المنتجات نفسها لم تُمس", "success");
       setDeleting(null);

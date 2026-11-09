@@ -342,3 +342,20 @@ export async function reorderProductMedia(
     if (link) await db.productMedia.update({ where: { id: link.id }, data: { sortOrder: i } });
   }
 }
+
+/** حقول مالية حساسة — تظهر فقط لمن يملك `products.wholesale` (إنفاذ خادمي). */
+export const WHOLESALE_ONLY_FIELDS = ["wholesalePrice", "discountCap"] as const;
+
+/**
+ * يشيل سعر الجملة وسقف الخصم من أي منتج يُرجَع بالـ API لمن لا يملك
+ * `products.wholesale` (مثلاً SALES_AGENT · SUPPORT_AGENT · VIEWER).
+ */
+export function redactProductForActor<T extends object>(
+  product: T,
+  actor: { can: (permission: "products.wholesale") => boolean }
+): T {
+  if (actor.can("products.wholesale")) return product;
+  const copy: Record<string, unknown> = { ...(product as Record<string, unknown>) };
+  for (const f of WHOLESALE_ONLY_FIELDS) delete copy[f];
+  return copy as T;
+}

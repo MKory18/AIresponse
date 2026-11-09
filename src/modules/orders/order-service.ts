@@ -72,6 +72,10 @@ export async function createOrderFromDraft(
   }
 
   // P22 — سلة: كل عنصر يُتحقق ويُسعّر من قاعدة البيانات (بلا أسعار من الموديل).
+  // نقطة مرجعية لنسخة المسودة — لو تغيّرت قبل الكتابة (تعديل متزامن) نرفض التأكيد.
+  const baselineUpdatedAt = new Date(
+    ((await db.orderDraft.findUnique({ where: { id: draft.id } })) as OrderDraft | null)?.updatedAt ?? draft.updatedAt
+  );
   const draftItems = parseDraftItems(draft);
   const itemIds = [...new Set(draftItems.map((i) => i.productId).filter((v): v is string => Boolean(v)))];
   const products = itemIds.length
@@ -196,6 +200,20 @@ export async function createOrderFromDraft(
   // idempotencyKey makes a concurrent confirmation resolve to one order
   // instead of a 500.
   const writeOrder = async (tx: Db): Promise<Order> => {
+    // حجز ذرّي: المسودة لسا مفتوحة وما تغيّرت منذ ما حسبنا السعر. إذا عدّلها
+    // العميل بنفس اللحظة (كمية/عنوان/منتج) يفشل الحجز ولا ينشأ طلب بقيم قديمة.
+    const claimed = (await tx.orderDraft.updateMany({
+      where: {
+        id: draft.id,
+        state: { notIn: ["CONVERTED", "CANCELLED"] },
+        updatedAt: { gte: baselineUpdatedAt, lte: baselineUpdatedAt },
+      },
+      data: { state: "CONVERTED" },
+    })) as { count: number };
+    if (claimed.count !== 1) {
+      throw new AppError("Draft changed during confirmation — please review and confirm again", 409, "DRAFT_CHANGED");
+    }
+
     const created = (await tx.order.create({
       data: {
         workspaceId: ctx.workspaceId,
@@ -206,6 +224,8 @@ export async function createOrderFromDraft(
         status,
         confirmationStatus: "CONFIRMED_BY_CUSTOMER",
         deliveryAddress: draft.rawAddress,
+        recipientName: draft.customerName ?? null,
+        recipientPhone: draft.phone ?? null,
         province: draft.province,
         notes: draft.notes ?? null,
         subtotal: breakdown.subtotal,
@@ -240,6 +260,27 @@ export async function createOrderFromDraft(
     const anyDb = db as unknown as { $transaction?: <T>(fn: (tx: Db) => Promise<T>) => Promise<T> };
     order = typeof anyDb.$transaction === "function" ? await anyDb.$transaction(writeOrder) : await writeOrder(db);
   } catch (err) {
+    // تأكيد متزامن آخر سبقنا وحوّل المسودة: نرجّع طلبه بدل خطأ (نفس سلوك التكرار).
+    if ((err as { code?: string })?.code === "DRAFT_CHANGED") {
+      // الفائز ممكن لسا ما التزم (commit) — نمهله شوي بدل ما نرمي خطأ للمكرر.
+      let latest = (await db.orderDraft.findUnique({ where: { id: draft.id } })) as OrderDraft | null;
+      for (let i = 0; i < 8 && !latest?.orderId; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        latest = (await db.orderDraft.findUnique({ where: { id: draft.id } })) as OrderDraft | null;
+      }
+      const winner = latest?.orderId ? await db.order.findUnique({ where: { id: latest.orderId } }) : null;
+      if (winner) {
+        return {
+          orderId: winner.id,
+          orderNumber: winner.orderNumber,
+          status: winner.status,
+          total: Number(winner.total),
+          currency: winner.currency,
+          created: false,
+          rules,
+        };
+      }
+    }
     // A concurrent confirmation won the race on the unique idempotencyKey.
     if ((err as { code?: string })?.code === "P2002") {
       const existing = await db.order.findUnique({ where: { idempotencyKey } });
@@ -397,7 +438,7 @@ export async function createOrderFromDraft(
         currency: breakdown.currency,
         status,
         customerName: customer?.name,
-        customerPhone: customer?.phone,
+        customerPhone: order.recipientPhone ?? customer?.phone,
         includePii: telegramOrderPiiEnabled(),
       });
       const thread = topicId ? Number(topicId) : NaN;

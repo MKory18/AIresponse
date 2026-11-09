@@ -1099,6 +1099,9 @@ model Order {
   paymentStatus      PaymentStatus      @default(UNPAID)
   fulfillmentStatus  FulfillmentStatus  @default(UNFULFILLED)
   deliveryAddress    String?
+  // لقطة المستلم لحظة التأكيد (ممكن تختلف عن ملف العميل — مثلاً طلب هدية).
+  recipientName      String?
+  recipientPhone     String?
   province           String?
   notes              String?
   subtotal           Decimal            @default(0) @db.Decimal(12, 2)
