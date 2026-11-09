@@ -1,4 +1,5 @@
 ﻿import type { Prisma, StockStatus } from "@prisma/client";
+import { customerFacingPriceTiers } from "./price-tiers";
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
@@ -99,11 +100,19 @@ export async function createProduct(db: Db, ctx: ActorContext, input: ProductInp
   // تدقيق الأسعار قبل الإنشاء — رفض صريح ما يخلّي منتج مأكول بلا أسعار سليمة.
   const tiers = normalizeTiers(input.priceTiers, db);
 
-  const product = await db.product.create({
-    data: { ...input, priceTiers: undefined, workspaceId: ctx.workspaceId } as Prisma.ProductUncheckedCreateInput,
+  const write = async (tx: Db) => {
+    const created = await tx.product.create({
+      data: { ...input, priceTiers: undefined, workspaceId: ctx.workspaceId } as Prisma.ProductUncheckedCreateInput,
+    });
+    if (tiers.length > 0) await tx.productPrice.createMany({ data: tiers.map((t) => ({ productId: created.id, label: t.label, price: t.price })) });
+    return created;
+  };
+  const anyDb = db as unknown as { $transaction?: <R>(fn: (tx: Db) => Promise<R>) => Promise<R> };
+  const product = await (typeof anyDb.$transaction === "function" ? anyDb.$transaction(write) : write(db)).catch((err: unknown) => {
+    // Two requests can pass the SKU check above at the same moment.
+    if ((err as { code?: string })?.code === "P2002") throw new ConflictError("A product with this SKU already exists");
+    throw err;
   });
-
-  if (tiers.length > 0) await db.productPrice.createMany({ data: tiers.map((t) => ({ productId: product.id, label: t.label, price: t.price })) });
 
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
@@ -357,5 +366,6 @@ export function redactProductForActor<T extends object>(
   if (actor.can("products.wholesale")) return product;
   const copy: Record<string, unknown> = { ...(product as Record<string, unknown>) };
   for (const f of WHOLESALE_ONLY_FIELDS) delete copy[f];
+  if (Array.isArray(copy.priceTiers)) copy.priceTiers = customerFacingPriceTiers(copy.priceTiers as { label: string }[]);
   return copy as T;
 }

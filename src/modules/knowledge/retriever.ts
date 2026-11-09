@@ -40,12 +40,21 @@ export async function retrieveKnowledge(
       // structured answers keep working exactly as before.
       if (vectorStore.size === 0) return [];
       const provider = getEmbeddingProvider();
+      // Documents tied to a product outside this page's catalog stay out; general
+      // documents (no product) apply to every page.
+      const excluded = params.allowedProductIds
+        ? await db.knowledgeDocument.findMany({
+            where: { workspaceId: params.workspaceId, productId: { not: null, notIn: params.allowedProductIds } },
+            select: { id: true },
+          })
+        : [];
       const embedding = await provider.embed(params.query);
       return vectorStore.search({
         embedding,
         workspaceId: params.workspaceId,
         limit: params.limit ?? 5,
         metadataFilters: params.category ? { category: params.category } : undefined,
+        excludeDocumentIds: excluded.map((d) => d.id),
       });
     })(),
   ]);

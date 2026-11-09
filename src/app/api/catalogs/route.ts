@@ -2,14 +2,8 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
+import { catalogListQuerySchema } from "@/modules/catalog/schemas";
 import { createCatalog, listCatalogs } from "@/modules/catalog/service";
-
-const listQuery = z.object({
-  q: z.string().trim().max(100).optional(),
-  isActive: z.coerce.boolean().optional(),
-  channelId: z.string().cuid().optional(),
-  sort: z.enum(["name", "updated"]).optional(),
-});
 
 const createBody = z.object({
   name: z.string().trim().min(2).max(80),
@@ -18,7 +12,7 @@ const createBody = z.object({
 });
 
 export const GET = createHandler(
-  { query: listQuery, permission: "catalogs.read" },
+  { query: catalogListQuerySchema, permission: "catalogs.read" },
   async ({ auth, query }) => {
     const catalogs = await listCatalogs(prisma, auth!.workspaceId, query);
     return ok({ catalogs });

@@ -91,6 +91,7 @@ export const knowledgeCreateSchema = z.object({
   category: z.enum(["PRODUCT", "FAQ", "POLICY", "DELIVERY", "PAYMENT", "COMPANY", "DOCUMENT", "CUSTOM"]).optional(),
   sourceType: z.string().trim().max(50).optional(),
   sourceUrl: z.string().url().max(2048).nullable().optional(),
+  productId: z.string().cuid().nullable().optional(),
 });
 
 export const knowledgeUpdateSchema = z.object({
@@ -98,6 +99,7 @@ export const knowledgeUpdateSchema = z.object({
   content: z.string().min(1).max(500_000).optional(),
   category: z.enum(["PRODUCT", "FAQ", "POLICY", "DELIVERY", "PAYMENT", "COMPANY", "DOCUMENT", "CUSTOM"]).optional(),
   isActive: z.boolean().optional(),
+  productId: z.string().cuid().nullable().optional(),
 });
 
 export const faqCreateSchema = z.object({

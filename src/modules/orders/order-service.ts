@@ -1,3 +1,6 @@
+import { childLogger } from "@/core/logger";
+import { enqueueJob } from "@/modules/jobs/service";
+import { deliverOrderTelegram } from "./telegram-delivery";
 import { randomId } from "@/core/crypto";
 import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
@@ -12,6 +15,8 @@ import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
 import { telegramNotifiedOrderIds } from "./telegram-status";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
+
+const log = childLogger("orders");
 
 export interface CreateOrderFromDraftResult {
   orderId: string;
@@ -144,11 +149,19 @@ export async function createOrderFromDraft(
     throw new AppError("Order items use different currencies", 422, "MIXED_CURRENCY");
   }
 
+  // variantId can come from the model: only a variant of this exact product counts.
+  const variantIds = [...new Set(orderLines.map((l) => l.item.variantId).filter((id): id is string => Boolean(id)))];
+  const variants = variantIds.length
+    ? ((await db.productVariant.findMany({ where: { id: { in: variantIds } } })) as { id: string; productId: string; price: Prisma.Decimal }[])
+    : [];
+  const variantFor = (line: (typeof orderLines)[number]) =>
+    variants.find((v) => v.id === line.item.variantId && v.productId === line.product.id) ?? null;
+
   // Pricing from Product DB — AI price input does not exist in this function.
   const breakdown = await calculateCartPricing(db, {
     workspaceId: ctx.workspaceId,
     items: orderLines.map((line) => ({
-      price: line.product.price,
+      price: variantFor(line)?.price ?? line.product.price,
       quantity: line.quantity,
       currency: line.product.currency,
     })),
@@ -238,7 +251,7 @@ export async function createOrderFromDraft(
         items: {
           create: orderLines.map((line, idx) => ({
             productId: line.product.id,
-            variantId: line.item.variantId,
+            variantId: variantFor(line)?.id ?? null,
             productNameSnapshot: line.product.name,
             skuSnapshot: line.product.sku,
             unitPrice: breakdown.lines[idx].unitPrice,
@@ -406,64 +419,18 @@ export async function createOrderFromDraft(
   // ترحيل الطلب لتلجرام — مرة واحدة عند إنشاء الطلب الرسمي (المسودة ما بتترحّل).
   // المصدر الأول: إعدادات المساحة (نفس اللي تنحفظ من الواجهة)، وبعدها متغيرات البيئة.
   try {
-    const tg = await (db as any).telegramOrderSettings?.findUnique?.({
-      where: { workspaceId: ctx.workspaceId },
-      select: { enabled: true, botTokenEnc: true, chatId: true, topicId: true },
-    });
-    let token: string | undefined;
-    let chatId: string | undefined;
-    let topicId: string | undefined;
-    if (tg?.enabled && tg.botTokenEnc && tg.chatId) {
-      const { decryptSecret } = await import("@/core/crypto");
-      token = decryptSecret(tg.botTokenEnc);
-      chatId = tg.chatId;
-      topicId = tg.topicId ?? undefined;
-    } else {
-      token = process.env.TELEGRAM_BOT_TOKEN;
-      chatId = process.env.TELEGRAM_ORDER_CHAT_ID;
-    }
-    if (token && chatId) {
-      const { getTelegramClient } = await import("@/modules/channels/telegram/client");
-      const { orderNotificationText, telegramOrderPiiEnabled } = await import("./notify");
-      // سيستم 1 — بلا بيانات زبون افتراضيًا؛ المالك يفعّلها صريحًا.
-      const text = orderNotificationText({
-        orderNumber,
-        // P22 — كل منتجات الطلب في سطر واحد (الكمية مدمجة بالاسم عند التعدد).
-        productName:
-          orderLines.length === 1
-            ? primary.product.name
-            : orderLines.map((l) => `${l.product.name} × ${l.quantity}`).join("، "),
-        quantity: orderLines.length === 1 ? primary.quantity : null,
-        total: breakdown.total,
-        currency: breakdown.currency,
-        status,
-        customerName: customer?.name,
-        customerPhone: order.recipientPhone ?? customer?.phone,
-        includePii: telegramOrderPiiEnabled(),
-      });
-      const thread = topicId ? Number(topicId) : NaN;
-      const result = await getTelegramClient().sendMessage(token, chatId, {
-        text,
-        ...(Number.isInteger(thread) && thread > 0 ? { messageThreadId: thread } : {}),
-      });
-      // سجل الإرسال = مصدر شعار «تم ترحيله للتلجرام» بالقائمة.
-      await recordAudit(db, {
-        workspaceId: ctx.workspaceId,
-        userId: ctx.userId,
-        action: "order.telegram_notified",
-        entityType: "Order",
-        entityId: order.id,
-        metadata: { orderNumber, chatId, messageId: result.messageId },
-      });
-      // Realtime: شعار «تم ترحيله للتلجرام» يظهر فورًا.
-      void publishRealtime(db, {
-        workspaceId: ctx.workspaceId,
-        type: "order.telegram",
-        entityId: order.id,
-      });
-    }
-  } catch {
-    // الإشعار best-effort — غيابه ما يوقف إنشاء الطلب
+    await deliverOrderTelegram(db, { workspaceId: ctx.workspaceId, userId: ctx.userId, orderId: order.id });
+  } catch (err) {
+    // الإشعار ما بيوقف إنشاء الطلب؛ الفشل بينحفظ كمهمة إعادة محاولة.
+    await enqueueJob(db, {
+      workspaceId: ctx.workspaceId,
+      type: "notify_order_telegram",
+      payload: { orderId: order.id, userId: ctx.userId },
+      runAfter: new Date(Date.now() + 30_000),
+      idempotencyKey: `tg-order:${ctx.workspaceId}:${order.id}`,
+      maxAttempts: 8,
+    }).catch(() => undefined);
+    log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_telegram_failed");
   }
 
   return {
@@ -593,6 +560,11 @@ export async function updateOrderFromChat(
 
   const changed: string[] = [];
   const data: Prisma.OrderUncheckedUpdateInput = {};
+  let itemChange: { quantity: number; subtotal: number } | null = null;
+  if (params.phone && params.phone !== (order as { recipientPhone?: string | null }).recipientPhone) {
+    data.recipientPhone = params.phone;
+    changed.push("phone");
+  }
   const newProvince = params.province ?? order.province;
   if (params.province && params.province !== order.province) {
     data.province = params.province;
@@ -629,10 +601,7 @@ export async function updateOrderFromChat(
     if (!breakdown.deliveryAvailable) {
       throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");
     }
-    await db.orderItem.updateMany({
-      where: { orderId: order.id },
-      data: { quantity: params.quantity, subtotal: breakdown.subtotal },
-    });
+    itemChange = { quantity: params.quantity, subtotal: breakdown.subtotal };
     data.subtotal = breakdown.subtotal;
     data.discount = breakdown.discount;
     data.deliveryFee = breakdown.deliveryFee;
@@ -655,9 +624,12 @@ export async function updateOrderFromChat(
     data.total = Number(order.subtotal) - Number(order.discount) + delivery.fee;
   }
 
-  const updated = Object.keys(data).length
-    ? ((await db.order.update({ where: { id: order.id }, data })) as Order)
-    : order;
+  const writeEdit = async (tx: Db): Promise<Order> => {
+    if (itemChange) await tx.orderItem.updateMany({ where: { orderId: order.id }, data: itemChange });
+    return Object.keys(data).length ? ((await tx.order.update({ where: { id: order.id }, data })) as Order) : order;
+  };
+  const txDb = db as unknown as { $transaction?: <R>(fn: (tx: Db) => Promise<R>) => Promise<R> };
+  const updated = await (typeof txDb.$transaction === "function" ? txDb.$transaction(writeEdit) : writeEdit(db));
 
   if (params.phone) {
     // Contact changes go through the confidence-gated customer merge.
@@ -775,8 +747,12 @@ export async function deleteOrder(db: Db, ctx: ActorContext, orderId: string) {
 
   // الترتيب صريح (بنود ثم الطلب): مضمون على القاعدة الحقيقية بالقيد Cascade
   // وعلى البديل بالذاكرة بالحذف المباشر — نفس النتيجة بالحالتين.
-  await db.orderItem.deleteMany({ where: { orderId: order.id } });
-  await db.order.delete({ where: { id: order.id } });
+  const writeDelete = async (tx: Db) => {
+    await tx.orderItem.deleteMany({ where: { orderId: order.id } });
+    await tx.order.delete({ where: { id: order.id } });
+  };
+  const txDb = db as unknown as { $transaction?: <R>(fn: (tx: Db) => Promise<R>) => Promise<R> };
+  await (typeof txDb.$transaction === "function" ? txDb.$transaction(writeDelete) : writeDelete(db));
 
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,

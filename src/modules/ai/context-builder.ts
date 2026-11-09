@@ -1,3 +1,4 @@
+import { customerFacingPriceTiers } from "@/modules/products/price-tiers";
 import type { KnowledgeCategory } from "@prisma/client";
 import { NotFoundError } from "@/core/errors";
 import type { Db } from "@/modules/customers/service";
@@ -111,9 +112,10 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
       objections: product.objections,
       salesNotes: product.salesNotes,
       faqs: product.faqs.map((f) => ({ id: f.id, question: f.question, answer: f.answer })),
-      priceTiers: ((product as unknown as { priceTiers?: { label: string; price: string }[] }).priceTiers ?? []).map(
-        (t) => ({ label: t.label, price: t.price.toString() })
-      ),
+      // Wholesale and distributor prices must never be quoted to retail customers.
+      priceTiers: customerFacingPriceTiers(
+        (product as unknown as { priceTiers?: { label: string; price: string }[] }).priceTiers ?? []
+      ).map((t) => ({ label: t.label, price: t.price.toString() })),
       ...(compliance ? { compliance } : {}),
     } as AIContext["product"],
     citations: [

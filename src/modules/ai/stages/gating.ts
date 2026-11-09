@@ -167,6 +167,58 @@ export async function runGating(
           hasFailed ? "ai_ordering_proceed_older_failed" : "ai_ordering_proceed_older_stale"
         );
       }
+
+      // The check above only covers the conversation's FIRST message. A later
+      // older message can still be in flight on another worker, and it must be
+      // answered first — otherwise a confirmation is handled before the address
+      // it depends on and no order gets created.
+      const recentOlder = (await timed("ordering", () =>
+        db.message.findMany({
+          where: {
+            conversationId: params.conversationId,
+            direction: "INBOUND",
+            senderType: "CUSTOMER",
+            deletedAt: null,
+            OR: [
+              { createdAt: { lt: msgTime } },
+              { createdAt: msgTime, id: { lt: message.id } },
+            ],
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 20,
+          select: { id: true },
+        })
+      )) as Array<{ id: string }>;
+      const answeredOlder = (await timed("ordering", () =>
+        db.aIUsageLog.findMany({
+          where: {
+            messageId: { in: recentOlder.map((m) => m.id) },
+            purpose: "RESPONSE",
+            status: { in: ["SUCCESS", "HANDOFF"] },
+          },
+          select: { messageId: true },
+        })
+      )) as Array<{ messageId: string | null }>;
+      const answered = new Set(answeredOlder.map((l) => l.messageId));
+      const pendingKeys = recentOlder.filter((m) => !answered.has(m.id)).map((m) => `ai:${m.id}`);
+      if (pendingKeys.length > 0) {
+        const liveOlder = (await timed("ordering", () =>
+          (db as any).backgroundJob.findFirst({
+            where: {
+              type: "process_ai_message",
+              idempotencyKey: { in: pendingKeys },
+              status: { in: ["PENDING", "PROCESSING"] },
+            },
+            select: { idempotencyKey: true },
+          })
+        )) as { idempotencyKey: string } | null;
+        if (liveOlder) {
+          const olderMessageId = liveOlder.idempotencyKey.slice("ai:".length);
+          log.info({ conversationId: conversation.id, messageId: message.id, olderMessageId }, "ai_deferred_older_sibling");
+          logTimings("DEFERRED", { olderMessageId });
+          return { terminal: { status: "DEFERRED", error: `OLDER_SIBLING_UNDECIDED:${olderMessageId}` } };
+        }
+      }
     }
   }
 

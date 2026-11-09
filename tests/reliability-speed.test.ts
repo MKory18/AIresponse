@@ -91,6 +91,122 @@ describe("Phase 3 — same-cycle: مهمة أنشئت خلال الدورة تُ
   });
 });
 
+describe("أولوية مهام الرد على العميل", () => {
+  it("مهمة الرد (process_ai_message) تتنفّذ قبل مهام ثانوية أقدم منها", async () => {
+    const db = createFakeDb() as FakeDb;
+    const ran: string[] = [];
+    const handlers = {
+      bookkeeping: async () => {
+        ran.push("bookkeeping");
+        return { success: true } as const;
+      },
+      process_ai_message: async () => {
+        ran.push("reply");
+        return { success: true } as const;
+      },
+    };
+    // 5 مهام ثانوية أقدم، ثم مهمة رد واحدة أحدث. الحد 3 → الرد لازم يدخل الدفعة.
+    for (let i = 0; i < 5; i++) {
+      await db.backgroundJob.create({
+        data: { workspaceId: WS, type: "bookkeeping", payload: {}, runAfter: new Date(0), createdAt: new Date(1000 + i) },
+      } as never);
+    }
+    await db.backgroundJob.create({
+      data: { workspaceId: WS, type: "process_ai_message", payload: { conversationId: "c1" }, runAfter: new Date(0), createdAt: new Date(5000) },
+    } as never);
+
+    await processPendingJobs(db as unknown as Db, handlers, { limit: 3, maintenance: false });
+    expect(ran).toContain("reply");
+  });
+});
+
+describe("مهام بداية الرد والمهام البطيئة", () => {
+  it("حدث الويبهوك يدخل الدفعة قبل مهام ثانوية أقدم منه", async () => {
+    const db = createFakeDb() as FakeDb;
+    const ran: string[] = [];
+    const handlers = {
+      bookkeeping: async () => {
+        ran.push("bookkeeping");
+        return { success: true } as const;
+      },
+      process_webhook_event: async () => {
+        ran.push("webhook");
+        return { success: true } as const;
+      },
+    };
+    for (let i = 0; i < 5; i++) {
+      await db.backgroundJob.create({
+        data: { workspaceId: WS, type: "bookkeeping", payload: {}, runAfter: new Date(0), createdAt: new Date(1000 + i) },
+      } as never);
+    }
+    await db.backgroundJob.create({
+      data: { workspaceId: WS, type: "process_webhook_event", payload: {}, runAfter: new Date(0), createdAt: new Date(5000) },
+    } as never);
+
+    await processPendingJobs(db as unknown as Db, handlers, { limit: 3, maintenance: false });
+    expect(ran).toContain("webhook");
+  });
+
+  function trackingHandler() {
+    const state = { active: 0, max: 0 };
+    const handler = async () => {
+      state.active += 1;
+      state.max = Math.max(state.max, state.active);
+      await new Promise((r) => setTimeout(r, 20));
+      state.active -= 1;
+      return { success: true } as const;
+    };
+    return { state, handler };
+  }
+
+  it("مهام الذكاء الثانوية لمحادثات مختلفة تشتغل بالتوازي", async () => {
+    const db = createFakeDb() as FakeDb;
+    const { state, handler } = trackingHandler();
+    for (const conversationId of ["c1", "c2", "c3"]) {
+      await db.backgroundJob.create({
+        data: { workspaceId: WS, type: "extract_customer_intel", payload: { conversationId }, runAfter: new Date(0) },
+      } as never);
+    }
+    await processPendingJobs(db as unknown as Db, { extract_customer_intel: handler }, { limit: 10, maintenance: false });
+    expect(state.max).toBeGreaterThan(1);
+  });
+
+  it("مهام نفس المحادثة تضل بالترتيب وما بتتداخل", async () => {
+    const db = createFakeDb() as FakeDb;
+    const { state, handler } = trackingHandler();
+    for (let i = 0; i < 3; i++) {
+      await db.backgroundJob.create({
+        data: { workspaceId: WS, type: "generate_summary", payload: { conversationId: "same" }, runAfter: new Date(0) },
+      } as never);
+    }
+    await processPendingJobs(db as unknown as Db, { generate_summary: handler }, { limit: 10, maintenance: false });
+    expect(state.max).toBe(1);
+  });
+});
+
+describe("تأجيل مهمة الرد لما رسالة أقدم لسا قيد المعالجة", () => {
+  it("المهمة المؤجلة بترجع للدور بدون ما تنحسب محاولة", async () => {
+    const db = createFakeDb() as FakeDb;
+    const handlers = {
+      process_ai_message: async () => ({ success: true, deferMs: 3000 }) as const,
+    };
+    await db.backgroundJob.create({
+      data: { workspaceId: WS, type: "process_ai_message", payload: { conversationId: "c1" }, runAfter: new Date(0) },
+    } as never);
+
+    const before = Date.now();
+    const res = await processPendingJobs(db as unknown as Db, handlers as never, { limit: 5, maintenance: false });
+
+    const job = (db._stores.backgroundJob as Array<Record<string, any>>)[0];
+    expect(res.processed).toBe(0);
+    expect(res.failed).toBe(0);
+    expect(job.status).toBe("PENDING");
+    expect(job.attempts).toBe(0);
+    expect(new Date(job.runAfter).getTime()).toBeGreaterThanOrEqual(before + 2500);
+    expect(job.lockedBy).toBeNull();
+  });
+});
+
 describe("Phase 3 — قياس زمن الرد الحقيقي", () => {
   function seedPage(db: FakeDb) {
     db._stores.channel.push({

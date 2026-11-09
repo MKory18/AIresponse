@@ -50,6 +50,7 @@ export const POST = createHandler({ permission: "knowledge.write" }, async ({ au
     content: content.slice(0, 500_000),
     category: (categoryRaw as (typeof CATEGORIES)[number] | undefined) ?? "DOCUMENT",
     sourceType: "FILE",
+    productId: str("productId") ?? null,
   });
   return ok(doc, 202);
 });

@@ -131,10 +131,15 @@ The worker must never share the Next.js process — it polls `BackgroundJob` and
 
 ### Capacity (200 concurrent customers)
 
-- **AI concurrency per worker:** `AI_JOB_CONCURRENCY` (default 8, max 16).
+- **Defaults in `docker-compose.yml`:** `WORKER_PROCESSES=4` × `AI_JOB_CONCURRENCY=16`
+  = 64 AI replies at once, `POSTGRES_MAX_CONNECTIONS=200`.
+- ⚠️ More workers only help while the database keeps up: on a single-threaded
+  local database, 8 workers × 16 replied slower than 4 × 8.
+  🔧 Raise `WORKER_PROCESSES` step by step and watch database CPU and reply time.
+- **AI concurrency per worker:** `AI_JOB_CONCURRENCY` (code default 8, max 16).
 - **Total capacity = workers × concurrency.** For ~10 messages/sec with a 3s
-  reply, run **2–4 worker containers** at 16 (`docker compose up --scale` or
-  duplicate the Coolify service).
+  reply, run **2–4 worker processes** at 16 (`WORKER_PROCESSES`, works on Coolify
+  too; plain Compose can also use `--scale`).
 - Multiple workers are safe: claiming is atomic and per-conversation order is
   preserved. Each worker writes its own `WorkerHeartbeat` row (health reports
   `workers`).
