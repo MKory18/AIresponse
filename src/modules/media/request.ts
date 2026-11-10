@@ -78,12 +78,23 @@ function containsPhrase(normalised: string, phrase: string): boolean {
   return words.includes(phrase);
 }
 
+/** Words that ask for more than one photo, normalised like the rest. */
+const PLURAL_IMAGE_PHRASES = ["صور", "photos", "pictures", "pics", "images"].map(normalizeMediaArabic);
+
+/** «ابعتلي صور» / "send me photos": more than one photo is wanted. */
+export function wantsMultipleImages(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const t = normalizeMediaArabic(text);
+  return PLURAL_IMAGE_PHRASES.some((p) => containsPhrase(t, p));
+}
+
 export type MediaAsk = "image" | "video" | null;
 
 /** What the customer's own message asks for — image, video, or nothing. */
 export function wantsMedia(text: string | null | undefined): MediaAsk {
   if (!text) return null;
-  const t = normalizeMediaArabic(text);
+  // «بأي شكل» / «على شكل دفعات» use «شكل» as "way/form", not "appearance".
+  const t = normalizeMediaArabic(text).replace(/(^|\s)(?:باي|علي)\s+شكل(?=\s|$|[؟?!.,،])/g, "$1");
   if (VIDEO_PHRASES.some((p) => containsPhrase(t, p))) return "video";
   if (IMAGE_PHRASES.some((p) => containsPhrase(t, p))) return "image";
   return null;

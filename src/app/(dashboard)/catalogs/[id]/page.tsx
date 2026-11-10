@@ -14,7 +14,8 @@ import { GlassCard, PageHeader } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
 
 type CatalogProduct = {
-  id: string;
+  productId: string;
+  // null: رابط لمنتج مش موجود بهالمساحة — الصفحة لازم تضل شغّالة.
   product: {
     id: string;
     name: string;
@@ -26,12 +27,13 @@ type CatalogProduct = {
     isActive: boolean;
     isArchived: boolean;
     offers: unknown;
-  };
+  } | null;
 };
 
 type CatalogPage = {
   id: string;
-  channel: { id: string; type: string; displayName: string; externalId: string | null; status: string };
+  channelId: string;
+  channel: { id: string; type: string; displayName: string; externalId: string | null; status: string } | null;
 };
 
 type Detail = {
@@ -42,7 +44,7 @@ type Detail = {
 
 type ChannelOption = { channelId: string; pageId: string | null; pageName: string | null; status: string };
 
-function priceText(p: CatalogProduct["product"]): string {
+function priceText(p: NonNullable<CatalogProduct["product"]>): string {
   const n = typeof p.price === "number" ? p.price : Number(p.price);
   return `${Number.isFinite(n) ? n.toLocaleString("en-US") : p.price} ${p.currency}`;
 }
@@ -247,7 +249,7 @@ export default function CatalogDetailPage() {
     );
   }
 
-  const linkedIds = new Set(detail.products.map((p) => p.product.id));
+  const linkedIds = new Set(detail.products.map((p) => p.productId));
 
   return (
     <div className="page-wrap">
@@ -289,21 +291,22 @@ export default function CatalogDetailPage() {
           <EmptyState title="كتالوج فارغ" description="أضف منتجات موجودة — لن يُنشأ منتج جديد هنا." />
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
-            {detail.products.map(({ product: p }) => (
-              <div key={p.id} className="flex items-center gap-2 rounded-2xl border border-line/60 p-2.5">
+            {detail.products.map(({ productId, product: p }) => (
+              <div key={productId} className="flex items-center gap-2 rounded-2xl border border-line/60 p-2.5">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-bold text-ink">{p.name}</p>
+                  <p className="truncate text-xs font-bold text-ink">{p?.name ?? "منتج غير موجود"}</p>
                   <p className="num mt-0.5 text-[11px] text-ink-subtle">
-                    {p.sku} · {priceText(p)} · {p.stockStatus === "IN_STOCK" ? `مخزون ${p.stockQty}` : "غير متوفر"}
-                    {!p.isActive || p.isArchived ? " · موقوف" : ""}
+                    {p
+                      ? `${p.sku} · ${priceText(p)} · ${p.stockStatus === "IN_STOCK" ? `مخزون ${p.stockQty}` : "غير متوفر"}${!p.isActive || p.isArchived ? " · موقوف" : ""}`
+                      : "المنتج ما عاد موجود — أزل الارتباط."}
                   </p>
                 </div>
                 <button
                   onClick={() =>
                     setConfirmMsg({
-                      title: `إزالة «${p.name}»؟`,
+                      title: `إزالة «${p?.name ?? "منتج غير موجود"}»؟`,
                       body: "فك ارتباط فقط — المنتج الأصلي وطلباته وعروضه لا تُمس.",
-                      run: () => void removeProduct(p.id, p.name),
+                      run: () => void removeProduct(productId, p?.name ?? "منتج غير موجود"),
                     })
                   }
                   className="shrink-0 text-[11px] font-semibold text-red-600 hover:text-red-700 dark:text-red-400"
@@ -325,9 +328,9 @@ export default function CatalogDetailPage() {
             {detail.pages.map((pg) => (
               <div key={pg.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line/60 p-2.5">
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-bold text-ink">{pg.channel.displayName}</p>
+                  <p className="truncate text-xs font-bold text-ink">{pg.channel?.displayName ?? "صفحة غير موجودة"}</p>
                   <p className="num mt-0.5 text-[11px] text-ink-subtle">
-                    {pg.channel.externalId ?? ""} · {pg.channel.status}
+                    {pg.channel ? `${pg.channel.externalId ?? ""} · ${pg.channel.status}` : "الصفحة ما عادت موجودة — فك الربط."}
                   </p>
                 </div>
                 <button
@@ -335,7 +338,7 @@ export default function CatalogDetailPage() {
                     setConfirmMsg({
                       title: "فك ربط الصفحة؟",
                       body: "ستبقى الصفحة بلا كتالوج نشط حتى تُسند من جديد — الكتالوج والمنتجات كما هي.",
-                      run: () => void unassign(pg.channel.id, pg.channel.displayName),
+                      run: () => void unassign(pg.channelId, pg.channel?.displayName ?? "صفحة غير موجودة"),
                     })
                   }
                   className="shrink-0 text-[11px] font-semibold text-red-600 hover:text-red-700 dark:text-red-400"

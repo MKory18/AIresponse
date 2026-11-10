@@ -337,7 +337,7 @@ export async function sendPlaygroundMessage(
       product: productCtx.product
         ? {
             name: productCtx.product.name,
-            price: `${productCtx.product.price} ${productCtx.product.currency ?? ""}`.trim(),
+            price: productCtx.product.price,
             currency: productCtx.product.currency ?? "",
             stockStatus: productCtx.product.stockStatus,
             shortDescription: productCtx.product.shortDescription,

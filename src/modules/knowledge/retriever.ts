@@ -10,6 +10,44 @@ export interface RetrievedKnowledge {
 }
 
 /**
+ * Vector search over documents. Needs only the query and the page's catalog,
+ * so the reply path can start it before the product is known.
+ */
+export async function searchKnowledgeChunks(
+  db: Db,
+  vectorStore: VectorStore,
+  params: {
+    workspaceId: string;
+    query: string;
+    category?: KnowledgeCategory;
+    limit?: number;
+    allowedProductIds?: string[] | null;
+  }
+): Promise<VectorMatch[]> {
+  // PERF — empty store: embedding the query can never match anything, so
+  // skip the provider call + search entirely. FAQ lookup above still runs;
+  // structured answers keep working exactly as before.
+  if (vectorStore.size === 0) return [];
+  const provider = getEmbeddingProvider();
+  // Documents tied to a product outside this page's catalog stay out; general
+  // documents (no product) apply to every page.
+  const excluded = params.allowedProductIds
+    ? await db.knowledgeDocument.findMany({
+        where: { workspaceId: params.workspaceId, productId: { not: null, notIn: params.allowedProductIds } },
+        select: { id: true },
+      })
+    : [];
+  const embedding = await provider.embed(params.query);
+  return vectorStore.search({
+    embedding,
+    workspaceId: params.workspaceId,
+    limit: params.limit ?? 5,
+    metadataFilters: params.category ? { category: params.category } : undefined,
+    excludeDocumentIds: excluded.map((d) => d.id),
+  });
+}
+
+/**
  * Hybrid retrieval: structured FAQ lookup + vector search over documents.
  * Every query is workspace-scoped inside the store implementation.
  */
@@ -24,6 +62,8 @@ export async function retrieveKnowledge(
     limit?: number;
     /** P18 — حدود كتالوج الصفحة: أسئلة المنتجات خارجها ما بترجع. */
     allowedProductIds?: string[] | null;
+    /** A search already started by the caller, instead of running a second one. */
+    preloadedChunks?: Promise<VectorMatch[]>;
   }
 ): Promise<RetrievedKnowledge> {
   const [faqs, chunks] = await Promise.all([
@@ -34,29 +74,7 @@ export async function retrieveKnowledge(
       allowedProductIds: params.allowedProductIds,
       limit: 3,
     }),
-    (async () => {
-      // PERF — empty store: embedding the query can never match anything, so
-      // skip the provider call + search entirely. FAQ lookup above still runs;
-      // structured answers keep working exactly as before.
-      if (vectorStore.size === 0) return [];
-      const provider = getEmbeddingProvider();
-      // Documents tied to a product outside this page's catalog stay out; general
-      // documents (no product) apply to every page.
-      const excluded = params.allowedProductIds
-        ? await db.knowledgeDocument.findMany({
-            where: { workspaceId: params.workspaceId, productId: { not: null, notIn: params.allowedProductIds } },
-            select: { id: true },
-          })
-        : [];
-      const embedding = await provider.embed(params.query);
-      return vectorStore.search({
-        embedding,
-        workspaceId: params.workspaceId,
-        limit: params.limit ?? 5,
-        metadataFilters: params.category ? { category: params.category } : undefined,
-        excludeDocumentIds: excluded.map((d) => d.id),
-      });
-    })(),
+    params.preloadedChunks ?? searchKnowledgeChunks(db, vectorStore, params),
   ]);
 
   return {

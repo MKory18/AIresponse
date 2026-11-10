@@ -100,6 +100,41 @@ export async function createVersion(
   return row;
 }
 
+/**
+ * A direct edit of the live row: the same bump and snapshot a publish gets, so
+ * no live state exists without a version to go back to. Only content changes
+ * count; switching the workspace default is not a new version.
+ */
+export async function applyLiveEdit(
+  db: Db,
+  ctx: ActorContext,
+  live: Record<string, unknown> & { id: string },
+  data: Record<string, unknown>
+) {
+  const contentChanged = JSON.stringify(snapshotOf(live)) !== JSON.stringify(snapshotOf({ ...live, ...data }));
+  if (!contentChanged) {
+    return (db as any).persona.update({ where: { id: live.id }, data });
+  }
+  const existing = await (db as any).personaVersion.findMany({
+    where: { personaId: live.id },
+    orderBy: [{ version: "desc" }],
+    take: 1,
+  });
+  const version = Math.max((existing[0]?.version as number) ?? 0, (live.version as number) ?? 1) + 1;
+  const updated = await (db as any).persona.update({ where: { id: live.id }, data: { ...data, version } });
+  await (db as any).personaVersion.create({
+    data: {
+      workspaceId: ctx.workspaceId,
+      personaId: live.id,
+      version,
+      ...snapshotOf(updated),
+      status: "PUBLISHED",
+      createdBy: ctx.userId,
+    },
+  });
+  return updated;
+}
+
 export async function publishVersion(db: Db, ctx: ActorContext, personaId: string, version: number) {
   const live = await ownedPersona(db, ctx.workspaceId, personaId);
   const snap = await (db as any).personaVersion.findUnique({

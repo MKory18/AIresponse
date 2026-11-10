@@ -2,7 +2,7 @@ import { customerFacingPriceTiers } from "@/modules/products/price-tiers";
 import type { KnowledgeCategory } from "@prisma/client";
 import { NotFoundError } from "@/core/errors";
 import type { Db } from "@/modules/customers/service";
-import { retrieveKnowledge, type VectorStore } from "@/modules/knowledge/retriever";
+import { retrieveKnowledge, type VectorMatch, type VectorStore } from "@/modules/knowledge/retriever";
 import { getApprovedFeedbackForProduct } from "@/modules/feedback/service";
 import { excludeCustomerInbound, findProductMedia, findRelevantMedia } from "@/modules/media/service";
 
@@ -139,6 +139,7 @@ export async function buildKnowledgeContext(
     limit?: number;
     /** P18 — حدود كتالوج الصفحة على الأسئلة الجاهزة/المعرفة. */
     allowedProductIds?: string[] | null;
+    preloadedChunks?: Promise<VectorMatch[]>;
   }
 ) {
   const result = await retrieveKnowledge(db, vectorStore, params);
@@ -185,8 +186,12 @@ export async function buildFeedbackContext(
 
 export async function buildMediaContext(
   db: Db,
-  params: { workspaceId: string; productId?: string; query?: string; limit?: number }
+  params: { workspaceId: string; productId?: string; query?: string; limit?: number; allowedProductIds?: string[] | null }
 ) {
+  // صفحة بكتالوج وبلا منتج محدد: البحث العام بيجيب وسائط أي منتج بالمساحة.
+  if (!params.productId && params.allowedProductIds) {
+    return { media: [] as AIContext["media"], citations: [] as Citation[] };
+  }
   const assets = params.productId
     ? await findProductMedia(db, params.workspaceId, params.productId, params.limit ?? 3)
     : await findRelevantMedia(db, {
@@ -212,6 +217,8 @@ export async function buildAIContext(
     knowledgeLimit?: number;
     /** P18 — undefined = ما في كتالوجات (بلا تقييد) · [] = لا منتجات متاحة. */
     allowedProductIds?: string[] | null;
+    /** Document search the caller already started (see runExtraction). */
+    preloadedChunks?: Promise<VectorMatch[]>;
   }
 ): Promise<AIContext> {
   const [productCtx, knowledgeCtx, feedbackCtx, mediaCtx] = await Promise.all([
@@ -224,6 +231,7 @@ export async function buildAIContext(
       productId: params.productId,
       limit: params.knowledgeLimit ?? 4,
       allowedProductIds: params.allowedProductIds,
+      preloadedChunks: params.preloadedChunks,
     }),
     params.productId
       ? buildFeedbackContext(db, params.workspaceId, params.productId)
@@ -233,6 +241,7 @@ export async function buildAIContext(
       productId: params.productId,
       query: params.query,
       limit: 3,
+      allowedProductIds: params.allowedProductIds,
     }),
   ]);
 

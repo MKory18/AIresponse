@@ -3,6 +3,7 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 import { PERSONA_LIMITS } from "@/modules/ai/persona-limits";
+import { applyLiveEdit } from "@/modules/ai/persona-versions";
 
 const personaSchema = z.object({
   name: z.string().trim().min(2).max(PERSONA_LIMITS.name),
@@ -37,22 +38,24 @@ export const GET = createHandler(
 export const POST = createHandler(
   { body: personaSchema, permission: "personas.write" },
   async ({ auth, body }) => {
-    // Only one active persona at a time per workspace.
-    if (body.isActive !== false) {
-      await prisma.persona.updateMany({
-        where: { workspaceId: auth!.workspaceId, isActive: true },
-        data: { isActive: false },
+    const workspaceId = auth!.workspaceId;
+    const persona = await prisma.$transaction(async (tx) => {
+      // A new persona answers only the pages it is assigned to. It becomes
+      // the workspace default when asked to, or when there is no default.
+      const isDefault = body.isActive ?? (await tx.persona.count({ where: { workspaceId, isActive: true } })) === 0;
+      // Only one active persona at a time per workspace.
+      if (isDefault) {
+        await tx.persona.updateMany({ where: { workspaceId, isActive: true }, data: { isActive: false } });
+      }
+      const created = await tx.persona.create({ data: { ...body, workspaceId, isActive: isDefault } });
+      await recordAudit(tx, {
+        workspaceId,
+        userId: auth!.userId,
+        action: "persona.created",
+        entityType: "Persona",
+        entityId: created.id,
       });
-    }
-    const persona = await prisma.persona.create({
-      data: { ...body, workspaceId: auth!.workspaceId, isActive: body.isActive ?? true },
-    });
-    await recordAudit(prisma, {
-      workspaceId: auth!.workspaceId,
-      userId: auth!.userId,
-      action: "persona.created",
-      entityType: "Persona",
-      entityId: persona.id,
+      return created;
     });
     return ok(persona, 201);
   }
@@ -66,19 +69,23 @@ export const PATCH = createHandler(
     if (!existing || existing.workspaceId !== auth!.workspaceId) {
       return Response.json({ error: "NOT_FOUND" }, { status: 404 });
     }
-    if (data.isActive) {
-      await prisma.persona.updateMany({
-        where: { workspaceId: auth!.workspaceId, isActive: true },
-        data: { isActive: false },
+    const actor = { workspaceId: auth!.workspaceId, userId: auth!.userId };
+    const persona = await prisma.$transaction(async (tx) => {
+      if (data.isActive) {
+        await tx.persona.updateMany({
+          where: { workspaceId: auth!.workspaceId, isActive: true },
+          data: { isActive: false },
+        });
+      }
+      const updated = await applyLiveEdit(tx, actor, existing, data);
+      await recordAudit(tx, {
+        ...actor,
+        action: "persona.updated",
+        entityType: "Persona",
+        entityId: id,
+        metadata: { version: updated.version },
       });
-    }
-    const persona = await prisma.persona.update({ where: { id }, data });
-    await recordAudit(prisma, {
-      workspaceId: auth!.workspaceId,
-      userId: auth!.userId,
-      action: "persona.updated",
-      entityType: "Persona",
-      entityId: id,
+      return updated;
     });
     return ok(persona);
   }

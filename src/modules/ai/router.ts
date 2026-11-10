@@ -56,18 +56,35 @@ const COST_PER_1K: Record<string, number> = {
 };
 
 export interface ResolvedModel {
+  /** Empty on Hermes/custom when nothing is set: the provider's own default applies. */
   model: string;
   temperature: number;
   maxTokens: number;
+}
+
+/** Which provider runs: a real workspace choice, else ENV, else the workspace value. */
+function selectedProvider(workspaceChoice: string | null, envChoice: string | undefined): string | null {
+  const real = ["openai", "openrouter", "internal", "hermes", "custom"].includes(workspaceChoice ?? "");
+  return real ? workspaceChoice : envChoice ?? workspaceChoice ?? null;
+}
+
+function firstNonBlank(...values: Array<string | null | undefined>): string | null {
+  for (const v of values) {
+    if (v?.trim()) return v.trim();
+  }
+  return null;
 }
 
 /**
  * Model router: picks model/temperature/maxTokens per task from workspace
  * AISettings with ENV fallback. Cost-aware: classification/extraction/summary
  * default to the cheap model; only RESPONSE defaults to the strong one.
+ * Gateways that name their own models (Hermes, custom) have no use for our
+ * gpt-4o defaults: a blank chat model is left for the provider to fill in.
  */
 export function resolveModel(
   settings: {
+    provider?: string | null;
     classificationModel: string | null;
     extractionModel: string | null;
     responseModel: string | null;
@@ -105,8 +122,12 @@ export function resolveModel(
   const maxTokens =
     task === "RESPONSE" ? settings?.maxTokens ?? 500 : task === "SUMMARY" ? 300 : 250;
 
+  const selected = selectedProvider(settings?.provider ?? null, process.env.AI_PROVIDER);
+  const providerNamesModel =
+    (selected === "hermes" || selected === "custom") && task !== "EMBEDDING" && task !== "RETRIEVAL";
+
   return {
-    model: settingsModels[task] || envModels[task] || DEFAULT_MODELS[task],
+    model: firstNonBlank(settingsModels[task], envModels[task]) ?? (providerNamesModel ? "" : DEFAULT_MODELS[task]),
     temperature,
     maxTokens,
   };
@@ -161,7 +182,7 @@ export async function logUsage(db: any, rec: UsageRecord): Promise<void> {
         messageId: rec.messageId ?? null,
         purpose: rec.purpose,
         provider: rec.provider,
-        model: rec.model,
+        model: rec.model.trim() || `${rec.provider}:default`,
         intent: rec.intent ?? null,
         confidence: rec.confidence ?? null,
         promptVersion: rec.promptVersion ?? null,
@@ -331,9 +352,7 @@ export function getWorkspaceProvider(
   // ENV still fail-closes exactly as before (no behavior change for existing
   // deployments), while a workspace can still opt into a real provider whose
   // key exists even when ENV names no provider.
-  const wsChoice = settings?.provider ?? null;
-  const wsWantsReal = wsChoice === "openai" || wsChoice === "openrouter" || wsChoice === "internal" || wsChoice === "hermes" || wsChoice === "custom";
-  const choice = wsWantsReal ? wsChoice : e.aiProvider ?? wsChoice ?? null;
+  const choice = selectedProvider(settings?.provider ?? null, e.aiProvider);
   const keyFor = (p: string | null | undefined) =>
     p === "openai" ? e.openaiKey : p === "openrouter" ? e.openrouterKey : p === "hermes" ? e.hermesKey : undefined;
   // Custom provider — أي واجهة OpenAI-compatible خارجية بعنوان + مفتاح من
@@ -354,7 +373,7 @@ export function getWorkspaceProvider(
       // /v1 أو رابط كامل — التطبيع بيبني مسار chat/completions الوحيد
       // الذي يفهمه مزوّد OpenAI-compatible (زائد شرطة صلبة).
       baseUrl: normalizeHermesEndpoint(base),
-      defaultModel: settings?.responseModel ?? e.responseModel ?? "gpt-4o-mini",
+      defaultModel: firstNonBlank(settings?.responseModel, e.responseModel) ?? "gpt-4o-mini",
       delivery: "external",
       // لا تتبّع إعادة توجيه مع المفتاح والأسئلة (فشل سريع).
       followRedirects: false,
@@ -378,7 +397,7 @@ export function getWorkspaceProvider(
       name: "hermes",
       apiKey: key,
       baseUrl: normalizeHermesEndpoint(base),
-      defaultModel: settings?.responseModel ?? e.hermesModel ?? e.responseModel ?? "hermes-agent",
+      defaultModel: firstNonBlank(settings?.responseModel, e.hermesModel, e.responseModel) ?? "hermes-agent",
       // Never follow gateway redirects with the key + prompts (fail fast).
       followRedirects: false,
     });

@@ -100,13 +100,26 @@ export function personaPrompt(persona: PersonaConfig): string {
 
 // ── Trusted data blocks ─────────────────────────────────────────────────────
 
+const MAX_DESCRIPTION_CHARS = 800;
+const MAX_INGREDIENTS_CHARS = 500;
+
+function clipText(text: string, max: number): string {
+  const trimmed = text.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
 export function trustedDataPrompt(data: {
   product?: {
     name: string;
+    /** الرقم فقط — العملة تُضاف هنا مرة واحدة. */
     price: string;
     currency: string;
+    /** السعر قبل الخصم (يظهر فقط إذا أعلى من السعر). */
+    compareAtPrice?: string | null;
     stockStatus: string;
     shortDescription: string | null;
+    description?: string | null;
+    ingredients?: string | null;
     benefits: string[];
     usage: string | null;
     warnings: string | null;
@@ -154,12 +167,17 @@ export function trustedDataPrompt(data: {
         "بيانات المنتج (المصدر الرسمي — لا تغير أي رقم ولا عملة):",
         `اسم المنتج: ${p.name}`,
         `السعر الرسمي: ${p.price} ${p.currency}`,
+        p.compareAtPrice && Number(p.compareAtPrice) > Number(p.price)
+          ? `السعر قبل الخصم: ${p.compareAtPrice} ${p.currency}`
+          : null,
         `العملة الرسمية: ${p.currency} — ممنوع ذكر أي عملة أخرى أو تحويل السعر.`,
         p.priceTiers?.length
-          ? `أسعار إضافية مسمّاة (السعر الرسمي فوق هو الأساس): ${p.priceTiers.map((tp) => `${tp.label} ${tp.price}`).join(" · ")}`
+          ? `أسعار إضافية مسمّاة (السعر الرسمي فوق هو الأساس): ${p.priceTiers.map((tp) => `${tp.label} ${tp.price} ${p.currency}`.trim()).join(" · ")}`
           : null,
         `التوفر: ${p.stockStatus}`,
         p.shortDescription ? `وصف: ${p.shortDescription}` : null,
+        p.description ? `وصف تفصيلي: ${clipText(p.description, MAX_DESCRIPTION_CHARS)}` : null,
+        p.ingredients ? `المكونات: ${clipText(p.ingredients, MAX_INGREDIENTS_CHARS)}` : null,
         p.benefits.length ? `الفوائد: ${p.benefits.join("، ")}` : null,
         p.usage ? `الاستخدام: ${p.usage}` : null,
         p.warnings ? `تحذيرات: ${p.warnings}` : null,
@@ -276,22 +294,44 @@ export function planInstruction(): string {
   ].join("\n");
 }
 
+/** What really happens to the picture the customer asked for, known before the reply is written. */
+export type ReplyMediaOutcome =
+  | { status: "ATTACHED"; count: number }
+  | { status: "NO_IMAGE" | "ALL_SENT" | "CHANNEL_UNFIT" | "UNAVAILABLE" | "ASK_PRODUCT" };
+
+function mediaInstruction(outcome: ReplyMediaOutcome): string {
+  const noPromise = "لن تُرفق أي صورة مع هذا الرد، فلا تكتب أنك أرفقت صورة ولا تعد بإرسالها.";
+  switch (outcome.status) {
+    case "ATTACHED":
+      return outcome.count > 1
+        ? "العميل طلب صور المنتج والنظام يرفقها قبل نصك: اكتب جملة قصيرة ترافق الصور (مثل «تفضل الصور») ولا تعتذر ولا تقل إنك لا تستطيع إرسال الصور."
+        : "العميل طلب صورة المنتج والنظام يرفقها قبل نصك: اكتب جملة قصيرة ترافق الصورة (مثل «تفضل الصورة») ولا تعتذر ولا تقل إنك لا تستطيع إرسال الصور.";
+    case "NO_IMAGE":
+      return `العميل طلب صورة، ولا توجد صورة لهذا المنتج حالياً. ${noPromise} اعتذر باختصار وصف المنتج من البيانات الموثوقة.`;
+    case "ALL_SENT":
+      return `العميل طلب صورة، وكل صور هذا المنتج أُرسلت له سابقاً في هذه المحادثة. ${noPromise} قل له باختصار إن الصور موجودة أعلى المحادثة.`;
+    case "CHANNEL_UNFIT":
+      return `العميل طلب صورة، وصور هذا المنتج لا تناسب هذه القناة. ${noPromise} اعتذر باختصار وصف المنتج من البيانات الموثوقة.`;
+    case "UNAVAILABLE":
+      return `العميل طلب صورة وتعذّر تجهيزها الآن. ${noPromise} اعتذر باختصار.`;
+    case "ASK_PRODUCT":
+      return `العميل طلب صورة دون تحديد المنتج. ${noPromise} اسأله سؤالاً واحداً قصيراً: صورة أي منتج يريد؟ لا تذكر اسم منتج من عندك ولا تخمّن المنتج.`;
+  }
+}
+
 export function responseInstruction(
   persona: PersonaConfig,
-  opts: { mediaRequested?: boolean } = {}
+  opts: { media?: ReplyMediaOutcome } = {}
 ): string {
   return [
     "اكتب الرد النهائي للعميل الآن، بعد أن عرفت النية والخطة والبيانات الموثوقة.",
     `اكتب بلهجة ${persona.dialect ?? persona.language} وبنبرة ${persona.tone}.`,
     "الرد 1-4 أسطر. لا تعدد أرقاماً أو أسعاراً غير موجودة في البيانات الموثوقة.",
     "إذا كانت الخطة تحتاج توضيحاً، اسأل سؤالاً واحداً قصيراً عن الحقل الناقص فقط.",
-    // The pipeline attaches the product photo before the text when
-    // plan.sendMedia is true. The model must not deny a capability it has.
-    ...(opts.mediaRequested
-      ? [
-          "العميل طلب صورة المنتج: اكتب جملة قصيرة ترافق الصورة (مثل «تفضل الصورة») ولا تعتذر ولا تقل إنك لا تستطيع إرسال الصور — النظام يرفقها تلقائياً إذا كانت متاحة.",
-        ]
-      : []),
+    // The pick happens before this prompt is built, so the model is told
+    // what is really going out: it must neither deny a capability it has
+    // nor promise a picture that is not coming.
+    ...(opts.media ? [mediaInstruction(opts.media)] : []),
     "أعد النص فقط بدون أي شرح.",
   ].join("\n");
 }

@@ -23,6 +23,7 @@ import { getWhatsAppClient, WhatsAppApiError } from "./whatsapp/client";
 import { getTikTokClient, TikTokApiError } from "./tiktok/client";
 import { InstagramApiError } from "./instagram/client";
 import { generatePublicMediaUrl } from "@/modules/media/service";
+import { ALREADY_SENT } from "./delivery-status";
 import type { Db } from "@/modules/customers/service";
 import type { ChannelType } from "@prisma/client";
 
@@ -67,8 +68,6 @@ export interface DispatchOutboundParams {
   template?: { name: string; language: string; variables?: Record<string, string> } | null;
 }
 
-/** حالات «الرسالة طلعت فعلًا» — نهائية لعدم التكرار (SENT وما بعده من إشارات التسليم). */
-const ALREADY_SENT = new Set(["SENT", "DELIVERED", "READ"]);
 
 export interface DispatchOutboundResult {
   messageId: string;
@@ -174,7 +173,8 @@ export async function dispatchOutbound(
   params: DispatchOutboundParams
 ): Promise<DispatchOutboundResult> {
   const started = Date.now();
-  if (!params.text?.trim()) {
+  // صورة بلا نص مسموحة (الصور الإضافية بطلب «ابعتلي صور»)؛ الفراغ التام لأ.
+  if (!params.text?.trim() && !params.mediaId) {
     return { messageId: "", deliveryStatus: "FAILED", error: "تعذر إرسال الرد — نص فارغ" };
   }
 
@@ -272,7 +272,8 @@ export async function dispatchOutbound(
           senderType: params.senderType ?? "AI",
           senderId: params.senderId ?? "ai-agent",
           direction: "OUTBOUND",
-          type: "TEXT",
+          // A media-only row has no words: the inbox labels it as an attachment.
+          type: params.text?.trim() ? "TEXT" : "IMAGE",
           text: params.text,
           provider: "facebook",
           deliveryStatus: "PENDING",
@@ -472,6 +473,15 @@ export async function dispatchOutbound(
     }
   }
 
+  // A media-only send whose attachment was skipped has nothing left to send:
+  // the text-only fallback above would be sendText("").
+  if (!attachment && !params.text?.trim()) {
+    const reason = mediaSkipped ?? "MEDIA_NOT_AVAILABLE";
+    await markFailed(db, message.id, reason, "تعذر إرسال الصورة", { mediaSkipped: reason });
+    log.warn({ ...ctx, recipientId, status: "FAILED", reason, durationMs: Date.now() - started }, "facebook.message.failed");
+    return { messageId: message.id, deliveryStatus: "FAILED", error: reason, channelId: ctx.channelId, pageId: ctx.pageId, recipientId, durationMs: Date.now() - started };
+  }
+
   // The id that actually travels from here on: a skipped attachment must
   // not be recorded as sent — the next reply would treat it as delivered
   // and never show it.
@@ -662,13 +672,20 @@ export async function dispatchOutbound(
   }
 }
 
-async function markFailed(db: Db, messageId: string, reason: string, arabicMessage?: string) {
+async function markFailed(
+  db: Db,
+  messageId: string,
+  reason: string,
+  arabicMessage?: string,
+  extraMetadata: Record<string, string> = {}
+) {
   await db.message.update({
     where: { id: messageId },
     data: {
       deliveryStatus: "FAILED",
       deliveryError: arabicMessage ? `${reason}: ${arabicMessage}` : reason,
       metadata: {
+        ...extraMetadata,
         providerErrorCode: reason,
         providerErrorMessage: arabicMessage ?? reason,
         failedAt: new Date().toISOString(),

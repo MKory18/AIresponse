@@ -17,10 +17,13 @@ import {
   trustedDataPrompt,
   responseInstruction,
   type Intent,
+  type ReplyMediaOutcome,
 } from "../prompts";
+import { wantsMultipleImages } from "@/modules/media/request";
 import { validateResponse } from "../guardrails";
 import { sendProtectedText } from "../privacy-gate";
 import { saveMemories } from "../memory";
+import { scrubRecalledText } from "../catalog-boundary";
 import { recordAudit } from "@/modules/audit/service";
 import type { Db } from "@/modules/customers/service";
 import type {
@@ -61,6 +64,7 @@ export async function runResponse(
     plan,
     extractionUser,
     catalogBoundary,
+    recallGuard,
   } = ext;
 
   // P1.1: trusted non-contact numbers that may legitimately appear in the
@@ -82,18 +86,31 @@ export async function runResponse(
     }
   }
   // P8 — أرقام خطة البيع (من DB حصرًا) مسموح بها في الرد؛ أي رقم آخر
-  // اخترعه النموذج ترفضه الـ guardrails. سعر الجملة لا يدخل هنا أبدًا.
+  // اخترعه النموذج ترفضه الـ guardrails. سعر الجملة لا يدخل هنا أبدًا،
+  // والكميات كمان: «3 دولار» مش سعر لأن الكمية 3.
   const salesPlan = ext.salesPlan ?? null;
   if (salesPlan) {
     if (salesPlan.primary) {
-      allowedNumbers.push(salesPlan.primary.unitPrice, salesPlan.primary.subtotal, salesPlan.primary.quantity);
+      allowedNumbers.push(salesPlan.primary.unitPrice, salesPlan.primary.subtotal);
     }
     if (salesPlan.upsell) {
-      allowedNumbers.push(salesPlan.upsell.price, salesPlan.upsell.saving, salesPlan.upsell.quantity);
+      allowedNumbers.push(salesPlan.upsell.price, salesPlan.upsell.saving);
     }
     for (const c of salesPlan.crossSell) allowedNumbers.push(c.unitPrice);
     if (salesPlan.discount) allowedNumbers.push(salesPlan.discount.discountedPrice, salesPlan.discount.amount);
   }
+
+  // What really goes out with this reply, decided BEFORE the model writes it:
+  // a promised picture that never arrives is worse than no picture.
+  const replyMedia = await planReplyMedia(db, {
+    workspaceId: params.workspaceId,
+    conversationId: conversation.id,
+    channelId: conversation.channelId,
+    sourceMessageId: message.id,
+    customerText: gate.customerText,
+    sendMedia: plan.sendMedia,
+    productId: context.product?.id ?? null,
+  });
 
   // 10. Response generation (validated by guardrails; regenerate once, then safe fallback).
   // The selected persona drives voice in EVERY provider mode: the external
@@ -107,10 +124,13 @@ export async function runResponse(
       product: context.product
         ? {
             name: context.product.name,
-            price: `${context.product.price} ${context.product.currency ?? ""}`.trim(),
+            price: context.product.price,
             currency: context.product.currency ?? "",
+            compareAtPrice: context.product.compareAtPrice,
             stockStatus: context.product.stockStatus,
             shortDescription: context.product.shortDescription,
+            description: context.product.description,
+            ingredients: context.product.ingredients,
             benefits: context.product.benefits,
             usage: context.product.usage,
             warnings: context.product.warnings,
@@ -125,11 +145,14 @@ export async function runResponse(
       media: context.media.map((m) => ({ title: m.title, url: m.url })),
       feedback: plan.useFeedback ? context.feedback : [],
       // Bound memory chars per item so 10 long rows can't bloat every prompt.
-      memory: memories.map((m) => ({
-        type: m.type,
-        content: m.value.length > 200 ? `${m.value.slice(0, 200)}…` : m.value,
-      })),
-      summary: conversation.summary,
+      memory: memories
+        .map((m) => ({ type: m.type, value: scrubRecalledText(recallGuard, m.value) }))
+        .filter((m) => m.value)
+        .map((m) => ({
+          type: m.type,
+          content: m.value.length > 200 ? `${m.value.slice(0, 200)}…` : m.value,
+        })),
+      summary: scrubRecalledText(recallGuard, conversation.summary) || null,
       orderSummary: orderResult?.summaryText ?? null,
       sales: salesPlan
         ? {
@@ -157,10 +180,7 @@ export async function runResponse(
     extractionUser,
     `النية: ${extraction.intent} (ثقة ${extraction.confidence})`,
     `الخطة: ${JSON.stringify(plan)}`,
-    responseInstruction(persona, {
-      // The attachment is only possible when a product with media resolved.
-      mediaRequested: Boolean(plan.sendMedia && context.product?.id),
-    }),
+    responseInstruction(persona, { media: replyMedia.outcome }),
   ].join("\n\n");
 
   let responseText = "";
@@ -330,8 +350,8 @@ export async function runResponse(
       text: responseText,
       sourceMessageId: message.id,
       dryRun: params.dryRun,
-      sendMedia: plan.sendMedia,
-      productId: context.product?.id ?? null,
+      mediaIds: replyMedia.mediaIds,
+      mediaSkipped: replyMedia.skipped,
     })
   );
   const sendMs = Date.now() - sendStarted;
@@ -489,32 +509,90 @@ export async function runResponse(
   };
 }
 
+const MAX_IMAGES_PER_REPLY = 3;
+
+interface ReplyMedia {
+  mediaIds: string[];
+  /** Why no picture goes out; recorded on the row, never silent. */
+  skipped?: string;
+  /** What the model is told. Undefined when the customer asked for no picture. */
+  outcome?: ReplyMediaOutcome;
+}
+
+async function planReplyMedia(
+  db: Db,
+  params: {
+    workspaceId: string;
+    conversationId: string;
+    channelId: string;
+    sourceMessageId: string;
+    customerText: string;
+    sendMedia: boolean;
+    productId: string | null;
+  }
+): Promise<ReplyMedia> {
+  if (!params.sendMedia) return { mediaIds: [] };
+  if (!params.productId) return { mediaIds: [], skipped: "NO_PRODUCT", outcome: { status: "ASK_PRODUCT" } };
+  try {
+    const { pickUnsentProductImages } = await import("@/modules/media/service");
+    const channel = await db.channel.findUnique({ where: { id: params.channelId }, select: { type: true } });
+    const picked = await pickUnsentProductImages(
+      db,
+      params.workspaceId,
+      params.conversationId,
+      params.productId,
+      wantsMultipleImages(params.customerText) ? MAX_IMAGES_PER_REPLY : 1,
+      { channelType: channel?.type, sourceMessageId: params.sourceMessageId }
+    );
+    if (picked.mediaIds.length > 0) {
+      return { mediaIds: picked.mediaIds, outcome: { status: "ATTACHED", count: picked.mediaIds.length } };
+    }
+    const skipped = picked.skipped ?? "NO_IMAGE";
+    const status = skipped === "ALL_SENT" || skipped === "CHANNEL_UNFIT" ? skipped : "NO_IMAGE";
+    return { mediaIds: [], skipped, outcome: { status } };
+  } catch (err) {
+    // The picture is optional; the reply is not.
+    log.warn({ conversationId: params.conversationId, error: err instanceof Error ? err.message : "media_pick_failed" }, "media_pick_failed");
+    return { mediaIds: [], skipped: "PICK_FAILED", outcome: { status: "UNAVAILABLE" } };
+  }
+}
+
 async function sendAI(
   db: Db,
-  params: { workspaceId: string; conversationId: string; text: string; sourceMessageId?: string; dryRun?: boolean; sendMedia?: boolean; productId?: string | null }
+  params: { workspaceId: string; conversationId: string; text: string; sourceMessageId?: string; dryRun?: boolean; mediaIds: string[]; mediaSkipped?: string }
 ) {
   if (params.dryRun) return null;
   const { dispatchOutbound } = await import("@/modules/channels/outbound");
-  let mediaId: string | null = null;
-  let mediaSkipped: string | undefined;
-  if (params.sendMedia && params.productId) {
-    const { pickUnsentProductImage } = await import("@/modules/media/service");
-    const picked = await pickUnsentProductImage(db, params.workspaceId, params.conversationId, params.productId);
-    if (picked.skipped) {
-      // Prepared and refused before anything leaves: no image at all is
-      // better than the wrong one, a repeat, or one the channel refuses.
-      mediaSkipped = picked.skipped;
-    } else {
-      mediaId = picked.mediaId;
+  const sourceMessageId = params.sourceMessageId ?? "n/a";
+  // Every photo but the last goes out on its own; the last travels with the
+  // words, so the customer reads the text after all the pictures. Each extra
+  // has its own idempotency key: a retry skips what already went out.
+  const extras = params.mediaIds.slice(0, -1);
+  const mediaId = params.mediaIds[params.mediaIds.length - 1];
+  for (const extraId of extras) {
+    try {
+      const extra = await dispatchOutbound(db, {
+        workspaceId: params.workspaceId,
+        conversationId: params.conversationId,
+        sourceMessageId: `${sourceMessageId}:img:${extraId}`,
+        text: "",
+        mediaId: extraId,
+      });
+      if (extra.deliveryStatus !== "SENT" && extra.deliveryStatus !== "SKIPPED_DUPLICATE") {
+        log.warn({ conversationId: params.conversationId, mediaId: extraId, deliveryStatus: extra.deliveryStatus }, "extra_image_not_sent");
+      }
+    } catch (err) {
+      // One extra photo never costs the customer the reply.
+      log.warn({ conversationId: params.conversationId, mediaId: extraId, error: err instanceof Error ? err.message : "send_failed" }, "extra_image_not_sent");
     }
   }
   const result = await dispatchOutbound(db, {
     workspaceId: params.workspaceId,
     conversationId: params.conversationId,
-    sourceMessageId: params.sourceMessageId ?? "n/a",
+    sourceMessageId,
     text: params.text,
-    mediaId: mediaId ?? undefined,
-    mediaSkipped,
+    mediaId,
+    mediaSkipped: params.mediaSkipped,
   });
   return { id: result.messageId, deliveryStatus: result.deliveryStatus };
 }

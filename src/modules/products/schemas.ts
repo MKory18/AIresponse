@@ -4,16 +4,26 @@ const decimalString = z.union([z.number(), z.string()]).transform((v) => String(
 
 /** سعر المنتج: رقم غير سالب ضمن Decimal(12,2) — بدل ما يوصل لبريزما ويطلع 500. */
 const moneyString = decimalString.refine(
-  (v) => /^\d{1,10}(\.\d{1,4})?$/.test(v.trim()),
-  { message: "Invalid price: must be a non-negative number up to 10 digits" }
+  (v) => /^\d{1,10}(\.\d{1,2})?$/.test(v.trim()),
+  { message: "Invalid price: must be a non-negative number up to 10 digits and 2 decimals" }
 );
+
+export const COMPARE_AT_PRICE_MESSAGE = "السعر قبل الخصم لازم يكون أكبر من السعر الحالي";
+
+/** لما الحقلين موجودين بنفس الطلب: السعر قبل الخصم لازم يكون أعلى من السعر. */
+function checkCompareAtPrice(d: { price?: string; compareAtPrice?: string | null }, ctx: z.RefinementCtx) {
+  if (d.price === undefined || d.price === null || d.compareAtPrice === undefined || d.compareAtPrice === null) return;
+  if (Number(d.compareAtPrice) <= Number(d.price)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["compareAtPrice"], message: COMPARE_AT_PRICE_MESSAGE });
+  }
+}
 
 export const priceTierInputSchema = z.object({
   label: z.string().trim().min(1).max(60),
   price: moneyString,
 });
 
-export const productInputSchema = z.object({
+const productFieldsSchema = z.object({
   name: z.string().trim().min(1).max(200),
   sku: z.string().trim().min(1).max(64),
   description: z.string().max(10000).nullable().optional(),
@@ -35,9 +45,11 @@ export const productInputSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-export const productUpdateSchema = productInputSchema.partial().extend({
+export const productInputSchema = productFieldsSchema.superRefine(checkCompareAtPrice);
+
+export const productUpdateSchema = productFieldsSchema.partial().extend({
   isArchived: z.boolean().optional(),
-}).refine((d) => Object.keys(d).length > 0, { message: "No fields to update" });
+}).superRefine(checkCompareAtPrice).refine((d) => Object.keys(d).length > 0, { message: "No fields to update" });
 
 export const listParamsSchema = z.object({
   q: z.string().trim().max(100).optional(),

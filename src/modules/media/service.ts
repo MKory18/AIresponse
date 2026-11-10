@@ -5,6 +5,8 @@ import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db, Paginated } from "@/modules/customers/service";
 import { getStorage, generateStorageKey, validateUpload, assertMagicBytes } from "./storage";
+import { mediaFitsChannel, type ChannelMediaKind } from "./channel-limits";
+import { ALREADY_SENT_STATUSES } from "@/modules/channels/delivery-status";
 export { validateUpload } from "./storage";
 
 /**
@@ -18,6 +20,13 @@ export const CUSTOMER_INBOUND: MediaCategory = "CUSTOMER_INBOUND";
 /** شرط الاستثناء — بينضاف لكل استعلام مشترك. */
 export function excludeCustomerInbound(): Prisma.MediaAssetWhereInput {
   return { category: { not: CUSTOMER_INBOUND } };
+}
+
+/** صور آراء الزبائن مربوطة بمنتج، بس هي مش صورة المنتج. */
+const NOT_PRODUCT_PHOTO: MediaCategory[] = ["FEEDBACK", "TESTIMONIAL"];
+
+export function isProductPhotoCategory(category: string): boolean {
+  return category !== CUSTOMER_INBOUND && !(NOT_PRODUCT_PHOTO as string[]).includes(category);
 }
 import { signPayload } from "@/core/crypto";
 import { getEnv } from "@/core/env";
@@ -255,7 +264,13 @@ export async function findProductMedia(
   const wantType = type ?? "IMAGE";
   const [direct, links] = await Promise.all([
     db.mediaAsset.findMany({
-      where: { workspaceId, productId, type: wantType, ...excludeCustomerInbound() },
+      where: {
+        workspaceId,
+        productId,
+        type: wantType,
+        ...excludeCustomerInbound(),
+        AND: [{ category: { notIn: NOT_PRODUCT_PHOTO } }],
+      },
       orderBy: [{ createdAt: "desc" }],
       take: limit,
     }),
@@ -263,7 +278,9 @@ export async function findProductMedia(
       where: { productId, workspaceId },
       include: { mediaAsset: true },
       orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
-      take: limit,
+      // Filtered in memory below: `limit` rows of testimonials must not
+      // use up the window and hide the real photos behind them.
+      take: Math.max(limit * 5, 50),
     }),
   ]);
   const seen = new Set<string>();
@@ -275,7 +292,7 @@ export async function findProductMedia(
     if (
       a &&
       a.workspaceId === workspaceId &&
-      a.category !== CUSTOMER_INBOUND &&
+      isProductPhotoCategory(a.category) &&
       a.type === wantType &&
       !seen.has(a.id)
     ) {
@@ -293,38 +310,64 @@ export async function findProductMedia(
 }
 
 /**
- * THE NEXT PHOTO THIS CONVERSATION HAS NOT SEEN — OR WHY THERE IS NONE.
+ * THE NEXT PHOTOS THIS CONVERSATION HAS NOT SEEN — OR WHY THERE ARE NONE.
  *
  * IMAGE only (never a video answering as a photo, never a customer
- * inbound — both enforced by findProductMedia), one at a time, each
+ * inbound, never a testimonial — all enforced by findProductMedia), each
  * photo once per conversation: when every photo went out already, no
- * repeat without a reason. Whether the file fits the channel is decided
- * at the send itself (see dispatchOutbound), so AI picks, human picks
- * and campaigns all share one table.
+ * repeat without a reason. dispatchOutbound still re-checks the channel at
+ * the send itself; passing `channelType` lets the caller know BEFORE it
+ * tells the customer a photo is coming.
+ *
+ * `sourceMessageId` keeps a retry stable: what this same turn already sent
+ * does not count as seen, so the retry picks the same photos and the
+ * idempotency keys skip them, instead of moving on to new ones.
  */
+export async function pickUnsentProductImages(
+  db: Db,
+  workspaceId: string,
+  conversationId: string,
+  productId: string,
+  max = 3,
+  opts: { channelType?: string | null; sourceMessageId?: string } = {}
+): Promise<{ mediaIds: string[]; skipped?: string }> {
+  const [images, sent] = await Promise.all([
+    findProductMedia(db, workspaceId, productId, 10, "IMAGE"),
+    db.message.findMany({
+      where: { conversationId, direction: "OUTBOUND", deliveryStatus: { in: [...ALREADY_SENT_STATUSES] } },
+      select: { metadata: true, outboundIdempotencyKey: true },
+    }),
+  ]);
+  if (images.length === 0) return { mediaIds: [], skipped: "NO_IMAGE" };
+  const ownKey = opts.sourceMessageId ? `${conversationId}:${opts.sourceMessageId}` : null;
+  const sentIds = new Set<string>();
+  for (const m of sent) {
+    const key = m.outboundIdempotencyKey;
+    if (ownKey && (key === ownKey || key?.startsWith(`${ownKey}:img:`))) continue;
+    const id = (m.metadata as { mediaId?: unknown } | null)?.mediaId;
+    if (typeof id === "string") sentIds.add(id);
+  }
+  const unsent = images.filter((img) => !sentIds.has(img.id));
+  if (unsent.length === 0) return { mediaIds: [], skipped: "ALL_SENT" };
+  const channelType = opts.channelType;
+  const fitting = channelType
+    ? unsent.filter(
+        (img) => mediaFitsChannel({ type: img.type as ChannelMediaKind, mimeType: img.mimeType, size: img.size }, channelType).ok
+      )
+    : unsent;
+  if (fitting.length === 0) return { mediaIds: [], skipped: "CHANNEL_UNFIT" };
+  return { mediaIds: fitting.slice(0, Math.max(1, max)).map((img) => img.id) };
+}
+
+/** One photo: the single-image case of pickUnsentProductImages. */
 export async function pickUnsentProductImage(
   db: Db,
   workspaceId: string,
   conversationId: string,
   productId: string
 ): Promise<{ mediaId: string | null; skipped?: string }> {
-  const [images, sent] = await Promise.all([
-    findProductMedia(db, workspaceId, productId, 10, "IMAGE"),
-    db.message.findMany({
-      where: { conversationId, direction: "OUTBOUND", deliveryStatus: "SENT" },
-      select: { metadata: true },
-    }),
-  ]);
-  const sentIds = new Set<string>();
-  for (const m of sent) {
-    const id = (m.metadata as { mediaId?: unknown } | null)?.mediaId;
-    if (typeof id === "string") sentIds.add(id);
-  }
-  for (const img of images) {
-    if (!sentIds.has(img.id)) return { mediaId: img.id };
-  }
-  if (images.length === 0) return { mediaId: null, skipped: "NO_IMAGE" };
-  return { mediaId: null, skipped: "ALL_SENT" };
+  const picked = await pickUnsentProductImages(db, workspaceId, conversationId, productId, 1);
+  return picked.mediaIds.length > 0 ? { mediaId: picked.mediaIds[0] } : { mediaId: null, skipped: picked.skipped };
 }
 
 export async function findFeedbackMedia(db: Db, workspaceId: string, productId: string, limit = 3) {

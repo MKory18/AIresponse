@@ -21,8 +21,9 @@ import { extractionResultSchema, validateStructured, type ExtractionResult, type
 import { heuristicIntent, looksLikeInjection } from "../intent";
 import { saveMemories, loadMemory } from "../memory";
 import { buildAIContext } from "../context-builder";
-import { buildCatalogBoundary } from "../catalog-boundary";
+import { buildCatalogBoundary, loadRecallGuard, scrubRecalledHistory } from "../catalog-boundary";
 import { wantsMedia } from "@/modules/media/request";
+import { searchKnowledgeChunks } from "@/modules/knowledge/retriever";
 import type { VectorStore } from "@/modules/knowledge/vector-store";
 import { PgVectorStore } from "@/modules/knowledge/vector-store";
 import { prisma } from "@/core/db/prisma";
@@ -41,6 +42,27 @@ import type {
 } from "./state";
 
 const log = childLogger("orchestrator");
+
+const KNOWLEDGE_LIMIT = 4;
+
+/**
+ * Extraction only classifies, and the reply can go on without it (heuristic
+ * fallback below), so it must never spend the job's 120s limit. The response
+ * call keeps AI_REQUEST_TIMEOUT_MS.
+ */
+function extractionTimeoutMs(): number {
+  return Math.max(1000, parseInt(process.env.AI_EXTRACTION_TIMEOUT_MS ?? "15000", 10) || 15000);
+}
+
+function extractionAttempts(): number {
+  return Math.min(3, Math.max(1, parseInt(process.env.AI_EXTRACTION_ATTEMPTS ?? "1", 10) || 1));
+}
+
+/** Started now, awaited later: a failure must surface there, not as unhandled. */
+function startedEarly<T>(work: Promise<T>): Promise<T> {
+  work.catch(() => undefined);
+  return work;
+}
 
 // Pure visual asks are safe to classify without the model — they carry no
 // order fields. Any order/price/contact signal keeps the normal path so a
@@ -76,15 +98,60 @@ export async function runExtraction(
     provider,
   } = gate;
 
+  // Read-only and independent of what the model extracts: running while the
+  // catalog and the extraction call do. Awaited where they are used.
+  const memoriesPending = startedEarly(loadMemory(db, params.workspaceId, customer.id));
+
+  // Catalog resolution runs FIRST: the page's catalog scopes the history the
+  // model sees, the REPLY candidates and — through the same allowlist — ORDER
+  // INTAKE below. One resolution, one trusted source; no second round-trip.
+  // resolveCatalogForChannel short-circuits workspaces with no catalogs
+  // internally:
+  // no_catalogs → undefined (legacy: every product may answer/order),
+  // assigned+active → ids, otherwise → [] (nothing may answer/order).
+  const { resolveCatalogForChannel, catalogProductIds } = await import(
+    "@/modules/catalog/service"
+  );
+  const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
+  log.info(
+    { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
+    "ai_catalog_resolved"
+  );
+  const allowedProductIds =
+    resolved.status === "ok"
+      ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id, resolved.catalog)
+      : resolved.status === "no_catalogs"
+        ? undefined
+        : [];
+
+  // Document search needs only the words and the page's catalog, not the
+  // extracted product: it runs during the extraction call below.
+  const vectorStore = deps.vectorStore ?? getVectorStore();
+  const chunksPending = startedEarly(
+    searchKnowledgeChunks(db, vectorStore, {
+      workspaceId: params.workspaceId,
+      query: customerText,
+      limit: KNOWLEDGE_LIMIT,
+      allowedProductIds,
+    })
+  );
+
+  // P18 — حدود الكتالوج: أسماء المنتجات المسموحة تُحقن بتعليمات الرد، وأسماء
+  // المنتجات خارجها تُشال من الذاكرة/الملخص/السجل كي لا «يتذكّرها» الذكاء.
+  // undefined = ما في كتالوجات أصلًا (سلوك قديم) → بلا حدود ولا فلترة.
+  const recallGuard = await loadRecallGuard(db, params.workspaceId, allowedProductIds);
+  const catalogBoundary = recallGuard ? buildCatalogBoundary(recallGuard.allowedNames) : undefined;
+
   // 5. Intent + entity extraction (structured, repaired, retried, fallback).
   const modelCfg = resolveModel(settings, "EXTRACTION");
   // Newest-last copy; the original array is shared with later stages.
   const historyAsc = [...recentMessages].reverse();
   const extractionUser = wrapUntrustedCustomerContent(
     customerText,
-    historyAsc.map((m) => ({
+    scrubRecalledHistory(recallGuard, historyAsc, message.id).map((m) => ({
       sender: m.senderType,
-      text: m.text ?? "[وسائط]",
+      // `||`: a media-only reply is stored with empty text.
+      text: m.text || "[وسائط]",
     }))
   );
   // Latency: extraction classifies intent/entities only — it does NOT write
@@ -154,9 +221,10 @@ export async function runExtraction(
               model: modelCfg.model,
               temperature: modelCfg.temperature,
               maxTokens: modelCfg.maxTokens,
+              timeoutMs: extractionTimeoutMs(),
               validate: (raw) => validateStructured(extractionResultSchema, raw),
             }, { pii: customerPII, trustedContacts, purpose: "EXTRACTION" }),
-          { attempts: 2 }
+          { attempts: extractionAttempts() }
         )
       );
       extraction = res.value;
@@ -218,44 +286,6 @@ export async function runExtraction(
   // Injection defence: customer content never escalates or changes policy.
   const injection = looksLikeInjection(customerText);
 
-  // Catalog resolution runs FIRST: the page's catalog scopes both the REPLY
-  // candidates and — through the same allowlist — ORDER INTAKE below. One
-  // resolution, one trusted source; no second round-trip later.
-  // resolveCatalogForChannel short-circuits workspaces with no catalogs
-  // internally:
-  // no_catalogs → undefined (legacy: every product may answer/order),
-  // assigned+active → ids, otherwise → [] (nothing may answer/order).
-  const { resolveCatalogForChannel, catalogProductIds } = await import(
-    "@/modules/catalog/service"
-  );
-  const resolved = await resolveCatalogForChannel(db, params.workspaceId, conversation.channelId);
-  log.info(
-    { conversationId: conversation.id, channelId: conversation.channelId, catalog: resolved.status },
-    "ai_catalog_resolved"
-  );
-  const allowedProductIds =
-    resolved.status === "ok"
-      ? await catalogProductIds(db, params.workspaceId, resolved.catalog.id)
-      : resolved.status === "no_catalogs"
-        ? undefined
-        : [];
-
-  // P18 — حدود الكتالوج: أسماء المنتجات المسموحة تُحقن بتعليمات الرد كي لا
-  // «يتذكّر» الذكاء منتجًا حُذف من كتالوج الصفحة (من محادثة/معرفة/ذاكرة).
-  // undefined = ما في كتالوجات أصلًا (سلوك قديم) → بلا حدود.
-  let catalogBoundary: string | undefined;
-  if (allowedProductIds !== undefined) {
-    const ids = allowedProductIds.slice(0, 40);
-    const names =
-      ids.length > 0
-        ? ((await db.product.findMany({
-            where: { workspaceId: params.workspaceId, id: { in: ids }, isActive: true, isArchived: false },
-            select: { name: true },
-          })) as { name: string }[]).map((p) => p.name)
-        : [];
-    catalogBoundary = buildCatalogBoundary(names);
-  }
-
   // Order Intelligence: deterministic draft/rules handling for order intents.
   let orderResult: Awaited<ReturnType<typeof handleOrderIntent>> | null = null;
   if (
@@ -291,7 +321,7 @@ export async function runExtraction(
   ];
   const [memories, productId] = await timed("memoryProduct", () =>
     Promise.all([
-      loadMemory(db, params.workspaceId, customer.id),
+      memoriesPending,
       resolveProductId(
         db,
         params.workspaceId,
@@ -302,7 +332,6 @@ export async function runExtraction(
       ),
     ])
   );
-  const vectorStore = deps.vectorStore ?? getVectorStore();
   const context = await timed("context", () =>
     buildAIContext(db, vectorStore, {
       workspaceId: params.workspaceId,
@@ -310,7 +339,8 @@ export async function runExtraction(
       productId: productId ?? undefined,
       // P18 — نفس حدود الصفحة تُطبَّق على المعرفة/الأسئلة الجاهزة.
       allowedProductIds,
-      knowledgeLimit: 4,
+      knowledgeLimit: KNOWLEDGE_LIMIT,
+      preloadedChunks: chunksPending,
     })
   );
 
@@ -350,6 +380,7 @@ export async function runExtraction(
           conversationId: conversation.id,
           quantity: extraction.entities.quantity ?? null,
           recordEvents: !params.dryRun,
+          allowedProductIds,
         });
       }
     } catch (err) {
@@ -393,6 +424,7 @@ export async function runExtraction(
       extractionUser,
       salesPlan,
       catalogBoundary,
+      recallGuard,
     },
   };
 }
