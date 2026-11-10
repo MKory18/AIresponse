@@ -197,7 +197,7 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
     },
     async create(args: any) {
       const row: Row = {
-        id: `c-${name}-${store.length + 1}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `c-${name}-${String(store.length + 1).padStart(6, "0")}-${Math.random().toString(36).slice(2, 8)}`,
         createdAt: new Date(),
         updatedAt: new Date(),
         ...defaults,
@@ -338,7 +338,7 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
           if (dup) continue;
         }
         store.push({
-          id: `c-${name}-${store.length + 1}-${Math.random().toString(36).slice(2, 8)}`,
+          id: `c-${name}-${String(store.length + 1).padStart(6, "0")}-${Math.random().toString(36).slice(2, 8)}`,
           createdAt: new Date(),
           updatedAt: new Date(),
           ...defaults,
