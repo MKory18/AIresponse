@@ -1,5 +1,6 @@
 ﻿import type { Prisma, StockStatus } from "@prisma/client";
 import { customerFacingPriceTiers } from "./price-tiers";
+import { COMPARE_AT_PRICE_MESSAGE } from "./schemas";
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
@@ -204,6 +205,15 @@ export async function updateProduct(
       select: { id: true },
     });
     if (clash) throw new ConflictError("A product with this SKU already exists");
+  }
+
+  // تحديث جزئي: المخطط ما بيعرف القيمة المخزّنة، فالمقارنة هون مع القيمة الفعلية.
+  if (data.price !== undefined || data.compareAtPrice !== undefined) {
+    const compareAt = data.compareAtPrice !== undefined ? data.compareAtPrice : existing.compareAtPrice;
+    const price = data.price ?? existing.price;
+    if (compareAt !== null && compareAt !== undefined && Number(compareAt) <= Number(price)) {
+      throw new AppError(COMPARE_AT_PRICE_MESSAGE, 422, "INVALID_COMPARE_AT_PRICE");
+    }
   }
 
   // تدقيق الأسعار قبل التحديث — رفض صريح ما يخلّي تحديث جزئي متضارب.

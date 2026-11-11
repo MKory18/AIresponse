@@ -92,6 +92,8 @@ export interface ExtractionReady {
    * undefined = ما في كتالوجات بالمساحة (السلوك القديم) · نص = حدّ صريح للرد.
    */
   catalogBoundary?: string;
+  /** أسماء منتجات خارج كتالوج الصفحة لفلترة نص الموديل؛ null = بلا كتالوجات. */
+  recallGuard?: import("../catalog-boundary").RecallGuard | null;
 }
 
 export type { Db };

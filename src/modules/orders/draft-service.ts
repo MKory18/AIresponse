@@ -592,6 +592,49 @@ export async function cancelDraft(db: Db, ctx: ActorContext, draftId: string) {
   return draft;
 }
 
+/**
+ * مسودات مفتوحة فيها منتج طلع من كتالوج الصفحة: المنتج بيتشال وبيانات التواصل
+ * بتضل، والمسودة بترجع لجمع البيانات — فما بتتأكد ولا بتظهر بملخص أو سؤال.
+ * يرجّع عدد المسودات اللي تعدّلت.
+ */
+export async function retireOutOfCatalogDraftItems(
+  db: Db,
+  params: { workspaceId: string; conversationId: string; allowedProductIds: string[] }
+): Promise<number> {
+  const open = await listOpenDrafts(db, params.workspaceId, params.conversationId);
+  const allowed = new Set(params.allowedProductIds);
+  let retired = 0;
+  for (const draft of open) {
+    const items = parseDraftItems(draft);
+    const kept = items.filter((item) => item.productId && allowed.has(item.productId));
+    const orphanName = items.length === 0 && Boolean(draft.productName);
+    if (kept.length === items.length && !orphanName) continue;
+
+    const requiredFields = await getRequiredOrderFields(db, params.workspaceId, params.conversationId);
+    const data: Prisma.OrderDraftUncheckedUpdateInput = {};
+    applyCartToDraftData(data, kept);
+    data.missingFields = computeMissingFields(
+      { items: kept, productId: kept[0]?.productId ?? null, quantity: kept[0]?.quantity ?? null, customerName: draft.customerName, phone: draft.phone, rawAddress: draft.rawAddress, province: draft.province },
+      requiredFields
+    );
+    if (draft.state === "READY" || draft.state === "CONFIRMING") {
+      assertDraftTransition(draft.state as OrderDraftState, "COLLECTING");
+      data.state = "COLLECTING";
+    }
+    await db.orderDraft.update({ where: { id: draft.id }, data });
+    await recordAudit(db, {
+      workspaceId: params.workspaceId,
+      action: "order_draft.updated",
+      entityType: "OrderDraft",
+      entityId: draft.id,
+      metadata: { source: "CATALOG_BOUNDARY", removedProductIds: items.filter((i) => !kept.includes(i)).map((i) => i.productId) },
+    });
+    await eventBus.publish(makeEvent("OrderDraftUpdated", params.workspaceId, { draftId: draft.id, catalogBoundary: true }));
+    retired += 1;
+  }
+  return retired;
+}
+
 /** Deterministic order summary text for the AI to phrase (never prices from AI). */
 export function buildDraftSummary(draft: {
   items?: unknown;

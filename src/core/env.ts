@@ -39,6 +39,8 @@ const envSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
   ALLOW_MOCK_AI: z.string().optional(),
   AI_REQUEST_TIMEOUT_MS: z.string().optional(),
+  AI_EXTRACTION_TIMEOUT_MS: z.string().optional(),
+  AI_EXTRACTION_ATTEMPTS: z.string().optional(),
   FACEBOOK_SEND_TIMEOUT_MS: z.string().optional(),
   ORPHAN_MAX_AGE_HOURS: z.string().optional(),
   // مدة الاحتفاظ بوسائط الزبون الواردة بالأيام (افتراضي 180 · `0` = مطفي).

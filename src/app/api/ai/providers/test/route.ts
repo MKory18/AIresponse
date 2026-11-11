@@ -127,7 +127,7 @@ export const POST = createHandler(
       }
       const key = decryptSecret(enc);
       endpoint = normalizeHermesEndpoint(base);
-      model = resolveModel(settings as never, "RESPONSE").model;
+      model = resolveModel(settings as never, "RESPONSE").model || "gpt-4o-mini";
       // المفتاح المخصص ما بيرجع بالنتيجة — بس الحالة والتأخير والسبب.
       const probe = await runProbe(endpoint, key, model, { followRedirects: false });
       return ok({

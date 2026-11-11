@@ -72,7 +72,8 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
 
   const tasks = AI_TASKS.map((task: AiTask) => {
     const resolved = resolveModel(settings as never, task);
-    const compat = validateTaskModel(task, resolved.model);
+    // Empty = the provider's own default applies; there is no name to judge.
+    const compat = resolved.model ? validateTaskModel(task, resolved.model) : { compatible: true, reason: "OK" };
     return {
       task,
       model: resolved.model,

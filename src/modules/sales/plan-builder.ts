@@ -107,6 +107,8 @@ export interface BuildSalesPlanInput {
   quantity?: number | null;
   /** تسجيل أحداث المقياس (يُعطَّل في المحاكاة). */
   recordEvents?: boolean;
+  /** حدود كتالوج الصفحة: undefined = بلا كتالوجات (السلوك القديم). */
+  allowedProductIds?: string[];
 }
 
 function num(v: unknown): number | null {
@@ -215,7 +217,13 @@ export async function buildSalesPlan(
       const rows = await (db as unknown as {
         product: { findMany: (a: unknown) => Promise<Array<Record<string, unknown>>> };
       }).product.findMany({
-        where: { workspaceId: input.workspaceId, sku: { in: skus }, isActive: true, isArchived: false },
+        where: {
+          workspaceId: input.workspaceId,
+          sku: { in: skus },
+          isActive: true,
+          isArchived: false,
+          ...(input.allowedProductIds ? { id: { in: input.allowedProductIds } } : {}),
+        },
       });
       for (const row of rows) {
         if (crossSell.length >= MAX_CROSS_SELL) break;

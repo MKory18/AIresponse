@@ -411,7 +411,21 @@ export const AI_JOB_CONCURRENCY = Math.min(
 );
 
 /** Jobs on the path to the customer reply: picked up before everything else. */
-const REPLY_PATH_JOB_TYPES = ["process_webhook_event", "process_ai_message"] as const;
+const REPLY_PATH_JOB_TYPES = ["process_webhook_event", "process_channel_inbound", "process_ai_message"] as const;
+
+const MIN_DEFER_MS = 500;
+const DEFER_BACKOFF_AFTER_MS = 30_000;
+const DEFER_BACKOFF_MS = 5_000;
+
+/**
+ * How long a deferred job waits. Never below the floor, so no handler can spin
+ * the queue; and a job that has been waiting a while (its older sibling sits in
+ * a long retry back-off) stops re-checking every second. Pure function (tested).
+ */
+export function deferDelayMs(requestedMs: number, jobAgeMs: number): number {
+  const delay = Math.max(MIN_DEFER_MS, requestedMs);
+  return jobAgeMs > DEFER_BACKOFF_AFTER_MS ? Math.max(delay, DEFER_BACKOFF_MS) : delay;
+}
 
 /**
  * Jobs that wait on the AI provider. Run sequentially, a batch of slow
@@ -533,7 +547,7 @@ async function processJobBatch(
         data: {
           status: "PENDING",
           attempts: job.attempts,
-          runAfter: new Date(Date.now() + result.deferMs),
+          runAfter: new Date(Date.now() + deferDelayMs(result.deferMs, Date.now() - new Date(job.createdAt).getTime())),
           startedAt: null,
           lockedAt: null,
           lockedBy: null,
@@ -654,21 +668,33 @@ export async function processPendingJobs(
   opts: { limit?: number; workerId?: string; maintenance?: boolean; sameCycle?: boolean } = {}
 ): Promise<{ processed: number; failed: number }> {
   const limit = opts.limit ?? 10;
+  const cycleStartedAt = new Date();
+  let orphanSweep: Promise<number> = Promise.resolve(0);
   if (opts.maintenance !== false) {
     await recoverStaleJobs(db);
     // Recover stuck outbound messages across all workspaces before processing new jobs
     await recoverStuckOutboundMessages(db, { maxAgeMinutes: 10, limit: 20 });
     // Durable backstop: re-queue inbound messages that never reached a terminal
     // AI decision (enqueue failure, exhausted job attempts, worker downtime).
-    await recoverOrphanedInboundMessages(db, { limit: 20 });
+    // It pages through many rows, so it runs beside the batch instead of ahead
+    // of it. Awaited below: one sweep per cycle, never one left running.
+    orphanSweep = recoverOrphanedInboundMessages(db, { limit: 20 }).then(
+      (r) => r.recovered,
+      (err) => {
+        log.error({ error: err instanceof Error ? err.message : String(err) }, "orphan_sweep_failed");
+        return 0;
+      }
+    );
   }
 
-  const cycleStartedAt = new Date();
   const result = await processJobBatch(db, handlers, limit, opts.workerId);
+  const orphansRecovered = await orphanSweep;
 
-  if (opts.sameCycle) {
+  if (opts.sameCycle || orphansRecovered > 0) {
     // Only jobs created AFTER the first batch's snapshot — no re-running work
     // the batch already claimed (that would be a no-op but wasted queries).
+    // A recovered orphan is answered this cycle, as it was before the sweep
+    // moved beside the batch.
     const extra = await processJobBatch(db, handlers, limit, opts.workerId, cycleStartedAt);
     result.processed += extra.processed;
     result.failed += extra.failed;

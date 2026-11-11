@@ -2,7 +2,7 @@ import type { Db } from "@/modules/customers/service";
 import { AppError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
 import { parseQuantity, parseConfirmation, normalizePhone, type ResolvableProduct } from "./primitives";
-import { listOpenDrafts, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, parseDraftItems, type DraftItem } from "./draft-service";
+import { listOpenDrafts, updateDraftFromExtraction, buildDraftSummary, getOwnedDraft, parseDraftItems, retireOutOfCatalogDraftItems, type DraftItem } from "./draft-service";
 import { evaluateOrderRules, aggregateVerdict, publishDuplicateEvent, detectDuplicate } from "./rules";
 import { createOrderFromDraft, mergeCustomerData, updateOrderFromChat, cancelLatestOrderFromConversation } from "./order-service";
 import type { ExtractionResult } from "@/modules/ai/structured";
@@ -64,6 +64,15 @@ export async function handleOrderIntent(
 ): Promise<OrderIntelligenceResult> {
   const { extraction } = params;
   const intent = extraction.intent;
+
+  // حدود الكتالوج أولًا: مسودة منتجها طلع من الصفحة ما بتتأكد ولا بتنذكر.
+  const retiredDrafts = params.allowedProductIds
+    ? await retireOutOfCatalogDraftItems(db, {
+        workspaceId: params.workspaceId,
+        conversationId: params.conversationId,
+        allowedProductIds: params.allowedProductIds,
+      })
+    : 0;
 
   // 1. Explicit cancel — مسودة واحدة فقط، ولو في أكثر من وحدة نسأل.
   if (intent === "ORDER_CANCEL") {
@@ -175,6 +184,13 @@ export async function handleOrderIntent(
           return { handled: true, action: "NONE" };
         }
       }
+    } else if (retiredDrafts > 0 && parseConfirmation(params.customerText).signal === "YES") {
+      return {
+        handled: true,
+        action: "ASK_MISSING_FIELD",
+        missingFields: ["product", "quantity"],
+        summaryText: "المنتج اللي كان بالطلب ما عاد متاح على هالصفحة، والطلب ما تأكد. بيانات التواصل محفوظة — اسأل العميل شو المنتج اللي بده ياه من المتاح.",
+      };
     }
   }
 

@@ -12,6 +12,8 @@ export interface TextRequest {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** This call's own limit. Unset = AI_REQUEST_TIMEOUT_MS. Never sent to the model. */
+  timeoutMs?: number;
 }
 
 export interface StructuredRequest<T> extends TextRequest {
@@ -101,10 +103,10 @@ export class OpenAICompatibleProvider implements AIProvider {
     return this.defaultModel;
   }
 
-  private async chat(body: Record<string, unknown>): Promise<AIResponse> {
+  private async chat(body: Record<string, unknown>, requestTimeoutMs?: number): Promise<AIResponse> {
     const started = Date.now();
     // Bounded execution: a hung provider must never hang the worker forever.
-    const timeoutMs = Math.max(1000, parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? "60000", 10) || 60000);
+    const timeoutMs = requestTimeoutMs ?? Math.max(1000, parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? "60000", 10) || 60000);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res: Response;
@@ -128,7 +130,8 @@ export class OpenAICompatibleProvider implements AIProvider {
       }
       throw err;
     }
-    clearTimeout(timer);
+    // A call with its own limit stays bounded while the body arrives too.
+    if (requestTimeoutMs === undefined || !res.ok) clearTimeout(timer);
     if (!this.followRedirects && (res.type === "opaqueredirect" || res.status === 0 || (res.status >= 300 && res.status < 400))) {
       throw new AIProviderError(
         `${this.name} endpoint refused: server answered with a redirect (REDIRECT_BLOCKED). Point the endpoint at the final gateway URL — redirects are never followed.`,
@@ -154,10 +157,20 @@ export class OpenAICompatibleProvider implements AIProvider {
         httpStatus: status,
       });
     }
-    const json = (await res.json()) as {
+    let json: {
       choices: { message: { content: string } }[];
       usage?: { prompt_tokens: number; completion_tokens: number };
     };
+    try {
+      json = (await res.json()) as typeof json;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new AIProviderError(`${this.name} request timed out after ${timeoutMs}ms`, { retryable: true });
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     const text = json.choices[0]?.message?.content ?? "";
     if (!text.trim()) {
       throw new AIProviderError(`${this.name} returned an empty response`);
@@ -171,15 +184,18 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   async generateText(req: TextRequest): Promise<AIResponse> {
-    return this.chat({
-      model: req.model ?? this.defaultModel,
-      messages: [
-        { role: "system", content: req.system },
-        { role: "user", content: req.user },
-      ],
-      temperature: req.temperature ?? 0.4,
-      max_tokens: req.maxTokens ?? 500,
-    });
+    return this.chat(
+      {
+        model: req.model?.trim() || this.defaultModel,
+        messages: [
+          { role: "system", content: req.system },
+          { role: "user", content: req.user },
+        ],
+        temperature: req.temperature ?? 0.4,
+        max_tokens: req.maxTokens ?? 500,
+      },
+      req.timeoutMs
+    );
   }
 
   async generateStructured<T>(req: StructuredRequest<T>): Promise<AIResponse & { value: T }> {
@@ -197,7 +213,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   async generateVision(req: VisionRequest): Promise<AIResponse> {
     return this.chat({
-      model: req.model ?? this.defaultModel,
+      model: req.model?.trim() || this.defaultModel,
       messages: [
         { role: "system", content: req.system },
         {

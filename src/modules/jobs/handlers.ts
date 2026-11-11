@@ -191,7 +191,9 @@ async function handleProcessMedia(db: HandlerDb, payload: Record<string, unknown
   return { success: true };
 }
 
-const AI_DEFERRED_RETRY_MS = 3_000;
+// The ordering guard decides on every retry; the queue enforces the floor and
+// the back-off (deferDelayMs), so this short delay cannot hot-loop.
+export const AI_DEFERRED_RETRY_MS = 1_000;
 
 /** process_ai_message: runs the AI orchestrator for one inbound message. */
 async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string; deferMs?: number }> {
