@@ -225,7 +225,11 @@ describe("c. read-only work starts before the extraction call finishes", () => {
     expect(catalogReads).toBe(1);
   });
 
-  it("a failing document search still fails the turn the way it did", async () => {
+  // Changed on purpose (tests/reply-every-message.test.ts): documents only
+  // enrich the reply. A failing search used to throw the whole turn and park
+  // the job in its 30s back-off with the customer unanswered; now the reply
+  // goes out without documents and the failure is logged.
+  it("a failing document search no longer fails the turn: the reply goes out without documents", async () => {
     await createProduct(asDb(), { userId: "a", workspaceId: WS }, { name: NAME, sku: "R", price: 25, currency: "USD" } as never);
     const channelId = await makePage();
     const msg = await inbound(channelId, REAL_QUESTION);
@@ -233,13 +237,13 @@ describe("c. read-only work starts before the extraction call finishes", () => {
     provider.intentHandler = () => ({ intent: "PRODUCT_QUESTION", confidence: 0.9, entities: {}, missingFields: [], memories: [], requestedAction: "ANSWER" }) as never;
     provider.responseHandler = () => "أهلا فيك";
     setMockAIProvider(provider);
-    await expect(
-      processAIMessage(
-        asDb(),
-        { conversationId: msg.conversationId, messageId: msg.messageId, workspaceId: WS },
-        { vectorStore: { size: 1, search: async () => { throw new Error("search down"); } } as never }
-      )
-    ).rejects.toThrow("search down");
+    const res = await processAIMessage(
+      asDb(),
+      { conversationId: msg.conversationId, messageId: msg.messageId, workspaceId: WS },
+      { vectorStore: { size: 1, search: async () => { throw new Error("search down"); } } as never }
+    );
+    expect(res.status).toBe("RESPONDED");
+    expect(res.response).toBe("أهلا فيك");
   });
 });
 

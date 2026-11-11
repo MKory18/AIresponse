@@ -229,20 +229,46 @@ async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unk
  * 1000 chunks + JSON.parse embeddings on EVERY message (latency fix).
  * Read-only snapshot semantics: a 60s delay in seeing new docs is acceptable.
  */
-const vectorStoreCache = new Map<string, { at: number; store: Awaited<ReturnType<typeof buildWorkspaceVectorStoreUncached>> }>();
+type WorkspaceVectorStore = Awaited<ReturnType<typeof buildWorkspaceVectorStoreUncached>>;
+const vectorStoreCache = new Map<string, { at: number; store: WorkspaceVectorStore }>();
+const vectorStoreLoading = new Map<string, Promise<WorkspaceVectorStore>>();
 const VECTOR_STORE_CACHE_MS = 60_000;
 
+/**
+ * Stale-while-revalidate: once a workspace has a store, an expired one is
+ * still served and the reload runs in the background — the minute-old copy
+ * is the same 60s staleness already accepted, and the reload (up to 1000
+ * rows + JSON.parse) no longer sits in front of a customer's reply. Only the
+ * very first message of a workspace in this process waits for the load.
+ */
 async function buildWorkspaceVectorStore(db: HandlerDb, workspaceId: string) {
   const cached = vectorStoreCache.get(workspaceId);
   if (cached && Date.now() - cached.at < VECTOR_STORE_CACHE_MS) return cached.store;
-  const store = await buildWorkspaceVectorStoreUncached(db, workspaceId);
-  vectorStoreCache.set(workspaceId, { at: Date.now(), store });
-  // Bound cache to avoid unbounded workspace growth in long-lived workers.
-  if (vectorStoreCache.size > 200) {
-    const oldest = [...vectorStoreCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];
-    if (oldest) vectorStoreCache.delete(oldest);
-  }
-  return store;
+  const loading = loadWorkspaceVectorStore(db, workspaceId);
+  if (!cached) return loading;
+  loading.catch((err) => {
+    log.warn({ workspaceId, error: err instanceof Error ? err.message : String(err) }, "vector_store_refresh_failed");
+  });
+  return cached.store;
+}
+
+/** One load per workspace at a time; concurrent replies share it. */
+function loadWorkspaceVectorStore(db: HandlerDb, workspaceId: string): Promise<WorkspaceVectorStore> {
+  const inFlight = vectorStoreLoading.get(workspaceId);
+  if (inFlight) return inFlight;
+  const loading = buildWorkspaceVectorStoreUncached(db, workspaceId)
+    .then((store) => {
+      vectorStoreCache.set(workspaceId, { at: Date.now(), store });
+      // Bound cache to avoid unbounded workspace growth in long-lived workers.
+      if (vectorStoreCache.size > 200) {
+        const oldest = [...vectorStoreCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];
+        if (oldest) vectorStoreCache.delete(oldest);
+      }
+      return store;
+    })
+    .finally(() => vectorStoreLoading.delete(workspaceId));
+  vectorStoreLoading.set(workspaceId, loading);
+  return loading;
 }
 
 async function buildWorkspaceVectorStoreUncached(db: HandlerDb, workspaceId: string) {

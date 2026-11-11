@@ -90,6 +90,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     // vectors stay consistent with each other.
     const { scrubForEmbedding } = await import("@/modules/ai/privacy-gate");
     const safeInput = scrubForEmbedding(text);
+    // Bounded: the reply path waits on this call; a stalled endpoint used to
+    // hold the reply until the 120s job limit.
+    const timeoutMs = Math.max(100, parseInt(process.env.EMBEDDING_TIMEOUT_MS ?? "8000", 10) || 8000);
     const res = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
       headers: {
@@ -97,6 +100,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({ model: this.model, input: safeInput }),
+      signal: AbortSignal.timeout(timeoutMs),
+    }).catch((err: unknown) => {
+      throw new AIError(`Embedding request failed: ${err instanceof Error ? err.name : "network error"}`);
     });
     if (!res.ok) {
       throw new AIError(`Embedding request failed with status ${res.status}`);
