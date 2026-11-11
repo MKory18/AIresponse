@@ -127,12 +127,21 @@ export async function runExtraction(
   // Document search needs only the words and the page's catalog, not the
   // extracted product: it runs during the extraction call below.
   const vectorStore = deps.vectorStore ?? getVectorStore();
+  // Documents enrich the reply; they never decide whether it goes out. A
+  // failed or slow embedding call used to throw out of the whole pipeline,
+  // and the job waited its 30s back-off with the customer unanswered.
   const chunksPending = startedEarly(
     searchKnowledgeChunks(db, vectorStore, {
       workspaceId: params.workspaceId,
       query: customerText,
       limit: KNOWLEDGE_LIMIT,
       allowedProductIds,
+    }).catch((err) => {
+      log.warn(
+        { conversationId: conversation.id, messageId: message.id, error: err instanceof Error ? err.message : "knowledge_search_failed" },
+        "knowledge_search_failed"
+      );
+      return [];
     })
   );
 
@@ -438,9 +447,9 @@ async function resolveProductId(
   // this workspace (legacy: every product may answer); [] = catalogs
   // exist but this page resolves none (nothing may answer).
   allowedIds?: string[] | null,
-  // Newest-first history. Only consulted when the customer asks for a
-  // picture and the current message names no product: «ورجيني الصورة»
-  // must still find the product discussed moments ago.
+  // Newest-first history. Only consulted when the current message names no
+  // product and either asks for a picture («ورجيني الصورة») or follows up
+  // on the product just discussed («قديش سعره» · «تمام بدي اطلب»).
   history: { senderType: string; text: string | null }[] = []
 ): Promise<string | null> {
   const candidates: string[] = [];
@@ -450,7 +459,7 @@ async function resolveProductId(
   candidates.push(...productSearchWords(customerText));
   const direct = await findProductId(db, workspaceId, candidates, allowedIds);
   if (direct) return direct;
-  if (wantsMedia(customerText) === null) return null;
+  if (wantsMedia(customerText) === null && !refersToDiscussedProduct(extraction)) return null;
   for (const past of history) {
     if (!past.text || past.text === customerText) continue;
     const found = await findProductId(
@@ -462,6 +471,27 @@ async function resolveProductId(
     if (found) return found;
   }
   return null;
+}
+
+/**
+ * Follow-ups about "it" — price, stock, usage, ordering — mean the product
+ * discussed moments ago. Without it the reply had no trusted price, the model
+ * quoted the price from its own earlier reply, the price guard rejected that
+ * as UNSUPPORTED_PRICE twice, and the customer got no reply at all.
+ * Greetings, delivery, complaints and unknown text keep no product.
+ */
+const PRODUCT_FOLLOW_UP_INTENTS = new Set([
+  "PRODUCT_QUESTION",
+  "PRICE_QUESTION",
+  "AVAILABILITY",
+  "HOW_TO_USE",
+  "BENEFITS",
+  "ORDER_CREATE",
+  "ORDER_UPDATE",
+]);
+
+function refersToDiscussedProduct(extraction: ExtractionResult): boolean {
+  return PRODUCT_FOLLOW_UP_INTENTS.has(extraction.intent) || extraction.requestedAction === "CREATE_ORDER";
 }
 
 /** Single query for all candidates (latency fix: never N sequential reads). */

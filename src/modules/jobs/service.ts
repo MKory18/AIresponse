@@ -284,12 +284,12 @@ export async function recoverOrphanedInboundMessages(
       where: { messageId: { in: messageIds }, purpose: "RESPONSE" },
       select: { messageId: true, status: true, createdAt: true },
     });
-    // SUCCESS/HANDOFF = decided. AI_FAILED = backoff accounting.
+    // SUCCESS/HANDOFF/SKIPPED (superseded) = decided. AI_FAILED = backoff accounting.
     // AI_DISABLED = visible but non-terminal (reprocessable on re-enable).
     const stateByMessage = new Map<string, { decided: boolean; failCount: number; lastFailureAt: number }>();
     for (const l of logs) {
       const entry = stateByMessage.get(l.messageId) ?? { decided: false, failCount: 0, lastFailureAt: 0 };
-      if (l.status === "SUCCESS" || l.status === "HANDOFF") {
+      if (l.status === "SUCCESS" || l.status === "HANDOFF" || l.status === "SKIPPED") {
         entry.decided = true;
       } else if (l.status === "AI_FAILED") {
         entry.failCount += 1;

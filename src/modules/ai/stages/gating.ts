@@ -36,6 +36,46 @@ const ORDERING_GUARD_FRESH_MINUTES = Math.max(
   parseInt(process.env.ORDERING_GUARD_FRESH_MINUTES ?? "30", 10) || 30
 );
 
+/**
+ * The newer message whose reply already covered this one — only when this
+ * message has failed before (AI_FAILED log, or its job recorded an error).
+ */
+async function findSupersedingReply(db: Db, messageId: string, conversationId: string, newerIds: string[]): Promise<string | null> {
+  const [failedLog, failedJobs] = await Promise.all([
+    db.aIUsageLog.findFirst({ where: { messageId, purpose: "RESPONSE", status: "AI_FAILED" }, select: { id: true } }),
+    (db as any).backgroundJob.findMany({
+      where: { type: "process_ai_message", idempotencyKey: `ai:${messageId}` },
+      select: { lastError: true },
+    }) as Promise<Array<{ lastError: string | null }>>,
+  ]);
+  if (!failedLog && !failedJobs.some((j) => j.lastError)) return null;
+  const [decided, sentReply] = await Promise.all([
+    db.aIUsageLog.findFirst({
+      where: { messageId: { in: newerIds }, purpose: "RESPONSE", status: { in: ["SUCCESS", "HANDOFF"] } },
+      select: { messageId: true },
+    }),
+    db.message.findFirst({
+      where: {
+        conversationId,
+        direction: "OUTBOUND",
+        senderType: "AI",
+        outboundIdempotencyKey: { in: newerIds.map((id) => `${conversationId}:${id}`) },
+        deliveryStatus: { in: ["SENT", "DELIVERED", "READ"] },
+      },
+      select: { outboundIdempotencyKey: true },
+    }),
+  ]);
+  if (decided?.messageId) return decided.messageId;
+  const key = (sentReply as { outboundIdempotencyKey?: string | null } | null)?.outboundIdempotencyKey;
+  return key ? key.slice(`${conversationId}:`.length) : null;
+}
+
+/** Started now, awaited later: a failure must surface there, not as unhandled. */
+function startedEarly<T>(work: Promise<T>): Promise<T> {
+  work.catch(() => undefined);
+  return work;
+}
+
 export async function runGating(
   db: Db,
   params: PipelineParams,
@@ -61,12 +101,26 @@ export async function runGating(
   // it is a reprocessable condition: a message recorded while AI was
   // temporarily off must be eligible again once the conversation returns to
   // AI_ACTIVE (sweeper + redelivered jobs), instead of being silenced forever.
-  const [existing, conversation] = await timed("gating", () => Promise.all([
+  // SKIPPED here = superseded (below): a later reply already covered it.
+  const msgCreated = message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt);
+  const [existing, conversation, newerInbound] = await timed("gating", () => Promise.all([
     db.aIUsageLog.findFirst({
-      where: { messageId: message.id, purpose: "RESPONSE", status: { in: ["SUCCESS", "HANDOFF"] } },
+      where: { messageId: message.id, purpose: "RESPONSE", status: { in: ["SUCCESS", "HANDOFF", "SKIPPED"] } },
       select: { id: true },
     }),
     db.conversation.findUnique({ where: { id: params.conversationId } }),
+    db.message.findMany({
+      where: {
+        conversationId: params.conversationId,
+        direction: "INBOUND",
+        senderType: "CUSTOMER",
+        deletedAt: null,
+        OR: [{ createdAt: { gt: msgCreated } }, { createdAt: msgCreated, id: { gt: message.id } }],
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 20,
+      select: { id: true },
+    }) as Promise<Array<{ id: string }>>,
   ]));
   if (existing && !params.dryRun) return { terminal: { status: "DUPLICATE", executionId: existing.id } };
   if (!conversation || conversation.workspaceId !== params.workspaceId) throw new NotFoundError("Conversation");
@@ -95,6 +149,37 @@ export async function runGating(
     return { terminal: { status: "AI_DISABLED" } };
   }
 
+  // 3a. Superseded retry: this message failed earlier and a NEWER customer
+  // message has since been answered (its reply read this one in the history).
+  // Answering now would arrive late and out of order. Terminal and visible:
+  // RESPONSE log SKIPPED · SUPERSEDED_BY:<newer id>; the sweeper treats it as
+  // decided, so it is never re-enqueued. Without a decided newer message the
+  // retry runs exactly as before.
+  if (!params.dryRun && newerInbound.length > 0) {
+    const supersededBy = await timed("ordering", () => findSupersedingReply(db, message.id, conversation.id, newerInbound.map((m) => m.id)));
+    if (supersededBy) {
+      const reason = `SUPERSEDED_BY:${supersededBy}`;
+      await logUsage(db, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        purpose: "RESPONSE",
+        provider: "none",
+        model: "none",
+        promptVersion: PROMPT_VERSIONS.RESPONSE,
+        promptTokens: 0,
+        completionTokens: 0,
+        latencyMs: Date.now() - pipelineStarted,
+        success: true,
+        status: "SKIPPED",
+        error: reason,
+      });
+      log.info({ conversationId: conversation.id, messageId: message.id, supersededBy }, "ai_superseded_by_newer_reply");
+      logTimings("SKIPPED", { supersededBy });
+      return { terminal: { status: "SKIPPED", error: reason } };
+    }
+  }
+
   // 3b. Per-conversation ordering: never answer a message while an OLDER
   // sibling in the same conversation is still likely to be answered. Two
   // overlapping executors (worker + jobs/run, scaled workers) or a retry
@@ -105,10 +190,49 @@ export async function runGating(
   // the oldest undecided message in a conversation never defers.
   // Runs only when the conversation is AI-active (checked above), so a
   // deferral always resolves instead of waiting on a dead thread.
+  // PERF — config, persona, customer and history are pure reads that do not
+  // depend on the ordering decision: started here, they overlap the ordering
+  // round-trips below instead of following them. A deferral drops them.
+  const configPending = startedEarly(
+    timed("config", () =>
+      Promise.all([
+        loadAISettings(db, params.workspaceId),
+        resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
+        db.customer.findUnique({ where: { id: conversation.customerId } }),
+        db.message.findMany({
+          where: { conversationId: conversation.id, deletedAt: null, isNote: false },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 8,
+          select: { id: true, senderType: true, direction: true, text: true },
+        }),
+      ])
+    )
+  );
+
   if (!params.dryRun) {
     // createdAt may arrive stringified through serialized test doubles —
     // normalize so the comparison is a real date comparison everywhere.
     const msgTime = message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt);
+    // Both ordering reads depend only on this message: one round-trip, not two.
+    const recentOlderPending = startedEarly(
+      timed("ordering", () =>
+        db.message.findMany({
+          where: {
+            conversationId: params.conversationId,
+            direction: "INBOUND",
+            senderType: "CUSTOMER",
+            deletedAt: null,
+            OR: [
+              { createdAt: { lt: msgTime } },
+              { createdAt: msgTime, id: { lt: message.id } },
+            ],
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 20,
+          select: { id: true },
+        })
+      )
+    );
     const older = await timed("ordering", () =>
       db.message.findFirst({
         where: {
@@ -132,7 +256,7 @@ export async function runGating(
           select: { status: true },
         })
       );
-      const olderDecided = olderLogs.some((l) => l.status === "SUCCESS" || l.status === "HANDOFF");
+      const olderDecided = olderLogs.some((l) => l.status === "SUCCESS" || l.status === "HANDOFF" || l.status === "SKIPPED");
       if (!olderDecided) {
         const hasFailed = olderLogs.some((l) => l.status === "AI_FAILED");
         const liveJob = await timed("ordering", () =>
@@ -142,10 +266,13 @@ export async function runGating(
               idempotencyKey: `ai:${older.id}`,
               status: { in: ["PENDING", "PROCESSING"] },
             },
-            select: { id: true },
+            select: { id: true, status: true },
           })
-        );
-        const olderLive = !!liveJob;
+        ) as { id: string; status: string } | null;
+        // A failed older turn waiting out its retry back-off (30s, 60s …) is
+        // not being answered right now: only a running retry may hold newer
+        // messages back, or one failure silences the rest of the conversation.
+        const olderLive = !!liveJob && (!hasFailed || liveJob.status === "PROCESSING");
         // P0: a LIVE older turn defers at any age (its answer is genuinely
         // in flight). Otherwise only a FRESH older sibling may defer: beyond
         // ORDERING_GUARD_FRESH_MINUTES with no live job, nobody is answering
@@ -172,46 +299,35 @@ export async function runGating(
       // older message can still be in flight on another worker, and it must be
       // answered first — otherwise a confirmation is handled before the address
       // it depends on and no order gets created.
-      const recentOlder = (await timed("ordering", () =>
-        db.message.findMany({
-          where: {
-            conversationId: params.conversationId,
-            direction: "INBOUND",
-            senderType: "CUSTOMER",
-            deletedAt: null,
-            OR: [
-              { createdAt: { lt: msgTime } },
-              { createdAt: msgTime, id: { lt: message.id } },
-            ],
-          },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          take: 20,
-          select: { id: true },
-        })
-      )) as Array<{ id: string }>;
-      const answeredOlder = (await timed("ordering", () =>
+      const recentOlder = (await recentOlderPending) as Array<{ id: string }>;
+      const olderOutcomes = (await timed("ordering", () =>
         db.aIUsageLog.findMany({
           where: {
             messageId: { in: recentOlder.map((m) => m.id) },
             purpose: "RESPONSE",
-            status: { in: ["SUCCESS", "HANDOFF"] },
+            status: { in: ["SUCCESS", "HANDOFF", "SKIPPED", "AI_FAILED"] },
           },
-          select: { messageId: true },
+          select: { messageId: true, status: true },
         })
-      )) as Array<{ messageId: string | null }>;
-      const answered = new Set(answeredOlder.map((l) => l.messageId));
+      )) as Array<{ messageId: string | null; status: string }>;
+      const answered = new Set(olderOutcomes.filter((l) => l.status !== "AI_FAILED").map((l) => l.messageId));
+      const failedKeys = new Set(olderOutcomes.filter((l) => l.status === "AI_FAILED").map((l) => `ai:${l.messageId}`));
       const pendingKeys = recentOlder.filter((m) => !answered.has(m.id)).map((m) => `ai:${m.id}`);
       if (pendingKeys.length > 0) {
-        const liveOlder = (await timed("ordering", () =>
-          (db as any).backgroundJob.findFirst({
+        const liveJobs = (await timed("ordering", () =>
+          (db as any).backgroundJob.findMany({
             where: {
               type: "process_ai_message",
               idempotencyKey: { in: pendingKeys },
               status: { in: ["PENDING", "PROCESSING"] },
             },
-            select: { idempotencyKey: true },
+            select: { idempotencyKey: true, status: true },
           })
-        )) as { idempotencyKey: string } | null;
+        )) as Array<{ idempotencyKey: string; status: string }>;
+        // Same rule as above: a failed turn in retry back-off does not hold
+        // the conversation; one whose retry is running right now does.
+        const liveOlder =
+          liveJobs.find((j) => !failedKeys.has(j.idempotencyKey) || j.status === "PROCESSING") ?? null;
         if (liveOlder) {
           const olderMessageId = liveOlder.idempotencyKey.slice("ai:".length);
           log.info({ conversationId: conversation.id, messageId: message.id, olderMessageId }, "ai_deferred_older_sibling");
@@ -228,24 +344,12 @@ export async function runGating(
   );
 
   // 4. Config + persona (page-assigned → workspace default) + customer +
-  // channel page + recent history: independent reads in parallel. History has
-  // no dependency on the others — serializing it wasted one full DB round-trip
-  // on every single AI turn (critical-path latency). Persona resolution is
-  // ALWAYS active: the selected persona (channel → workspace default →
-  // builtin) drives reply voice in every provider mode, including Hermes —
-  // Hermes carries no personaId parameter, so local instructions travel in
-  // the request via the standard message builder.
-  const [settingsRaw, resolvedPersona, customer, recentMessagesRaw] = await timed("config", () => Promise.all([
-    loadAISettings(db, params.workspaceId),
-    resolveChannelPersona(db, { workspaceId: params.workspaceId, channelId: conversation.channelId }),
-    db.customer.findUnique({ where: { id: conversation.customerId } }),
-    db.message.findMany({
-      where: { conversationId: conversation.id, deletedAt: null, isNote: false },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 8,
-      select: { id: true, senderType: true, direction: true, text: true },
-    }),
-  ]));
+  // channel page + recent history: independent reads in parallel, started
+  // above. Persona resolution is ALWAYS active: the selected persona (channel
+  // → workspace default → builtin) drives reply voice in every provider mode,
+  // including Hermes — Hermes carries no personaId parameter, so local
+  // instructions travel in the request via the standard message builder.
+  const [settingsRaw, resolvedPersona, customer, recentMessagesRaw] = await configPending;
   // PERF — the channel row is read once inside resolveChannelPersona (scope
   // + assignment + display fields); reuse its display fields here instead of
   // a second channel.findUnique. Same data, fully parallel as before.

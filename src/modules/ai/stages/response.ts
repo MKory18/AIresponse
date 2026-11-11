@@ -251,14 +251,18 @@ export async function runResponse(
     if (!check.valid) {
       violations = check.violations;
       log.warn({ violations }, "guardrail_violation_regen");
-      // One corrective regeneration.
-      const retry = await sendProtectedText(provider, {
-        system: `${system}\n\nردك السابق رُفض للأسباب التالية: ${violations.join(", ")}. أعد كتابة الرد ملتزماً تماماً بالقواعد.`,
-        user: userPrompt,
-        model: responseModelCfg.model,
-        temperature: 0.2,
-        maxTokens: responseModelCfg.maxTokens,
-      }, { pii: customerPII, trustedContacts, allowedNumbers, purpose: "RESPONSE_RETRY" });
+      // One corrective regeneration — on the model that just answered: after
+      // a primary outage the fallback wrote the text, and asking the failing
+      // primary again cost a full timeout and then the reply.
+      const retry = await timed("responseRegen", () =>
+        sendProtectedText(provider, {
+          system: `${system}\n\nردك السابق رُفض للأسباب التالية: ${violations.join(", ")}. أعد كتابة الرد ملتزماً تماماً بالقواعد.`,
+          user: userPrompt,
+          model: effectiveModel,
+          temperature: 0.2,
+          maxTokens: responseModelCfg.maxTokens,
+        }, { pii: customerPII, trustedContacts, allowedNumbers, purpose: "RESPONSE_RETRY" })
+      );
       const retryCheck = validateResponse({
         response: retry.text.trim(),
         context,
