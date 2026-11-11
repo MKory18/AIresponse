@@ -1225,6 +1225,8 @@ model OrderDraft {
   conversationId   String
   customerId       String
   state            OrderDraftState @default(EMPTY)
+  // قرار المالك — كل منتج مسودة مستقلة: ترقيم تسلسلي داخل المحادثة.
+  sequence         Int             @default(1)
   productId        String?
   productName      String?
   variantId        String?
@@ -1245,7 +1247,7 @@ model OrderDraft {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  @@unique([conversationId])
+  @@unique([conversationId, sequence])
   @@index([workspaceId, state])
   @@index([workspaceId, customerId])
 }
