@@ -191,8 +191,10 @@ async function handleProcessMedia(db: HandlerDb, payload: Record<string, unknown
   return { success: true };
 }
 
+const AI_DEFERRED_RETRY_MS = 3_000;
+
 /** process_ai_message: runs the AI orchestrator for one inbound message. */
-async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string }> {
+async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unknown>, workspaceId: string): Promise<{ success: boolean; error?: string; deferMs?: number }> {
   // Fail loudly instead of silently no-oping: an empty workspace context made
   // gating return SKIPPED, the job complete DONE, and the orphan sweeper
   // re-enqueue the same message forever (silent hot loop with zero logs).
@@ -210,6 +212,11 @@ async function handleProcessAIMessage(db: HandlerDb, payload: Record<string, unk
   // gates (AI disabled, duplicate, takeover) are terminal successes.
   if (result.status === "AI_FAILED") {
     return { success: false, error: result.error ?? "AI failed" };
+  }
+  // An older message of this conversation is still being answered (possibly by
+  // another worker). Retry shortly so this message still gets its reply.
+  if (result.status === "DEFERRED") {
+    return { success: true, deferMs: AI_DEFERRED_RETRY_MS };
   }
   return { success: true };
 }
@@ -586,6 +593,25 @@ async function handleNotifyOrderReady(): Promise<{ success: boolean }> {
   return { success: true };
 }
 
+/** notify_order_telegram: retries a failed order notification; failures back off. */
+async function handleNotifyOrderTelegram(
+  db: HandlerDb,
+  payload: Record<string, unknown>,
+  workspaceId: string
+): Promise<{ success: boolean; error?: string }> {
+  const { deliverOrderTelegram } = await import("@/modules/orders/telegram-delivery");
+  try {
+    await deliverOrderTelegram(db as never, {
+      workspaceId,
+      userId: String(payload.userId ?? "system"),
+      orderId: String(payload.orderId ?? ""),
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** evaluate_automation: runs the Automation Engine for one trusted event. */
 async function handleEvaluateAutomation(db: HandlerDb, payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
   const { evaluateEvent } = await import("@/modules/automation/engine");
@@ -672,6 +698,7 @@ export function getJobHandlers(): Record<string, JobHandler> {
     resolve_sender_profile: (payload, _jobId, workspaceId) =>
       handleResolveSenderProfile(db, payload, workspaceId),
     notify_order_ready: () => handleNotifyOrderReady(),
+    notify_order_telegram: (payload, _jobId, workspaceId) => handleNotifyOrderTelegram(db, payload, workspaceId),
     generate_summary: (payload) => handleGenerateSummary(db, payload),
     process_webhook_event: (payload, jobId) => handleProcessWebhookEvent(db, payload),
     process_channel_inbound: (payload) => handleChannelInbound(db, payload),

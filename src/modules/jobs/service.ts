@@ -36,6 +36,8 @@ export const JOB_TYPES = [
   "resolve_sender_profile",
   // P19 — إشعار تيليجرام بمسودة طلب صارت READY (مجموعة/توبيك محدّد).
   "notify_order_ready",
+  // إعادة محاولة إشعار طلب رسمي لتلجرام بعد فشل الإرسال الأول.
+  "notify_order_telegram",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
@@ -117,6 +119,8 @@ export async function enqueueJob(
 export interface JobResult {
   success: boolean;
   error?: string;
+  /** Not ready yet: put the job back in the queue after this delay (no attempt spent). */
+  deferMs?: number;
 }
 
 export type JobHandler = (
@@ -376,6 +380,16 @@ export function shouldRunMaintenance(cycle: number, every: number): boolean {
 }
 
 /**
+ * How many worker processes one container runs (WORKER_PROCESSES). Lets a single
+ * container scale on platforms that cannot run Compose replicas, such as Coolify.
+ */
+export function resolveWorkerProcesses(raw: string | undefined): number {
+  const n = Math.trunc(Number(raw ?? 1));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(16, n);
+}
+
+/**
  * PERF — bounded concurrency for AI jobs.
  *
  * AI replies spend nearly all their time waiting on the provider (network),
@@ -395,6 +409,20 @@ export const AI_JOB_CONCURRENCY = Math.min(
   16,
   Math.max(1, Math.trunc(Number(process.env.AI_JOB_CONCURRENCY ?? 8)) || 8)
 );
+
+/** Jobs on the path to the customer reply: picked up before everything else. */
+const REPLY_PATH_JOB_TYPES = ["process_webhook_event", "process_ai_message"] as const;
+
+/**
+ * Jobs that wait on the AI provider. Run sequentially, a batch of slow
+ * intel/summary jobs held up the whole cycle — and every reply behind it. They
+ * run concurrently per conversation, sharing the AI semaphore.
+ */
+const CONVERSATION_CONCURRENT_JOB_TYPES = new Set([
+  "process_ai_message",
+  "extract_customer_intel",
+  "generate_summary",
+]);
 
 function createSemaphore(max: number) {
   let active = 0;
@@ -429,15 +457,26 @@ async function processJobBatch(
   workerId: string | undefined,
   createdAfter?: Date
 ): Promise<{ processed: number; failed: number }> {
-  const jobs = await db.backgroundJob.findMany({
-    where: {
-      status: "PENDING",
-      runAfter: { lte: new Date() },
-      ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
-    },
+  // PRIORITY — the jobs a customer is waiting on (REPLY_PATH_JOB_TYPES) are
+  // fetched FIRST and separately, so they never queue behind a backlog of older
+  // bookkeeping jobs (automation/intel/summary fan-out). Others keep their own
+  // batch, still oldest-first, so they are never starved.
+  const baseWhere = {
+    status: "PENDING" as const,
+    runAfter: { lte: new Date() },
+    ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+  };
+  const replyJobs = await db.backgroundJob.findMany({
+    where: { ...baseWhere, type: { in: [...REPLY_PATH_JOB_TYPES] } },
     orderBy: { createdAt: "asc" },
     take: limit,
   });
+  const otherJobs = await db.backgroundJob.findMany({
+    where: { ...baseWhere, type: { notIn: [...REPLY_PATH_JOB_TYPES] } },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
+  const jobs = [...replyJobs, ...otherJobs];
 
   let processed = 0;
   let failed = 0;
@@ -486,6 +525,21 @@ async function processJobBatch(
       }
     } catch (err) {
       result = { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    if (result.success && result.deferMs) {
+      await db.backgroundJob.update({
+        where: { id: job.id },
+        data: {
+          status: "PENDING",
+          attempts: job.attempts,
+          runAfter: new Date(Date.now() + result.deferMs),
+          startedAt: null,
+          lockedAt: null,
+          lockedBy: null,
+        },
+      });
+      return;
     }
 
     if (result.success) {
@@ -549,7 +603,7 @@ async function processJobBatch(
 
     const payload = job.payload as { conversationId?: unknown } | null;
     const conversationId =
-      job.type === "process_ai_message" && typeof payload?.conversationId === "string"
+      CONVERSATION_CONCURRENT_JOB_TYPES.has(job.type) && typeof payload?.conversationId === "string"
         ? payload.conversationId
         : null;
 

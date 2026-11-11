@@ -18,6 +18,7 @@ type Doc = {
   category: string;
   status: string;
   version: number;
+  productId?: string | null;
   error: string | null;
   chunkCount?: number;
   createdAt: string;
@@ -67,7 +68,9 @@ export default function KnowledgePage() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [newFaq, setNewFaq] = useState({ question: "", answer: "", category: "" });
   const [editing, setEditing] = useState<Doc | null>(null);
-  const [editForm, setEditForm] = useState({ title: "", content: "", category: "CUSTOM" });
+  const [editForm, setEditForm] = useState({ title: "", content: "", category: "CUSTOM", productId: "" });
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
+  const [uploadProductId, setUploadProductId] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [deleting, setDeleting] = useState<Doc | null>(null);
   const [detail, setDetail] = useState<{ doc: Doc; chunks: Chunk[] } | null>(null);
@@ -99,6 +102,13 @@ export default function KnowledgePage() {
     return () => clearTimeout(timer);
   }, [load, q]);
 
+  useEffect(() => {
+    fetch("/api/products?limit=100&status=active")
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data) => setProducts(data.items ?? []))
+      .catch(() => setProducts([]));
+  }, []);
+
   async function createDoc(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -111,6 +121,7 @@ export default function KnowledgePage() {
         content: form.get("content"),
         category: form.get("category"),
         sourceType: "MANUAL",
+        productId: form.get("productId") || null,
       }),
     });
     setCreating(false);
@@ -126,6 +137,7 @@ export default function KnowledgePage() {
   async function uploadFile(file: File) {
     const form = new FormData();
     form.append("file", file);
+    if (uploadProductId) form.append("productId", uploadProductId);
     setUploadingFile(true);
     const res = await fetch("/api/knowledge/upload", { method: "POST", body: form });
     setUploadingFile(false);
@@ -163,13 +175,13 @@ export default function KnowledgePage() {
 
   function openEdit(d: Doc) {
     setEditing(d);
-    setEditForm({ title: d.title, content: "", category: d.category });
+    setEditForm({ title: d.title, content: "", category: d.category, productId: d.productId ?? "" });
   }
 
   async function saveEdit() {
     if (!editing) return;
     setSavingEdit(true);
-    const body: Record<string, unknown> = { title: editForm.title, category: editForm.category };
+    const body: Record<string, unknown> = { title: editForm.title, category: editForm.category, productId: editForm.productId || null };
     if (editForm.content.trim()) body.content = editForm.content;
     const res = await fetch(`/api/knowledge/${editing.id}`, {
       method: "PATCH",
@@ -256,6 +268,14 @@ export default function KnowledgePage() {
               ))}
             </Select>
           </Field>
+          <Field label="خاص بمنتج (اختياري)">
+            <Select name="productId" defaultValue="">
+              <option value="">عام لكل الصفحات</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
+          </Field>
           <div className="flex items-end">
             <Button type="submit" loading={creating} disabled={creating} className="w-full md:w-auto">
               <Plus size={14} />
@@ -268,6 +288,12 @@ export default function KnowledgePage() {
         </form>
         <div className="flex flex-wrap items-center gap-2 border-t border-line/60 pt-3">
           <span className="text-xs font-bold text-ink-muted">{t.knowledge.fromFile} (PDF/TXT/MD/CSV/JSON):</span>
+          <Select value={uploadProductId} onChange={(e) => setUploadProductId(e.target.value)} aria-label="خاص بمنتج" className="w-44">
+            <option value="">عام لكل الصفحات</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </Select>
           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-surface-3 px-3 py-1.5 text-xs font-bold text-ink transition hover:bg-surface-3/70">
             <Upload size={13} />
             {uploadingFile ? "جارٍ الرفع…" : t.knowledge.uploadFile}
@@ -436,6 +462,14 @@ export default function KnowledgePage() {
             <Select value={editForm.category} onChange={(e) => setEditForm((s) => ({ ...s, category: e.target.value }))}>
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>{label(c)}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="خاص بمنتج (اختياري)">
+            <Select value={editForm.productId} onChange={(e) => setEditForm((s) => ({ ...s, productId: e.target.value }))}>
+              <option value="">عام لكل الصفحات</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
           </Field>

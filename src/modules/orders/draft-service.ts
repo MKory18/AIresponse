@@ -336,6 +336,11 @@ export async function updateDraftFromExtraction(
   }
 
   // كل منتج → مسودته: نفس المنتج يحدّث مسودته المفتوحة، ومنتج جديد = مسودة جديدة.
+  // لقطة المسودات المفتوحة قبل التعديل: لو مسودة جاهزة/قيد التأكيد تغيّر فيها شي جوهري
+  // بنرجّعها لجمع البيانات ونطلب تأكيد جديد (العميل شاف ملخصاً قديماً).
+  const beforeById = new Map(
+    (await listOpenDrafts(db, params.workspaceId, params.conversationId)).map((d) => [d.id, d] as const)
+  );
   const targets: OrderDraft[] = [];
   if (incoming.length > 0) {
     for (const item of incoming) {
@@ -403,6 +408,11 @@ export async function updateDraftFromExtraction(
       ? ((await db.orderDraft.update({ where: { id: target.id }, data: common })) as OrderDraft)
       : target;
     current = await backfillCustomerFields(db, params.workspaceId, params.customerId, current);
+    const prev = beforeById.get(current.id);
+    if (prev && (prev.state === "READY" || prev.state === "CONFIRMING") && draftMaterialChange(prev, current)) {
+      assertDraftTransition(current.state as OrderDraftState, "COLLECTING");
+      current = (await db.orderDraft.update({ where: { id: current.id }, data: { state: "COLLECTING" } })) as OrderDraft;
+    }
 
     const missing = computeMissingFields(current, requiredFields);
     current = (await db.orderDraft.update({
@@ -625,4 +635,14 @@ function fieldLabel(f: string): string {
     case "name": return "الاسم";
     default: return f;
   }
+}
+
+/** تغيير جوهري بمسودة جاهزة: منتج · كمية · رقم هاتف · عنوان — يستوجب تأكيداً جديداً. */
+function draftMaterialChange(prev: OrderDraft, next: OrderDraft): boolean {
+  const itemsKey = (d: OrderDraft) => JSON.stringify(parseDraftItems(d).map((i) => [i.productId, i.quantity]));
+  return (
+    itemsKey(prev) !== itemsKey(next) ||
+    (prev.phone ?? null) !== (next.phone ?? null) ||
+    (prev.rawAddress ?? null) !== (next.rawAddress ?? null)
+  );
 }

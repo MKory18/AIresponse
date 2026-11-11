@@ -2,9 +2,15 @@ import { z } from "zod";
 
 const decimalString = z.union([z.number(), z.string()]).transform((v) => String(v));
 
+/** سعر المنتج: رقم غير سالب ضمن Decimal(12,2) — بدل ما يوصل لبريزما ويطلع 500. */
+const moneyString = decimalString.refine(
+  (v) => /^\d{1,10}(\.\d{1,4})?$/.test(v.trim()),
+  { message: "Invalid price: must be a non-negative number up to 10 digits" }
+);
+
 export const priceTierInputSchema = z.object({
   label: z.string().trim().min(1).max(60),
-  price: decimalString,
+  price: moneyString,
 });
 
 export const productInputSchema = z.object({
@@ -12,9 +18,9 @@ export const productInputSchema = z.object({
   sku: z.string().trim().min(1).max(64),
   description: z.string().max(10000).nullable().optional(),
   shortDescription: z.string().max(500).nullable().optional(),
-  price: decimalString,
-  compareAtPrice: decimalString.nullable().optional(),
-  currency: z.string().trim().min(3).max(3).optional(),
+  price: moneyString,
+  compareAtPrice: moneyString.nullable().optional(),
+  currency: z.string().trim().length(3).transform((c) => c.toUpperCase()).optional(),
   stockStatus: z.enum(["IN_STOCK", "OUT_OF_STOCK", "PRE_ORDER", "DISCONTINUED"]).optional(),
   stockQty: z.number().int().min(0).max(1_000_000).optional(),
   category: z.string().trim().max(100).nullable().optional(),
@@ -85,6 +91,7 @@ export const knowledgeCreateSchema = z.object({
   category: z.enum(["PRODUCT", "FAQ", "POLICY", "DELIVERY", "PAYMENT", "COMPANY", "DOCUMENT", "CUSTOM"]).optional(),
   sourceType: z.string().trim().max(50).optional(),
   sourceUrl: z.string().url().max(2048).nullable().optional(),
+  productId: z.string().cuid().nullable().optional(),
 });
 
 export const knowledgeUpdateSchema = z.object({
@@ -92,6 +99,7 @@ export const knowledgeUpdateSchema = z.object({
   content: z.string().min(1).max(500_000).optional(),
   category: z.enum(["PRODUCT", "FAQ", "POLICY", "DELIVERY", "PAYMENT", "COMPANY", "DOCUMENT", "CUSTOM"]).optional(),
   isActive: z.boolean().optional(),
+  productId: z.string().cuid().nullable().optional(),
 });
 
 export const faqCreateSchema = z.object({

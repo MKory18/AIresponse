@@ -32,6 +32,9 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16
+    # Every worker replica opens its own pool: keep this above
+    # (web + WORKER_PROCESSES) × pool + 20 (docs/COOLIFY-STAGING.md → Capacity).
+    command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
     environment:
       POSTGRES_USER: postgres
       # OCR-2026-10-16: بلا كلمة مرور افتراضية عامة — POSTGRES_PASSWORD
@@ -66,6 +69,10 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public}
+      # Total AI capacity = WORKER_PROCESSES × AI_JOB_CONCURRENCY. Processes, not
+      # Compose replicas: Coolify cannot run replicas of a Compose service.
+      WORKER_PROCESSES: ${WORKER_PROCESSES:-4}
+      AI_JOB_CONCURRENCY: ${AI_JOB_CONCURRENCY:-16}
     volumes:
       - storage:/app/.data/storage
     depends_on:

@@ -1,3 +1,4 @@
+import { workspaceHasEnabledAutomations } from "@/modules/automation/active-check";
 import { childLogger } from "@/core/logger";
 import { eventBus, deriveEventId } from "@/core/events/bus";
 import { eventToWorkflowTrigger } from "./workflow-engine";
@@ -22,6 +23,7 @@ const log = childLogger("workflow-bridge");
 const globalForBridge = globalThis as typeof globalThis & { __acreWorkflowBridge?: boolean };
 
 export function registerWorkflowBridge(prismaLike: {
+  automation?: { count(args: { where: { workspaceId: string; isEnabled: boolean } }): Promise<number> };
   backgroundJob: { create(args: { data: Record<string, unknown> }): Promise<unknown> };
 }) {
   if (globalForBridge.__acreWorkflowBridge) return;
@@ -34,6 +36,7 @@ export function registerWorkflowBridge(prismaLike: {
     if (payload.originWorkflowId) return;
     const eventId = event.eventId ?? deriveEventId(event);
     if (eventId.includes(":volatile:")) return; // non-replayable → no trigger
+    if (!(await workspaceHasEnabledAutomations(prismaLike, event.workspaceId))) return;
     try {
       await prismaLike.backgroundJob.create({
         data: {

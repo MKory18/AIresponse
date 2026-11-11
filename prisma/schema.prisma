@@ -508,6 +508,7 @@ model Product {
   workspace  Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   variants   ProductVariant[]
   priceTiers ProductPrice[]
+  knowledgeDocuments KnowledgeDocument[]
   mediaLinks ProductMedia[]
   catalogLinks CatalogProduct[]
   orderItems OrderItem[]
@@ -716,6 +717,8 @@ enum KnowledgeStatus {
 model KnowledgeDocument {
   id          String            @id @default(cuid())
   workspaceId String
+  // Set = only pages whose catalog includes this product may use the document.
+  productId   String?
   title       String
   category    KnowledgeCategory @default(CUSTOM)
   sourceType  String
@@ -729,10 +732,12 @@ model KnowledgeDocument {
   updatedAt   DateTime          @updatedAt
 
   workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  product   Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
   chunks    KnowledgeChunk[]
 
   @@index([workspaceId, status])
   @@index([workspaceId, category])
+  @@index([workspaceId, productId])
 }
 
 model KnowledgeChunk {
@@ -1099,6 +1104,9 @@ model Order {
   paymentStatus      PaymentStatus      @default(UNPAID)
   fulfillmentStatus  FulfillmentStatus  @default(UNFULFILLED)
   deliveryAddress    String?
+  // لقطة المستلم لحظة التأكيد (ممكن تختلف عن ملف العميل — مثلاً طلب هدية).
+  recipientName      String?
+  recipientPhone     String?
   province           String?
   notes              String?
   subtotal           Decimal            @default(0) @db.Decimal(12, 2)

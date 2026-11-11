@@ -1,3 +1,4 @@
+import { workspaceHasEnabledAutomations } from "@/modules/automation/active-check";
 import type { Prisma } from "@prisma/client";
 import { childLogger } from "@/core/logger";
 import { eventBus } from "@/core/events/bus";
@@ -261,12 +262,14 @@ async function executeAction(
 const globalForBridge = globalThis as typeof globalThis & { __acreAutomationBridge?: boolean };
 
 export function registerAutomationBridge(prismaLike: {
+  automation?: { count(args: { where: { workspaceId: string; isEnabled: boolean } }): Promise<number> };
   backgroundJob: { create(args: { data: Record<string, unknown> }): Promise<unknown> };
 }) {
   if (globalForBridge.__acreAutomationBridge) return;
   globalForBridge.__acreAutomationBridge = true;
   eventBus.subscribe("*", async (event) => {
     if (!eventToTrigger(event.name)) return;
+    if (!(await workspaceHasEnabledAutomations(prismaLike, event.workspaceId))) return;
     try {
       await prismaLike.backgroundJob.create({
         data: {

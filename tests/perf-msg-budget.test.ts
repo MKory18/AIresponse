@@ -260,6 +260,26 @@ describe("perf guards — ordering + worker polling", () => {
       expect(sentCount()).toBe(0);
     }, 120000);
 
+    it("newer turn defers while a MIDDLE older sibling is still live", async () => {
+      const ch = await seedOrder();
+      const m1 = await inbound(ch.id, "psid-d3", "d3m1", "مرحبا");
+      const m2 = await inbound(ch.id, "psid-d3", "d3m2", "مرحبا مجددا");
+      const m3 = await inbound(ch.id, "psid-d3", "d3m3", "مرحبا كمان");
+      await (db as any).message.update({ where: { id: m1.messageId }, data: { createdAt: new Date(Date.now() - 60_000) } });
+      await (db as any).message.update({ where: { id: m2.messageId }, data: { createdAt: new Date(Date.now() - 30_000) } });
+      // m1 is answered; m2 is still being processed by another worker.
+      await (db as any).aIUsageLog.create({
+        data: { workspaceId: OW, conversationId: m1.conversationId, messageId: m1.messageId, purpose: "RESPONSE", provider: "mock", model: "m", promptTokens: 1, completionTokens: 1, latencyMs: 1, success: true, status: "SUCCESS" },
+      });
+      await (db as any).backgroundJob.updateMany({
+        where: { idempotencyKey: `ai:${m2.messageId}` },
+        data: { status: "PROCESSING", lockedAt: new Date(), lockedBy: "other-worker" },
+      });
+      const r3 = await processAIMessage(db as Db, { ...m3, workspaceId: OW }, { vectorStore: stubVector });
+      expect(r3.status).toBe("DEFERRED");
+      expect(sentCount()).toBe(0);
+    }, 120000);
+
     it("sequential turns answer in order (no deferral on the happy path)", async () => {
       const ch = await seedOrder();
       const m1 = await inbound(ch.id, "psid-d3", "d3m1", "مرحبا");

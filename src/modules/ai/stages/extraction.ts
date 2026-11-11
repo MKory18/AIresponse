@@ -7,6 +7,7 @@
  * deterministic response plan → human-review and handoff terminals.
  * Returns a terminal result or the ready state for response generation.
  */
+import { pickBestProductMatch, productSearchWords } from "@/modules/ai/product-match";
 import { childLogger } from "@/core/logger";
 import { resolveModel, withRetry, logUsage } from "../router";
 import {
@@ -248,7 +249,7 @@ export async function runExtraction(
     const names =
       ids.length > 0
         ? ((await db.product.findMany({
-            where: { workspaceId: params.workspaceId, id: { in: ids } },
+            where: { workspaceId: params.workspaceId, id: { in: ids }, isActive: true, isArchived: false },
             select: { name: true },
           })) as { name: string }[]).map((p) => p.name)
         : [];
@@ -414,7 +415,7 @@ async function resolveProductId(
   if (extraction.entities.product) candidates.push(extraction.entities.product);
   // Context-based fallback: match product names against words in the message
   // ("بدي 3" after a product mention resolves via this path).
-  candidates.push(...productCandidatesFromText(customerText));
+  candidates.push(...productSearchWords(customerText));
   const direct = await findProductId(db, workspaceId, candidates, allowedIds);
   if (direct) return direct;
   if (wantsMedia(customerText) === null) return null;
@@ -423,22 +424,12 @@ async function resolveProductId(
     const found = await findProductId(
       db,
       workspaceId,
-      productCandidatesFromText(past.text),
+      productSearchWords(past.text),
       allowedIds
     );
     if (found) return found;
   }
   return null;
-}
-
-/** Words long enough to be a product-name fragment (bounded to 12). */
-function productCandidatesFromText(text: string): string[] {
-  const out: string[] = [];
-  for (const word of text.split(/[\s،,.!؟?]+/)) {
-    if (word.length >= 3) out.push(word);
-    if (out.length >= 12) break;
-  }
-  return out;
 }
 
 /** Single query for all candidates (latency fix: never N sequential reads). */
@@ -450,13 +441,13 @@ async function findProductId(
 ): Promise<string | null> {
   if (!candidates.length) return null;
   if (allowedIds && allowedIds.length === 0) return null;
-  const ors: { name: { contains: string } }[] = [];
+  const ors: { name: { contains: string; mode: "insensitive" } }[] = [];
   for (const name of candidates.slice(0, 12)) {
-    ors.push({ name: { contains: name } });
+    ors.push({ name: { contains: name, mode: "insensitive" } });
     const cleaned = name.replace(/^(ال|الـ)/, "");
-    if (cleaned !== name) ors.push({ name: { contains: cleaned } });
+    if (cleaned !== name) ors.push({ name: { contains: cleaned, mode: "insensitive" } });
   }
-  const product = await db.product.findFirst({
+  const products = await db.product.findMany({
     where: {
       workspaceId,
       isActive: true,
@@ -464,9 +455,10 @@ async function findProductId(
       ...(allowedIds ? { id: { in: allowedIds } } : {}),
       OR: ors,
     },
-    select: { id: true },
+    select: { id: true, name: true },
+    take: 50,
   });
-  return product?.id ?? null;
+  return pickBestProductMatch(candidates.slice(0, 12), products);
 }
 
 function buildPlan(

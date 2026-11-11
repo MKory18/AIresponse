@@ -505,6 +505,36 @@ describe("retry idempotency, burst, ordering", () => {
     expect(replyNumbers).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
+  it("16b. burst inside one millisecond: created-order drain is never falsely deferred", async () => {
+    // A fast machine stores several inbound rows in the same millisecond, so
+    // the ordering guard falls back to comparing ids. Row 10 must not sort
+    // before row 9 there, or draining in arrival order defers a message.
+    const ch = await seedPage();
+    fbSuccess();
+    mockAI({});
+    const conv = await seedInbound("psid-d6b", "رسالة 0", ch.id, "tie0");
+    for (let i = 1; i < 12; i++) {
+      await processIncomingMessage(db as Db, {
+        workspaceId: WS_A, channelType: "FACEBOOK", channelId: ch.id,
+        externalUserId: "psid-d6b", externalConversationId: "psid-d6b",
+        externalMessageId: `m-tie-${i}`, externalEventId: `e-tie-${i}`,
+        provider: "facebook", type: "TEXT", text: `رسالة ${i}`,
+      });
+    }
+    const sameInstant = new Date("2026-01-01T00:00:00Z");
+    const inbound = (db._stores.message as any[]).filter((m) => m.conversationId === conv.conversationId);
+    for (const m of inbound) m.createdAt = sameInstant;
+
+    const statuses: string[] = [];
+    for (const row of inbound) {
+      const res = await processAIMessage(
+        db as Db, { conversationId: conv.conversationId, messageId: row.id, workspaceId: WS_A }, { vectorStore: stubVector }
+      );
+      statuses.push(res.status);
+    }
+    expect(statuses.filter((status) => status === "DEFERRED")).toEqual([]);
+  });
+
   it("13. QUEUED outbound eventually reaches SENT via recovery (no silent stall)", async () => {
     const ch = await seedPage();
     setFacebookClientFactory(
