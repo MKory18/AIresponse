@@ -743,6 +743,14 @@ export function getJobHandlers(): Record<string, JobHandler> {
       handleRefreshProductCompliance(db, payload, workspaceId),
     extract_customer_intel: (payload, _jobId, workspaceId) =>
       handleExtractCustomerIntel(db, payload, workspaceId),
+    handoff_order_to_oms: async (payload, _jobId, workspaceId) => {
+      const { handleAutoHandoffJob } = await import("@/modules/oms/auto-handoff");
+      return handleAutoHandoffJob(db as never, payload, workspaceId || String(payload.workspaceId ?? ""));
+    },
+    sync_oms_products: async (payload, _jobId, workspaceId) => {
+      const { handleProductSyncJob } = await import("@/modules/oms/auto-handoff");
+      return handleProductSyncJob(db as never, workspaceId || String(payload.workspaceId ?? ""));
+    },
   };
 }
 

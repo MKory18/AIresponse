@@ -38,6 +38,9 @@ export const JOB_TYPES = [
   "notify_order_ready",
   // إعادة محاولة إشعار طلب رسمي لتلجرام بعد فشل الإرسال الأول.
   "notify_order_telegram",
+  // ربط الـ OMS (باب /api/v1): إرسال طلب مؤكد · مزامنة المنتجات الساعية.
+  "handoff_order_to_oms",
+  "sync_oms_products",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

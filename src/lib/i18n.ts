@@ -489,6 +489,8 @@ export const LABELS: Record<string, string> = {
   "customer.merged_from_order": "اندمج العميل",
   "order.updated_from_chat": "تحدّث من المحادثة",
   "order.deleted": "انحذف الطلب",
+  "oms.order_handed_off": "نزل بالـ OMS",
+  "oms.auto_handoff_refused": "ما نزل بالـ OMS",
   "order.blacklisted_blocked": "انمنع (عميل محظور)",
   "order_draft.cancelled": "انلغت المسودة",
   "order_draft.confirmed_by_agent": "أكّدها موظف",

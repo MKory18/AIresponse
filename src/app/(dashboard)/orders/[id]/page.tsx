@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { OmsOrderCard } from "@/components/orders/oms-order-card";
 
 type OrderDetail = {
   canWrite?: boolean;
@@ -255,6 +256,7 @@ export default function OrderDetailPage() {
             <p className="flex items-center justify-between text-ink-muted">الدفع <StatusBadge value={order.paymentStatus} dot /></p>
             <p className="flex items-center justify-between text-ink-muted">التنفيذ <StatusBadge value={order.fulfillmentStatus} dot /></p>
           </GlassCard>
+          <OmsOrderCard orderId={params.id} cancelled={order.status === "CANCELLED" || order.status === "FAILED"} />
         </div>
       </div>
       <ConfirmDialog
