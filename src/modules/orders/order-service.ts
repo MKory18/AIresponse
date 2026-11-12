@@ -433,6 +433,15 @@ export async function createOrderFromDraft(
     log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_telegram_failed");
   }
 
+  // ربط الـ OMS: الطلب المؤكد بينزل بالـ OMS كمهمة مستقلة (إذا الإرسال
+  // التلقائي مفعّل) — فشلها أو انقطاع الـ OMS ما بيوقف إنشاء الطلب أبدًا.
+  try {
+    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
+    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, order.id);
+  } catch (err) {
+    log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_oms_enqueue_failed");
+  }
+
   return {
     orderId: order.id,
     orderNumber,

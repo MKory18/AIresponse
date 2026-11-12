@@ -77,7 +77,7 @@ npm run build
 | حارس البيانات | `integrations/pii-guard.ts` — صيغ المراجع المعروفة · الروابط بعد شيل cuid |
 | الكليبر · القدرة · الامتثال · الإشارات | `clipper.ts` · `capacity.ts` · `compliance.ts` · `ops-signals.ts` · `scheduler.ts` |
 | الإسناد والموافقة | `attribution.ts` (حلقات · «بداية المحادثة بتحكم») · `consent.ts` |
-| الـ OMS | `src/modules/oms/` — `app-webhook.ts` (أحداث التطبيقات الحقيقية) · `manual.ts` (نص الإدخال + الربط) · `handoff.ts` · `auto-handoff.ts` (8 محاولات + كنس ساعي) · `client.ts` (legacy · v1) |
+| الـ OMS (باب `/api/v1` بس) | `src/modules/oms/` — `client.ts` (عميل v1) · `connection.ts` (رابط + توكن `zk1_` مشفّر) · `sync.ts` (منتجات الردود = منتجات الـ OMS: نفس الرمز/الاسم بيتحدّث · الجديد لكل الكتالوجات · الباقي بيتوقف مش بينحذف · كل ساعة) · `handoff.ts` (طلب مؤكد ← `POST /api/v1/orders`) · `auto-handoff.ts` (كل طلب مؤكد تلقائيًا · 8 محاولات + كنس ساعي) · الواجهة: «القنوات ← ربط الـ OMS» + بطاقة بصفحة الطلب · `tests/oms-v1-link.test.ts` · ⚠️ أحداث الـ OMS الراجعة (تأكيد · شحن) لسا ما بتوصل |
 | باب الوكلاء (Hermes) | `src/modules/agent-door/` — `tools.ts` (11 أداة · مخططات حرفية) · `door.ts` · `drafts.ts` · `status.ts` |
 | المزوّد الخارجي (الوكيل الذكي) | `src/modules/ai/router.ts` (`isHermesSelected` · `isHermesPersonaMode`) · `stages/*` · `hermes-diagnostics.ts` — الشخصيات المحلية بتقود الصوت بكل مزوّد · ⚠️ بلا تحويل تلقائي للموظف على المسار الخارجي |
 | وسائط القنوات الواردة | `src/modules/channels/whatsapp/media-download.ts` (معرّف ميتا ← رابط مؤقت ← بايتات ← مخزننا) · الصف من `channels/inbound-job.ts` بمفتاح `wa-media:مساحة:wamid` · الحذف بـ `media-retention.ts` |

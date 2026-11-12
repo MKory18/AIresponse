@@ -5,6 +5,7 @@ import { Facebook, PlugZap, Unplug } from "lucide-react";
 import { MultiChannelSection } from "./multi-channel-section";
 import { CatalogPageSection } from "./catalog-page-section";
 import { TelegramOrderSection } from "./telegram-order-section";
+import { OmsSection } from "./oms-section";
 import { OrderFieldsSection } from "./order-fields-section";
 import { t } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -225,6 +226,7 @@ export default function ChannelsPage() {
       </GlassCard>
 
       {loading && <Skeleton className="h-36 rounded-2xl" />}
+      <OmsSection />
       <TelegramOrderSection />
       <MultiChannelSection />
       {connections.map((c) => (

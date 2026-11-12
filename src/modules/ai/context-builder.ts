@@ -113,9 +113,13 @@ export async function buildProductContext(db: Db, workspaceId: string, productId
       salesNotes: product.salesNotes,
       faqs: product.faqs.map((f) => ({ id: f.id, question: f.question, answer: f.answer })),
       // Wholesale and distributor prices must never be quoted to retail customers.
-      priceTiers: customerFacingPriceTiers(
-        (product as unknown as { priceTiers?: { label: string; price: string }[] }).priceTiers ?? []
-      ).map((t) => ({ label: t.label, price: t.price.toString() })),
+      // منتج من الـ OMS: السعر والعروض من الـ OMS بس — أسعار مسمّاة قديمة
+      // عندنا ما بتنقال (الـ OMS كان رح يعيد التسعير ويطلع غير اللي انوعد فيه).
+      priceTiers: (product as unknown as { syncedFromOms?: boolean }).syncedFromOms
+        ? []
+        : customerFacingPriceTiers(
+            (product as unknown as { priceTiers?: { label: string; price: string }[] }).priceTiers ?? []
+          ).map((t) => ({ label: t.label, price: t.price.toString() })),
       ...(compliance ? { compliance } : {}),
     } as AIContext["product"],
     citations: [
