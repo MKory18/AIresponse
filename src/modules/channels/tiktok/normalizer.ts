@@ -42,14 +42,15 @@ export function verifyTikTokWebhook(secretHeader: string | null, configuredSecre
 
 export function normalizeTikTokEvent(payload: AssumedTikTokEvent): NormalizedTikTokMessage | null {
   if (!payload.conversation_id || !payload.sender_id || !payload.message_id) return null;
-  if (typeof payload.text !== "string" || payload.text.length === 0) return null;
+  // رسالة بلا نص (صورة · فيديو · ملصق) بتنسجّل كمان وبيطلعلها رد.
+  const text = typeof payload.text === "string" && payload.text.length > 0 ? payload.text : null;
   return {
     externalCustomerId: payload.sender_id,
     externalConversationId: payload.conversation_id,
     externalMessageId: payload.message_id,
     externalEventId: `tt:${payload.conversation_id}:${payload.message_id}`,
     senderName: payload.sender_name ?? null,
-    text: payload.text,
+    text,
     timestamp: payload.timestamp ? new Date(payload.timestamp * 1000) : new Date(),
   };
 }

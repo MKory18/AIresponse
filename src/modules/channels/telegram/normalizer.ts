@@ -19,6 +19,17 @@ export interface TelegramUpdate {
     photo?: { file_id: string }[];
     document?: { file_id: string };
     caption?: string;
+    // رسائل زبون بلا نص: لازم توصل كمان، وإلا الزبون بيبعت صوتية وما بيجيه رد.
+    voice?: { file_id?: string };
+    audio?: { file_id?: string };
+    video?: { file_id?: string };
+    video_note?: { file_id?: string };
+    animation?: { file_id?: string };
+    sticker?: { file_id?: string; emoji?: string };
+    location?: { latitude?: number; longitude?: number };
+    contact?: { phone_number?: string };
+    poll?: { question?: string };
+    dice?: { emoji?: string };
   };
 }
 
@@ -53,7 +64,24 @@ export function normalizeTelegramUpdate(payload: TelegramUpdate): NormalizedTele
   const hasText = typeof msg.text === "string" && msg.text.length > 0;
   const photo = msg.photo?.[msg.photo.length - 1]?.file_id ?? null;
   const doc = msg.document?.file_id ?? null;
-  if (!hasText && !photo && !doc) return null;
+  // صوتية · فيديو · ملصق · موقع · جهة اتصال: رسالة زبون زي غيرها — بتنسجّل
+  // وبيطلعلها رد. اللي بينرمى بس: تحديث ما فيه ولا محتوى زبون (انضمام لمجموعة…).
+  const otherFileId =
+    msg.voice?.file_id ??
+    msg.audio?.file_id ??
+    msg.video?.file_id ??
+    msg.video_note?.file_id ??
+    msg.animation?.file_id ??
+    msg.sticker?.file_id ??
+    null;
+  const hasOther =
+    otherFileId !== null ||
+    msg.location !== undefined ||
+    msg.contact !== undefined ||
+    msg.poll !== undefined ||
+    msg.dice !== undefined ||
+    (typeof msg.caption === "string" && msg.caption.length > 0);
+  if (!hasText && !photo && !doc && !hasOther) return null;
   // Identity: private chats use the user id; groups use chat id (documented
   // Bot API addressing — a group thread is one conversation here).
   const peerId = msg.chat.type === "private" ? String(msg.from.id) : `group:${msg.chat.id}`;
@@ -64,9 +92,9 @@ export function normalizeTelegramUpdate(payload: TelegramUpdate): NormalizedTele
     externalMessageId: `tg:${msg.chat.id}:${msg.message_id}`,
     externalEventId: `tg:update:${payload.update_id}`,
     senderName: msg.from.first_name ?? msg.from.username ?? null,
-    text: hasText ? (msg.text as string) : (msg.caption ?? null),
-    mediaType: photo ? "IMAGE" : doc ? "FILE" : "TEXT",
-    mediaFileId: photo ?? doc,
+    text: hasText ? (msg.text as string) : (msg.caption ?? msg.sticker?.emoji ?? null),
+    mediaType: photo ? "IMAGE" : doc || otherFileId ? "FILE" : "TEXT",
+    mediaFileId: photo ?? doc ?? otherFileId,
     timestamp: new Date((msg.date || 0) * 1000),
   };
 }

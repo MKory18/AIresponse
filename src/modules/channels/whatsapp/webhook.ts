@@ -40,13 +40,32 @@ export async function ingestWhatsAppWebhook(
   let lastStatus: WhatsAppIngestResult["status"] = "OK";
   let allDuplicate = true;
   for (const phoneNumberId of numberIds) {
-    const res = await ingestSingleNumber(db, payload, phoneNumberId);
+    // رقمين بنفس الدفعة: لازم كل رقم ياخد حمولته لحاله، وإلا الاتنين بيطلعلهم
+    // نفس مفتاح الحدث والتاني بينحسب «مكرر» وبتضيع رسائله بلا رد.
+    const scoped = numberIds.length > 1 ? scopePayloadToNumber(payload, phoneNumberId) : payload;
+    const res = await ingestSingleNumber(db, scoped, phoneNumberId);
     total += res.normalizedCount ?? 0;
     if (res.status !== "DUPLICATE") allDuplicate = false;
     if (res.status !== "OK" && res.status !== "DUPLICATE") lastStatus = res.status;
   }
   if (numberIds.length > 0 && allDuplicate) return { status: "DUPLICATE", normalizedCount: 0 };
   return { status: lastStatus, normalizedCount: total };
+}
+
+/** حمولة مقصوصة على رقم واحد — نفس اللي بيعمله فيسبوك مع الصفحات. */
+function scopePayloadToNumber(payload: unknown, phoneNumberId: string): unknown {
+  type Change = { value?: { metadata?: { phone_number_id?: string } } };
+  type Entry = { changes?: Change[] };
+  const entries = (payload as { entry?: Entry[] }).entry ?? [];
+  const entry = entries
+    .map((e) => ({
+      ...e,
+      changes: (e.changes ?? []).filter(
+        (c) => c.value?.metadata?.phone_number_id === phoneNumberId
+      ),
+    }))
+    .filter((e) => e.changes.length > 0);
+  return { ...(payload as object), entry };
 }
 
 async function ingestSingleNumber(db: Db, payload: unknown, phoneNumberId: string): Promise<WhatsAppIngestResult> {
