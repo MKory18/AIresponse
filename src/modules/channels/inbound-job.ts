@@ -60,7 +60,12 @@ export async function handleChannelInbound(
 ): Promise<{ success: boolean; error?: string }> {
   const workspaceId = String(payload.workspaceId ?? "");
   const messages = (payload.messages as NormalizedIncomingMessage[]) ?? [];
-  if (!workspaceId || messages.length === 0) {
+  // مساحة ناقصة = دفعة رسائل كاملة كانت بتنحسب «تمّت» وبتختفي بلا أثر.
+  // منفشّلها بصوت عالي ليعيد الطابور المحاولة ويبيّن السبب.
+  if (!workspaceId) {
+    return { success: false, error: "MISSING_WORKSPACE_CONTEXT" };
+  }
+  if (messages.length === 0) {
     return { success: true };
   }
   const { processIncomingMessage } = await import("@/modules/conversations/service");
