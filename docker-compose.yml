@@ -17,6 +17,13 @@ services:
     build: .
     ports:
       - "3000:3000"
+    # ط®ط¯ظ…ط© ط°ظƒط§ط، ط´ط؛ظ‘ط§ظ„ط© ط¹ظ„ظ‰ ظ†ظپط³ ط§ظ„ط³ظٹط±ظپط± ط¨ط±ظ‘ط§ ظ‡ط§ظ„ط³طھط§ظƒ (GLM ط¹ظ„ظ‰ ظ…ظ†ظپط°
+    # ظ…ط­ظ„ظٹ): ظ…ظ† ط¬ظˆظ‘ط§ ط§ظ„ط­ط§ظˆظٹط© "localhost" ظ‡ظٹ ط§ظ„ط­ط§ظˆظٹط© ظ†ظپط³ظ‡ط§طŒ ظ…ط´ ط§ظ„ط³ظٹط±ظپط±.
+    # host.docker.internal ط¨ظٹظˆطµظ„ ظ„ظ„ط³ظٹط±ظپط± â€” ط§ط³طھط¹ظ…ظ„ظ‡ ط¨ط¹ظ†ظˆط§ظ† ط§ظ„ظ…ط²ظˆظ‘ط¯طŒ
+    # ظ…ط«ط§ظ„: http://host.docker.internal:20128/v1 ظ…ط¹
+    # AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 ط¨ط§ظ„ط¨ظٹط¦ط©.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/ai_commerce?schema=public}
@@ -62,6 +69,13 @@ services:
   # the `worker_started` log line). Never runs inside the Next.js process.
   worker:
     build: .
+    # ط®ط¯ظ…ط© ط°ظƒط§ط، ط´ط؛ظ‘ط§ظ„ط© ط¹ظ„ظ‰ ظ†ظپط³ ط§ظ„ط³ظٹط±ظپط± ط¨ط±ظ‘ط§ ظ‡ط§ظ„ط³طھط§ظƒ (GLM ط¹ظ„ظ‰ ظ…ظ†ظپط°
+    # ظ…ط­ظ„ظٹ): ظ…ظ† ط¬ظˆظ‘ط§ ط§ظ„ط­ط§ظˆظٹط© "localhost" ظ‡ظٹ ط§ظ„ط­ط§ظˆظٹط© ظ†ظپط³ظ‡ط§طŒ ظ…ط´ ط§ظ„ط³ظٹط±ظپط±.
+    # host.docker.internal ط¨ظٹظˆطµظ„ ظ„ظ„ط³ظٹط±ظپط± â€” ط§ط³طھط¹ظ…ظ„ظ‡ ط¨ط¹ظ†ظˆط§ظ† ط§ظ„ظ…ط²ظˆظ‘ط¯طŒ
+    # ظ…ط«ط§ظ„: http://host.docker.internal:20128/v1 ظ…ط¹
+    # AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 ط¨ط§ظ„ط¨ظٹط¦ط©.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: sh -c "npx prisma migrate deploy && npm run worker"
     env_file:
       - path: .env

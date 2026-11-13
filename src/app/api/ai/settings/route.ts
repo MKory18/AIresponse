@@ -3,8 +3,6 @@ import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 import {
-  validateEndpointUrl,
-  assertEndpointResolvesPublic,
   validateHermesEndpoint,
   assertHermesEndpointResolves,
   isHermesPrivateNetworkAllowed,
@@ -63,39 +61,43 @@ export const PATCH = createHandler(
     // server sets HERMES_ALLOW_PRIVATE_NETWORK=1/true/yes. Metadata, creds,
     // and reserved ranges stay blocked regardless; every other provider keeps
     // the strict guard byte-identically.
-    if (body.customBaseUrl !== undefined && body.customBaseUrl !== null) {
-      const current = await prisma.aISettings.findUnique({ where: { workspaceId: auth!.workspaceId } });
-      const effectiveProvider = body.provider ?? current?.provider ?? "mock";
-      const isHermesProvider = effectiveProvider === "hermes";
-      const isCustomProvider = effectiveProvider === "custom";
-      if (isHermesProvider || isCustomProvider) {
-        const allowPrivateNetwork = isHermesProvider
-          ? isHermesPrivateNetworkAllowed()
-          : isCustomPrivateNetworkAllowed();
-        const sync = validateHermesEndpoint(body.customBaseUrl, { allowPrivateNetwork });
-        if (!sync.ok) {
-          const hint = isHermesProvider
-            ? "فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة"
-            : "فعّل AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 في بيئة الخادم إذا الـ API على نفس السيرفر أو شبكتك المحلية";
-          throw new AppError(
-            `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) ${hint}`,
-            422,
-            "ENDPOINT_REJECTED"
-          );
-        }
-        const dns = await assertHermesEndpointResolves(body.customBaseUrl, { allowPrivateNetwork });
-        if (!dns.ok) {
-          throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — تحقق من العنوان وأن DNS يحله لوجهة مسموحة`, 422, "ENDPOINT_REJECTED");
-        }
-      } else {
-        const sync = validateEndpointUrl(body.customBaseUrl);
-        if (!sync.ok) {
-          throw new AppError(`عنوان الاتصال مرفوض (${sync.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
-        }
-        const dns = await assertEndpointResolvesPublic(body.customBaseUrl);
-        if (!dns.ok) {
-          throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — لا تُسمح عناوين داخلية أو محجوزة`, 422, "ENDPOINT_REJECTED");
-        }
+    // ⚠️ كان: أي حفظ فيه customBaseUrl بينفحص العنوان حتى لو المزوّد المختار
+    // ما بيستعمله — فعنوان خربان بيقفل الصفحة كلها، وما بتقدر تهرب منه لمزوّد
+    // تاني (الواجهة بتبعت العنوان مع كل حفظ).
+    // 🔧 هلأ: الفحص بيصير بس للمزوّدين اللي فعلًا بيستعملوا العنوان، وبيشمل
+    // العنوان المخزّن كمان لما تبدّل لمزوّد منهم بلا ما تبعت عنوان جديد —
+    // فما في ثغرة تخزين عنوان بلا فحص وبعدين تفعيله.
+    const currentSettings = await prisma.aISettings.findUnique({ where: { workspaceId: auth!.workspaceId } });
+    const effectiveProvider = body.provider ?? currentSettings?.provider ?? "mock";
+    const isHermesProvider = effectiveProvider === "hermes";
+    const isCustomProvider = effectiveProvider === "custom";
+    // المزوّدين اللي فعلًا بيستعملوا العنوان. غيرهم: العنوان بينخزّن بلا
+    // استعمال، وبينفحص كامل لحظة ما تبدّل لمزوّد بيستعمله (فوق) — فما في
+    // طريق لتخزين عنوان بلا فحص وبعدين تشغيله.
+    const usesCustomUrl = isHermesProvider || isCustomProvider;
+    const urlToCheck = usesCustomUrl
+      ? (body.customBaseUrl !== undefined
+          ? body.customBaseUrl
+          : ((currentSettings as { customBaseUrl?: string | null } | null)?.customBaseUrl ?? null))
+      : null;
+    if (urlToCheck !== null && urlToCheck !== undefined) {
+      const allowPrivateNetwork = isHermesProvider
+        ? isHermesPrivateNetworkAllowed()
+        : isCustomPrivateNetworkAllowed();
+      const sync = validateHermesEndpoint(urlToCheck, { allowPrivateNetwork });
+      if (!sync.ok) {
+        const hint = isHermesProvider
+          ? "فعّل HERMES_ALLOW_PRIVATE_NETWORK=true في بيئة الخادم، أو اضبط HERMES_BASE_URL هناك مباشرة"
+          : "فعّل AI_CUSTOM_ALLOW_PRIVATE_NETWORK=1 في بيئة الخادم إذا الـ API على نفس السيرفر أو شبكتك المحلية";
+        throw new AppError(
+          `عنوان الاتصال مرفوض (${sync.reason}) — للعناوين الداخلية (localhost/LAN) ${hint}`,
+          422,
+          "ENDPOINT_REJECTED"
+        );
+      }
+      const dns = await assertHermesEndpointResolves(urlToCheck, { allowPrivateNetwork });
+      if (!dns.ok) {
+        throw new AppError(`عنوان الاتصال مرفوض (${dns.reason}) — تحقق من العنوان وأن DNS يحله لوجهة مسموحة`, 422, "ENDPOINT_REJECTED");
       }
     }
     // customApiKey أيضاً write-only: تنخزن معمّاة — القيمة المفتوحة لا
