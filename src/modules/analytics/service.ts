@@ -505,18 +505,56 @@ export async function getSLA(db: DbClient, workspaceId: string, q: RangeQuery, s
 
 // ── Queue metrics ───────────────────────────────────────────────────────────
 
+/**
+ * سبب الفشل بلا أي بيانات زبون: الأرقام الطويلة والمعرّفات بتنشال من النص
+ * قبل ما يطلع لأي شاشة أو رد API.
+ */
+export function scrubFailureReason(raw: string | null | undefined): string {
+  if (!raw) return "سبب غير معروف";
+  return raw
+    .replace(/c[a-z0-9]{20,}/gi, "…")
+    .replace(/\+?\d[\d\s()-]{6,}\d/g, "…")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
 export async function getQueueMetrics(db: DbClient, workspaceId: string | null) {
   const where: Prisma.BackgroundJobWhereInput = workspaceId ? { workspaceId } : {};
   const jobs = await db.backgroundJob.findMany({ where, select: { status: true, type: true } });
   const by = (status: string) => jobs.filter((j) => j.status === status).length;
   const byType: Record<string, number> = {};
   for (const j of jobs) byType[j.type] = (byType[j.type] ?? 0) + 1;
+
+  // ليش ما رد؟ أكتر أسباب الفشل تكرارًا — بلا هاد الرقم لحاله ما بيدلّ على شي.
+  const failures = (await db.backgroundJob.findMany({
+    where: { ...where, status: "FAILED" },
+    select: { type: true, lastError: true, finishedAt: true },
+    orderBy: { finishedAt: "desc" },
+    take: 500,
+  })) as Array<{ type: string; lastError: string | null; finishedAt: Date | null }>;
+  const grouped = new Map<string, { type: string; reason: string; count: number; lastAt: Date | null }>();
+  for (const f of failures) {
+    const reason = scrubFailureReason(f.lastError);
+    const key = `${f.type}|${reason}`;
+    const row = grouped.get(key);
+    if (row) {
+      row.count += 1;
+      if (f.finishedAt && (!row.lastAt || f.finishedAt > row.lastAt)) row.lastAt = f.finishedAt;
+    } else {
+      grouped.set(key, { type: f.type, reason, count: 1, lastAt: f.finishedAt ?? null });
+    }
+  }
+  const topFailures = [...grouped.values()].sort((a, b) => b.count - a.count).slice(0, 10);
+
   return {
     pending: by("PENDING"),
     running: by("PROCESSING"),
     completed: by("DONE"),
     failed: by("FAILED"),
     byType,
+    topFailures,
+    failureSample: failures.length,
   };
 }
 
