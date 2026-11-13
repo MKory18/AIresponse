@@ -14,6 +14,7 @@ import { GlassCard, PageHeader } from "@/components/ui/card";
 import { providerLabel, publicDetail } from "@/lib/provider-labels";
 import { GLM_ZAKIAI_PRESET, aiConnectionMode } from "@/lib/ai-connection";
 import { AiStatusCard, TASK_AR, type TaskInfo } from "./ai-status-card";
+import { WhyNoReplyCard } from "./why-no-reply-card";
 
 type Settings = {
   provider: string;
@@ -338,6 +339,8 @@ export default function AISettingsPage() {
       <PageHeader title={t.pages.aiSettingsTitle} description={t.pages.aiSettingsDesc} />
 
       <AiStatusCard key={statusKey} onTasks={setTasks} />
+
+      <WhyNoReplyCard />
 
       <Section
         icon={<Power size={15} />}
