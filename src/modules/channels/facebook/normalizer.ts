@@ -34,7 +34,7 @@ export interface MetaWebhookPayload {
       timestamp?: number;
       // P8 — بيانات إحالة موثوقة (messaging_referrals / postback ref).
       referral?: MetaReferral;
-      postback?: { ref?: string; payload?: string; referral?: MetaReferral };
+      postback?: { ref?: string; payload?: string; title?: string; mid?: string; referral?: MetaReferral };
       message?: {
         mid?: string;
         text?: string;
@@ -80,6 +80,42 @@ function attachmentType(t: string | undefined): NormalizedAttachment["type"] | n
   }
 }
 
+type MetaMessagingEvent = NonNullable<NonNullable<MetaWebhookPayload["entry"]>[number]["messaging"]>[number];
+
+/**
+ * كبسة زر بالماسنجر (postback): الزبون كبس «ابدأ» أو زر من قائمة، فما في
+ * نص رسالة. منحوّلها لرسالة زبون بنص الزر، وإلا بتضل بلا رد.
+ */
+function normalizePostbackTap(
+  event: MetaMessagingEvent,
+  pageId: string,
+  channelAccountId: string,
+  rawEventId: string
+): NormalizedInboundMessage | null {
+  const pb = event.postback;
+  const psid = event.sender?.id;
+  if (!pb || !psid) return null;
+  const ts = event.timestamp ?? 0;
+  // معرّف ثابت: نفس الكبسة بإعادة التسليم = نفس المفتاح (بلا تكرار رد).
+  const mid = pb.mid ?? `pb:${psid}:${ts}:${pb.payload ?? pb.title ?? ""}`;
+  const text = (pb.title ?? pb.payload ?? "").trim();
+  return {
+    channelType: "FACEBOOK",
+    channelAccountId,
+    externalCustomerId: psid,
+    externalConversationId: psid,
+    externalMessageId: mid,
+    adRef: event.referral?.ref ?? pb.ref ?? null,
+    referral: normalizeMetaReferral(event.referral ?? pb.referral, pageId, "fb"),
+    externalEventId: `${rawEventId}:${mid}`,
+    text: text.length > 0 ? text : null,
+    attachments: [],
+    timestamp: ts ? new Date(ts) : new Date(),
+    provider: "facebook",
+    rawEventId,
+  };
+}
+
 /**
  * Normalizes a verified Meta webhook payload for one connected Page into
  * internal inbound messages. Echoes, reads, deliveries and non-message events
@@ -96,6 +132,13 @@ export function normalizeFacebookWebhook(
     if (entry.id !== pageId) continue; // safety: entry must belong to this Page
     for (const event of entry.messaging ?? []) {
       const msg = event.message;
+      // كبسة زر (ابدأ · رد سريع من قائمة): حدث بلا رسالة — لازم تنحسب رسالة
+      // زبون وإلا الزبون بيكبس وما بيجيه رد.
+      if (!msg && event.postback && event.sender?.id) {
+        const tapped = normalizePostbackTap(event, pageId, channelAccountId, rawEventId);
+        if (tapped) out.push(tapped);
+        continue;
+      }
       if (!msg || msg.is_echo || msg.is_deleted || !msg.mid || !event.sender?.id) continue;
       const attachments: NormalizedAttachment[] = (msg.attachments ?? [])
         .map((a): NormalizedAttachment | null => {
@@ -142,8 +185,9 @@ export function extractFacebookReferralSignals(payload: MetaWebhookPayload, page
   for (const entry of payload.entry ?? []) {
     if (entry.id !== pageId) continue;
     for (const event of entry.messaging ?? []) {
-      if (event.message || !event.sender?.id) continue;
-      const referral = normalizeMetaReferral(event.referral ?? event.postback?.referral, pageId, "fb");
+      // الكبسة صارت رسالة زبون فوق ومعها إحالتها — ما منعدّها لمسة تانية.
+      if (event.message || event.postback || !event.sender?.id) continue;
+      const referral = normalizeMetaReferral(event.referral, pageId, "fb");
       if (!referral) continue;
       const ts = event.timestamp ?? 0;
       out.push({

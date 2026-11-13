@@ -586,6 +586,21 @@ async function processJobBatch(
         },
       });
       log.warn({ jobId: job.id, type: job.type, error: result.error, exhausted }, "job_failed");
+      // خلصت كل المحاولات ومهمة رد: رسالة الزبون كانت بتضل بلا أي رد.
+      // منبعت نص ثابت آمن بدل السكوت (بيتخطّى نفسه إذا الموظف مستلم أو
+      // الزبون أصلًا أخد رد أحدث).
+      if (exhausted && job.type === "process_ai_message") {
+        const payload = (job.payload ?? {}) as { conversationId?: string; messageId?: string };
+        if (payload.conversationId && payload.messageId) {
+          const { sendLastResortReply } = await import("@/modules/ai/last-resort");
+          await sendLastResortReply(db, {
+            workspaceId: job.workspaceId,
+            conversationId: payload.conversationId,
+            messageId: payload.messageId,
+            reason: result.error ?? "unknown error",
+          });
+        }
+      }
     }
   };
 
