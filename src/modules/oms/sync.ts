@@ -3,6 +3,7 @@ import { recordAudit } from "@/modules/audit/service";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { OMS_PRODUCTS_PAGE_LIMIT, type OmsProduct } from "./client";
 import { buildOmsClient, noteOmsError, noteOmsOk } from "./connection";
+import { sameProductName } from "@/modules/products/name-match";
 
 /**
  * منتجات الردود = منتجات الـ OMS (قرار المالك 2026-11-12).
@@ -37,20 +38,9 @@ export interface ProductSyncResult {
 type LocalProduct = { id: string; sku: string; name: string; isActive: boolean; isArchived?: boolean };
 
 /** نفس الاسم = نفس الكلمات بعد التطبيع العربي (أ/إ/آ · ة · ى · تشكيل · مسافات). */
-export function sameProductName(a: string, b: string): boolean {
-  return normalizeName(a) === normalizeName(b) && normalizeName(a).length > 0;
-}
+// ط§ظ„طھط·ط¨ظٹط¹ ظˆط§ظ„ظ…ظ‚ط§ط±ظ†ط© طµط§ط±ظˆط§ ط¨ظ…ظƒط§ظ† ظˆط§ط­ط¯ ظ…ط´طھط±ظƒ ظ…ط¹ ظ…ط³ط§ط± ط§ظ„ط±ط¯.
+export { sameProductName };
 
-function normalizeName(text: string): string {
-  return text
-    .replace(/[ً-ْٰـ]/g, "")
-    .replace(/[أإآٱ]/g, "ا")
-    .replace(/ى/g, "ي")
-    .replace(/ة/g, "ه")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function problemOf(p: OmsProduct): string | null {
   if (!p.code || p.code.length > 64) return "رمز منتج ناقص";
