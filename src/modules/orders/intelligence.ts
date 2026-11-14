@@ -31,6 +31,40 @@ export interface OrderIntelligenceResult {
 
 const ORDER_INTENTS = new Set(["ORDER_CREATE", "ORDER_UPDATE", "ORDER_CANCEL", "TRACK_ORDER"]);
 
+/** قيمة فيها نص فعلي (مش فراغ ولا null). */
+function filled(value: unknown): boolean {
+  return typeof value === "number" ? Number.isFinite(value) && value > 0 : Boolean(String(value ?? "").trim());
+}
+
+/**
+ * ⚠️ المسودة كانت تتعبّى بس لما الموديل يصنّف الرسالة «طلب». الاستخراج بيشتغل
+ * على كل رسالة أصلًا، فالكمية والرقم والعنوان كانوا بينستخرجوا وبينحكوا بالرد
+ * وبعدين **بينرموا** — ولا طلب انسجّل.
+ * 🔧 أي رسالة فيها بيانات طلب بتوصل المسودة، مهما كان تصنيفها. **بلا أي نداء
+ * ذكاء زيادة** — نفس الاستخراج اللي صار.
+ *
+ * اسم منتج لحاله مش «بيانات طلب»: «بكم ماء الكمأ؟» سؤال سعر وبيضل سؤال سعر.
+ * اللي بيفتح مسودة لحاله: الرقم أو العنوان أو سلة منتجات — ما بيبعتهم الزبون
+ * إلا وهو بيطلب. والأضعف (كمية · محافظة · اسم) بيكمّل مسودة مفتوحة بس، لأنه
+ * «عندكم فرع بعمان؟» بيطلّع محافظة وما بصير يفتح طلب من لا شي.
+ */
+export function hasOrderData(extraction: ExtractionResult): boolean {
+  return hasStrongOrderData(extraction) || hasWeakOrderData(extraction);
+}
+
+/** بيانات بتفتح مسودة لحالها: رقم · عنوان · سلة منتجات. */
+function hasStrongOrderData(extraction: ExtractionResult): boolean {
+  const e = extraction.entities;
+  if (Array.isArray(e.products) && e.products.some((p) => p && filled(p.name))) return true;
+  return filled(e.phone) || filled(e.address);
+}
+
+/** بيانات بتكمّل مسودة مفتوحة بس: كمية · محافظة · اسم. */
+function hasWeakOrderData(extraction: ExtractionResult): boolean {
+  const e = extraction.entities;
+  return filled(e.quantity) || filled(e.province) || filled(e.customer_name);
+}
+
 function isProductCandidate(text: string): boolean {
   // Don't treat every message as a product mention — only plausible ones.
   return text.length > 2 && /[\p{L}]/u.test(text);
@@ -195,7 +229,16 @@ export async function handleOrderIntent(
   }
 
   // 3. Order creation/update → merge extraction into the persisted draft.
-  if (intent === "ORDER_CREATE" || intent === "ORDER_UPDATE" || extraction.requestedAction === "CREATE_ORDER") {
+  //    ⚠️ كان الشرط على التصنيف بس، فكل رسالة سمّاها الموديل «سؤال» كانت
+  //    بياناتها تُرمى (المحادثة الحقيقية: الكمية والرقم والعنوان كلهم انرموا).
+  //    🔧 بيانات الطلب بتدخل المسودة مهما كان التصنيف — والكمية لحالها بس
+  //    مع مسودة مفتوحة، فسؤال عادي فيه رقم ما بيفتح طلب من لا شي.
+  const labelledOrder = intent === "ORDER_CREATE" || intent === "ORDER_UPDATE" || extraction.requestedAction === "CREATE_ORDER";
+  const capturesOrderData =
+    labelledOrder ||
+    hasStrongOrderData(extraction) ||
+    (hasWeakOrderData(extraction) && (await listOpenDrafts(db, params.workspaceId, params.conversationId)).length > 0);
+  if (capturesOrderData) {
     const entities = extraction.entities;
     // P22 — عدة منتجات في رسالة واحدة: نبني سلة من entities.products.
     const multiItems = Array.isArray(entities.products)

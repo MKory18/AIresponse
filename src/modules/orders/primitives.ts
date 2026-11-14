@@ -173,6 +173,12 @@ const NO_WORDS = new Set(
 );
 const NO_PHRASES = ["لا شكرا", "غيرت رايي", "ما بدي", "مش بدي"].map(normalizeCounting);
 const TAMAM = normalizeCounting("تمام");
+/**
+ * «اي» لحالها موافقة بالشامي والأردني («اي، أكد»). وسط جملة بتضل «which»
+ * («أي لون عندكم؟») — فمنقبلها بس لما تكون الرسالة كلها كلمة وحدة.
+ * ⚠️ الزبون أكّد بـ«اي» بمحادثة حقيقية والنظام حسبها كلام عادي، فما تأكد الطلب.
+ */
+const BARE_YES_ONLY = [normalizeCounting("اي")];
 /** Bare negation words that only refuse when they stand alone at the message end. */
 const BARE_NO = [normalizeCounting("لا"), normalizeCounting("مو")];
 
@@ -195,7 +201,7 @@ export interface ConfirmationSignal {
  * Extracts an order-confirmation signal. Whole-token only:
  *  - "لا" is a refusal ONLY as the final/standalone token ("نعم لا" = conflict,
  *    "لا تؤجله" = a negation of another verb → not a refusal).
- *  - "أي/اي" is never a yes.
+ *  - "أي/اي" is a yes ONLY as the entire message; inside a sentence it is "which".
  *  - Greetings/questions with no signal vocabulary → UNKNOWN.
  *  - Conflicting YES and NO → UNKNOWN.
  * Callers must treat UNKNOWN as "do nothing"; it never creates or cancels.
@@ -212,6 +218,8 @@ export function parseConfirmation(text: string): ConfirmationSignal {
       // "تمام" is filler inside a longer sentence → only counts in a short reply.
       if (token !== TAMAM || tokens.length <= 3) yes = true;
     }
+    // "اي" counts only as the whole message — mid-sentence it means "which".
+    if (tokens.length === 1 && BARE_YES_ONLY.includes(token)) yes = true;
     if (NO_WORDS.has(token)) {
       // Bare "لا"/"مو" mid-sentence negate another verb, not the order.
       if (!BARE_NO.includes(token) || i === tokens.length - 1) no = true;

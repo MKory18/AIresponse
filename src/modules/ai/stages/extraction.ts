@@ -30,7 +30,7 @@ import { prisma } from "@/core/db/prisma";
 import { sendProtectedStructured, extractPhoneDeterministic } from "../privacy-gate";
 import { recordAudit } from "@/modules/audit/service";
 import { matchProductByAnyName } from "@/modules/products/name-match";
-import { handleOrderIntent } from "@/modules/orders/intelligence";
+import { handleOrderIntent, hasOrderData } from "@/modules/orders/intelligence";
 import { isBuyingContext } from "@/modules/sales/plan-builder";
 import type { Db } from "@/modules/customers/service";
 import type {
@@ -298,9 +298,14 @@ export async function runExtraction(
 
   // Order Intelligence: deterministic draft/rules handling for order intents.
   let orderResult: Awaited<ReturnType<typeof handleOrderIntent>> | null = null;
+  // ⚠️ البوابة كانت على التصنيف بس: رسالة فيها الرقم والعنوان وصنّفها الموديل
+  // «سؤال» ما كانت توصل منطق الطلب أبدًا، فبياناتها تنرمى.
+  // 🔧 `hasOrderData` فحص حتمي بلا قاعدة بيانات ولا نداء ذكاء — بيمرّر الرسالة
+  // اللي فيها بيانات طلب مهما كان تصنيفها.
   if (
     ["ORDER_CREATE", "ORDER_UPDATE", "ORDER_CANCEL", "UNKNOWN"].includes(extraction.intent) ||
-    extraction.requestedAction === "CREATE_ORDER"
+    extraction.requestedAction === "CREATE_ORDER" ||
+    hasOrderData(extraction)
   ) {
     try {
       orderResult = await handleOrderIntent(db, {
