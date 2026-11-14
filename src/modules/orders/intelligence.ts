@@ -48,8 +48,8 @@ function filled(value: unknown): boolean {
  * إلا وهو بيطلب. والأضعف (كمية · محافظة · اسم) بيكمّل مسودة مفتوحة بس، لأنه
  * «عندكم فرع بعمان؟» بيطلّع محافظة وما بصير يفتح طلب من لا شي.
  */
-export function hasOrderData(extraction: ExtractionResult): boolean {
-  return hasStrongOrderData(extraction) || hasWeakOrderData(extraction);
+export function hasOrderData(extraction: ExtractionResult, customerText?: string): boolean {
+  return hasStrongOrderData(extraction) || hasWeakOrderData(extraction, customerText);
 }
 
 /** بيانات بتفتح مسودة لحالها: رقم · عنوان · سلة منتجات. */
@@ -59,10 +59,19 @@ function hasStrongOrderData(extraction: ExtractionResult): boolean {
   return filled(e.phone) || filled(e.address);
 }
 
-/** بيانات بتكمّل مسودة مفتوحة بس: كمية · محافظة · اسم. */
-function hasWeakOrderData(extraction: ExtractionResult): boolean {
+/**
+ * بيانات بتكمّل مسودة مفتوحة بس: كمية · محافظة · اسم.
+ *
+ * ⚠️ «٣ عبوات بكم؟» سؤال سعر بنص فيه الكمية. الموديل ساعات بيطلّعها
+ * وساعات لأ — وبمحادثة حقيقية ما طلّعها، فالكمية ضاعت والطلب ضل ناقص وهو
+ * كان حاكي عنها بالرد.
+ * 🔧 منقرا الكمية من النص كمان بـ`parseQuantity` الحتمي — نفس القارئ اللي
+ * بيستعمله جمع الطلب أصلًا، فـ«شارع 1235» و«46002535» بيرجعوا فاضي.
+ */
+function hasWeakOrderData(extraction: ExtractionResult, customerText?: string): boolean {
   const e = extraction.entities;
-  return filled(e.quantity) || filled(e.province) || filled(e.customer_name);
+  if (filled(e.quantity) || filled(e.province) || filled(e.customer_name)) return true;
+  return Boolean(customerText && parseQuantity(customerText).value);
 }
 
 function isProductCandidate(text: string): boolean {
@@ -237,7 +246,8 @@ export async function handleOrderIntent(
   const capturesOrderData =
     labelledOrder ||
     hasStrongOrderData(extraction) ||
-    (hasWeakOrderData(extraction) && (await listOpenDrafts(db, params.workspaceId, params.conversationId)).length > 0);
+    (hasWeakOrderData(extraction, params.customerText) &&
+      (await listOpenDrafts(db, params.workspaceId, params.conversationId)).length > 0);
   if (capturesOrderData) {
     const entities = extraction.entities;
     // P22 — عدة منتجات في رسالة واحدة: نبني سلة من entities.products.
