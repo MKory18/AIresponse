@@ -73,6 +73,14 @@ function omsFields(p: OmsProduct): Record<string, unknown> {
     isActive: true,
     isArchived: false,
     ...(stock ? { stockStatus: stock } : {}),
+    // الأسماء التانية: بتدخل بالبحث زي الاسم الأصلي، فالزبون اللي بيسمّيه
+    // بالإنجليزي أو باسم مختصر بيلاقيه.
+    ...(p.aliases.length > 0 ? { aliases: p.aliases.slice(0, 20) } : {}),
+    // ⚠️ الوصف والصنف لسا ما بيجوا من باب الـ OMS (موجودين عنده بس الباب
+    // ما بيبعتهم). 🔧 لما يبعتهم بينحفظوا من هون بلا أي تعديل تاني —
+    // والقيمة الفاضية ما بتمسح وصف مكتوب بإيد.
+    ...(p.description ? { description: p.description } : {}),
+    ...(p.category ? { category: p.category } : {}),
   };
 }
 
