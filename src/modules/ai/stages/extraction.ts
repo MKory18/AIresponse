@@ -29,6 +29,7 @@ import { PgVectorStore } from "@/modules/knowledge/vector-store";
 import { prisma } from "@/core/db/prisma";
 import { sendProtectedStructured, extractPhoneDeterministic } from "../privacy-gate";
 import { recordAudit } from "@/modules/audit/service";
+import { matchProductByAnyName } from "@/modules/products/name-match";
 import { handleOrderIntent } from "@/modules/orders/intelligence";
 import { isBuyingContext } from "@/modules/sales/plan-builder";
 import type { Db } from "@/modules/customers/service";
@@ -520,7 +521,23 @@ async function findProductId(
     select: { id: true, name: true },
     take: 50,
   });
-  return pickBestProductMatch(candidates.slice(0, 12), products);
+  const direct = pickBestProductMatch(candidates.slice(0, 12), products);
+  if (direct) return direct;
+
+  // ⚠️ البحث فوق حرفي: «ماء الكماة» ما بتطابق «ماء الكمأ»، فالرد بيطلع بلا
+  // سعر مع إن السعر مسجّل. 🔧 محاولة تانية بعد التطبيع العربي (الهمزات ·
+  // التاء المربوطة · الألف المقصورة · التشكيل) على منتجات الصفحة بس.
+  const scope = (await db.product.findMany({
+    where: {
+      workspaceId,
+      isActive: true,
+      isArchived: false,
+      ...(allowedIds ? { id: { in: allowedIds } } : {}),
+    },
+    select: { id: true, name: true },
+    take: 500,
+  })) as Array<{ id: string; name: string }>;
+  return matchProductByAnyName(candidates.slice(0, 12), scope)?.id ?? null;
 }
 
 function buildPlan(
