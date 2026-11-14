@@ -6,6 +6,9 @@ import { evaluateWorkerHealth } from "@/modules/jobs/worker-health";
 
 const log = childLogger("health");
 
+/** نافذة «الفشل الحالي»: اللي صار اليوم، مش تاريخ النظام كله. */
+const RECENT_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /**
  * GET /api/health — operational health, no secrets.
  * Distinguishes: APP_HEALTHY / DB_UNHEALTHY / QUEUE_UNHEALTHY /
@@ -30,7 +33,15 @@ export async function GET() {
     const staleRaw = Number(process.env.WORKER_STALE_MS ?? 120_000);
     const staleMs = Number.isFinite(staleRaw) && staleRaw >= 5_000 ? staleRaw : 120_000;
     try {
-      const failed = await prisma.backgroundJob.count({ where: { status: "FAILED" } });
+      // ⚠️ كان: عدّ كل الفشل من يوم ما اشتغل النظام — ٣٤٨٣ مهمة قديمة بتخلّي
+      // الحالة «غير سليمة» للأبد، فالمؤشر ما بيميّز عطل اليوم عن عطل الشهر الماضي.
+      // 🔧 هلأ: فشل آخر ٢٤ ساعة بس — رقم بيتحرّك وبيدلّ على الوضع الحالي.
+      const failedSince = new Date(Date.now() - RECENT_FAILURE_WINDOW_MS);
+      const failed = await prisma.backgroundJob.count({
+        where: { status: "FAILED", finishedAt: { gte: failedSince } },
+      });
+      const failedAllTime = await prisma.backgroundJob.count({ where: { status: "FAILED" } });
+      status.failedJobsAllTime = String(failedAllTime);
       const pending = await prisma.backgroundJob.count({ where: { status: "PENDING" } });
       // عمر أقدم مهمة معلّقة = مقياس «هل الردود متأخرة؟»
       const oldest = await prisma.backgroundJob.findFirst({

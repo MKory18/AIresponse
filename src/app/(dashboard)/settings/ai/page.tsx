@@ -15,6 +15,10 @@ import { providerLabel, publicDetail } from "@/lib/provider-labels";
 import { GLM_ZAKIAI_PRESET, aiConnectionMode } from "@/lib/ai-connection";
 import { AiStatusCard, TASK_AR, type TaskInfo } from "./ai-status-card";
 import { WhyNoReplyCard } from "./why-no-reply-card";
+import { RiskNote, FixNote } from "@/components/integrations/ui";
+
+/** طھط­طھ ظ‡ط§ظ„ط­ط¯ ط§ظ„ط±ط¯ ط§ظ„ط¹ط±ط¨ظٹ ط¨ظٹظ†ظ‚ط·ط¹ â€” ط§ظ„ظ‚ظٹط§ط³ ظ…ظ† ظ…ط³ط§ط­ط© ط­ظ‚ظٹظ‚ظٹط©: ظ،ظ ظ  ظˆط­ط¯ط© = ظ¢ظ§ ط­ط±ظپ. */
+const SAFE_ARABIC_MAX_TOKENS = 300;
 
 type Settings = {
   provider: string;
@@ -486,7 +490,12 @@ export default function AISettingsPage() {
               className="num"
             />
           </Field>
-          <Field label="أقصى طول للرد" hint="بالتوكنز — كل ١٠٠ ≈ ٧٠ كلمة">
+          {/* ⚠️ الشرح القديم كان يحسبها بالإنجليزي (مئة وحدة = سبعين كلمة) وغلط
+              بالعربي: الموديل بياكل ٣ أو ٤ وحدات بالحرف الواحد، فـ١٠٠ وحدة
+              ≈ ٥ كلمات عربية. على هالشرح انحطّ الحد ١٠٠ بمساحة حقيقية،
+              فصار كل رد ينقطع بنص الكلمة، يرفضه الحارس، وتعاد المحاولة
+              ٣ مرات — بطء وسكوت بلا سبب ظاهر. */}
+          <Field label="أقصى طول للرد" hint="بالتوكنز — بالعربي كل ١٠٠ ≈ ٥ كلمات فقط">
             <Input
               type="number"
               min="50"
@@ -496,6 +505,12 @@ export default function AISettingsPage() {
               dir="ltr"
               className="num"
             />
+            {form.maxTokens < SAFE_ARABIC_MAX_TOKENS ? (
+              <div className="mt-2 space-y-1">
+                <RiskNote title="الحد قصير عالعربي — الرد بينقطع بنص الكلمة، والنظام بيرفضه ويعيد المحاولة: بطء بالرد أو ما بيوصل رد أبدًا." />
+                <FixNote>خليه ٨٠٠ أو أكتر. رد مبيعات عربي عادي بياخد ٢٠٠ وحدة.</FixNote>
+              </div>
+            ) : null}
           </Field>
         </div>
         {/* «حد التنفيذ» و«حد الرد» (confidenceExecute/Respond) انشالوا من الشاشة:
