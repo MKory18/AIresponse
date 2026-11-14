@@ -1,6 +1,6 @@
 import { childLogger } from "@/core/logger";
 import { AIProviderError, type AIProvider } from "@/modules/ai/provider";
-import { getExtractionProvider } from "./provider";
+import { getWorkspaceExtractionProvider } from "./provider";
 import {
   EMPTY_INTEL_FIELDS,
   INTEL_FIELD_CATALOG,
@@ -196,7 +196,9 @@ export async function runCustomerIntelExtraction(
   const activeDefs = enabledFieldDefs(fieldSettings);
 
   const prompt = buildExtractionPrompt(sources, activeDefs);
-  const handle = params.options ?? getExtractionProvider();
+  // المزوّد من إعدادات المساحة — بيانات الزبون ما بتطلع لموديل خارجي.
+  // المختبر الداخلي بيمرّر مزوّده صريح بـ `params.options`.
+  const handle = params.options ?? (await getWorkspaceExtractionProvider(db as never, params.workspaceId));
   const provider = handle.provider as AIProvider;
   const model = handle.model ?? "unknown";
 
