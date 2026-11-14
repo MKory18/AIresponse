@@ -636,6 +636,19 @@ export async function retireOutOfCatalogDraftItems(
 }
 
 /** Deterministic order summary text for the AI to phrase (never prices from AI). */
+/**
+ * نفس الملخص بلا قيم التواصل — هاد اللي بيروح للموديل.
+ *
+ * ⚠️ ملخص المسودة فيه رقم الزبون وعنوانه، وكان بينحط حرفيًا بسياق الموديل.
+ * الموديل ما بيحتاجه أبدًا ليكتب الرد — بيحتاج يعرف إنه موجود مش ناقص.
+ * 🔧 القيمة بتنشال ويضل الإشعار. وبما إنه الموديل ما شافها، ما بيقدر يطلّعها.
+ */
+export function redactSummaryContacts(summary: string): string {
+  return summary
+    .replace(/^(الهاتف|الاسم):.*$/gmu, "$1: محفوظ ✅")
+    .replace(/^العنوان:.*$/gmu, "العنوان: محفوظ ✅");
+}
+
 export function buildDraftSummary(draft: {
   items?: unknown;
   productId?: string | null;

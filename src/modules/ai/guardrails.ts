@@ -41,9 +41,17 @@ export function validateResponse(params: {
    * P1.1: trusted non-contact numbers (prices, totals) exempt from the rule.
    */
   allowedNumbers?: Array<string | number>;
+  /**
+   * هل انسجّل طلب فعليًا بهاي اللفة؟
+   * ⚠️ بمحادثة حقيقية (٢٠٢٦-١١-١٤) الموديل قال «تمام، ثبّتنا الطلب» وما كان
+   * في ولا طلب — الزبون انتظر شحنة ما إلها وجود.
+   * 🔧 `false` = مسودة لسا بتتجمع، فأي ادعاء تثبيت مرفوض والرد بينعاد.
+   * `true` = في رقم طلب. `undefined` = القاعدة مطفية (السلوك القديم).
+   */
+  orderPlaced?: boolean;
 }): GuardrailResult {
   const violations: string[] = [];
-  const { response, context, prohibitedPhrases = [], allowFeedbackQuote = false, trustedContacts = [], allowedNumbers = [] } = params;
+  const { response, context, prohibitedPhrases = [], allowFeedbackQuote = false, trustedContacts = [], allowedNumbers = [], orderPlaced } = params;
 
   // 0. Empty responses must never be sent.
   if (!response || !response.trim()) {
@@ -161,12 +169,36 @@ export function validateResponse(params: {
     }
   }
 
+  // 9. ادعاء تثبيت الطلب بلا طلب فعلي. الفعل الماضي بصيغة «نحنا» بس — السؤال
+  //    («هل أؤكد الطلب؟») والوعد («بعتلي عنوانك لأثبّت الطلب») بيضلوا مسموحين.
+  if (orderPlaced === false && claimsOrderPlaced(response)) {
+    violations.push("UNCONFIRMED_ORDER_CLAIM");
+  }
+
   const valid = violations.length === 0;
   return {
     valid,
     violations,
     fallback: undefined,
   };
+}
+
+/** تطبيع عربي خفيف للمطابقة: تشكيل · همزات · ة/ه · ى/ي. */
+function foldArabic(text: string): string {
+  return text
+    .replace(/[ً-ْٰـ]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه");
+}
+
+/** ماضي التثبيت بصيغة «نحنا» أو «تم» + ذكر الطلب. */
+const ORDER_PLACED_CLAIM = /(تم\s+(تاكيد|تثبيت|تسجيل|اعتماد)|ثبتنا|اكدنا|سجلنا|ثبتنالك|سجلنالك|انسجل)/u;
+const ORDER_WORD = /(الطلب|طلبك|طلبكم|طلبيتك)/u;
+
+export function claimsOrderPlaced(response: string): boolean {
+  const folded = foldArabic(response);
+  return ORDER_PLACED_CLAIM.test(folded) && ORDER_WORD.test(folded);
 }
 
 /**

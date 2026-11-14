@@ -24,6 +24,7 @@ import { validateResponse } from "../guardrails";
 import { sendProtectedText } from "../privacy-gate";
 import { saveMemories } from "../memory";
 import { scrubRecalledText } from "../catalog-boundary";
+import { redactSummaryContacts } from "@/modules/orders/draft-service";
 import { recordAudit } from "@/modules/audit/service";
 import type { Db } from "@/modules/customers/service";
 import type {
@@ -100,6 +101,19 @@ export async function runResponse(
     if (salesPlan.discount) allowedNumbers.push(salesPlan.discount.discountedPrice, salesPlan.discount.amount);
   }
 
+  // ⚠️ الموديل قال «تمام، ثبّتنا الطلب» والمسودة كانت لسا ناقصة — ولا طلب
+  // انسجّل، والزبون انتظر شحنة ما إلها وجود.
+  // 🔧 حالة الطلب من منطق الطلب الحتمي: `true` في رقم طلب · `false` المسودة
+  // لسا بتتجمع فأي ادعاء تثبيت مرفوض · `undefined` ما في سياق طلب أبدًا
+  // (القاعدة مطفية، فردود الأسئلة العادية ما بيتغيّر سلوكها).
+  const orderPlaced: boolean | undefined =
+    orderResult?.action === "ORDER_CONFIRMED" || orderResult?.action === "ORDER_UPDATED"
+      ? true
+      : orderResult &&
+          ["ASK_MISSING_FIELD", "REQUEST_CONFIRMATION", "DRAFT_UPDATED", "RULES_BLOCKED"].includes(orderResult.action)
+        ? false
+        : undefined;
+
   // What really goes out with this reply, decided BEFORE the model writes it:
   // a promised picture that never arrives is worse than no picture.
   const replyMedia = await planReplyMedia(db, {
@@ -153,7 +167,8 @@ export async function runResponse(
           content: m.value.length > 200 ? `${m.value.slice(0, 200)}…` : m.value,
         })),
       summary: scrubRecalledText(recallGuard, conversation.summary) || null,
-      orderSummary: orderResult?.summaryText ?? null,
+      // رقم الزبون وعنوانه ما بيوصلوا الموديل — بيوصله إنهم محفوظين بس.
+      orderSummary: orderResult?.summaryText ? redactSummaryContacts(orderResult.summaryText) : null,
       sales: salesPlan
         ? {
             primary: salesPlan.primary
@@ -247,6 +262,7 @@ export async function runResponse(
       allowFeedbackQuote: plan.useFeedback,
       trustedContacts,
       allowedNumbers,
+      orderPlaced,
     });
     if (!check.valid) {
       violations = check.violations;
@@ -270,6 +286,7 @@ export async function runResponse(
         allowFeedbackQuote: plan.useFeedback,
         trustedContacts,
         allowedNumbers,
+        orderPlaced,
       });
       if (!retryCheck.valid) {
         throw new AIProviderError(`Guardrail violations persist after retry: ${retryCheck.violations.join(", ")}`);
