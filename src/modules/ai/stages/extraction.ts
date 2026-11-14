@@ -534,10 +534,15 @@ async function findProductId(
       isArchived: false,
       ...(allowedIds ? { id: { in: allowedIds } } : {}),
     },
-    select: { id: true, name: true },
+    select: { id: true, name: true, aliases: true },
     take: 500,
-  })) as Array<{ id: string; name: string }>;
-  return matchProductByAnyName(candidates.slice(0, 12), scope)?.id ?? null;
+  })) as Array<{ id: string; name: string; aliases?: string[] | null }>;
+  // الاسم التاني (من الـ OMS) بيتعامل معاملة الاسم الأصلي بالبحث.
+  const searchable = scope.flatMap((p) => [
+    { id: p.id, name: p.name },
+    ...(p.aliases ?? []).filter((a) => a && a.trim().length > 0).map((a) => ({ id: p.id, name: a })),
+  ]);
+  return matchProductByAnyName(candidates.slice(0, 12), searchable)?.id ?? null;
 }
 
 function buildPlan(

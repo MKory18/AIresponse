@@ -498,6 +498,9 @@ model Product {
   discountCap      Decimal?    @db.Decimal(12, 2)
   offers           Json        @default("[]")
   complementarySkus String[]   @default([])
+  // أسماء تانية للمنتج (من الـ OMS: الاسم الإنجليزي · وأي اسم بيكتبه الزبون).
+  // الزبون بيختصر وبيسمّي على كيفه — البحث بيمرّ عليها زي الاسم الأصلي.
+  aliases          String[]    @default([])
   // P12 — مرجع المنتج بسيستم 1 (مثل pf_2031) لقراءة قواعد الادعاءات.
   s1ProductRef     String?
   isActive         Boolean     @default(true)
