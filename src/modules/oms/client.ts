@@ -34,6 +34,16 @@ export interface OmsProduct {
   stockStatus: OmsStockStatus | null;
   offers: OmsOffer[];
   complements: string[];
+  /** أسماء تانية للمنتج — بتوصل لما نطلب `fields=aliases`. */
+  aliases: string[];
+  /**
+   * ⚠️ الوصف والصنف والصورة: الـ OMS عنده إياهم (`description` · `categoryId`
+   * · `image` بجدول المنتج) بس باب `/api/v1/products` لسا ما بيبعتهم.
+   * 🔧 منقرأهم هون من هلأ — أول ما الباب يبعتهم بينحفظوا بلا أي تعديل تاني.
+   */
+  description: string | null;
+  category: string | null;
+  imageUrl: string | null;
 }
 
 export interface OmsOrderAttribution {
@@ -85,6 +95,13 @@ export interface OmsClientDeps {
 /** حد صفحة المنتجات بباب الـ OMS (`readLimit(…, 100, 500)`). */
 export const OMS_PRODUCTS_PAGE_LIMIT = 500;
 
+/** نص مفيد أو null — الفاضي والمسافات ما بينحفظوا فوق قيمة موجودة. */
+function text(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
+}
+
 function num(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(String(v));
@@ -116,6 +133,12 @@ export function mapV1Product(raw: Record<string, unknown>): OmsProduct {
       // عرض ناقص ما بيوصل للبيع (نفس شروط `productOfferSchema`).
       .filter((o) => o.title && o.quantity >= 1 && o.price > 0),
     complements: Array.isArray(raw.complements) ? (raw.complements as unknown[]).map(String) : [],
+    aliases: Array.isArray(raw.aliases)
+      ? (raw.aliases as unknown[]).map((a) => String(a).trim()).filter((a) => a.length > 0)
+      : [],
+    description: text(raw.description) ?? text(raw.description_ar) ?? null,
+    category: text(raw.category) ?? text(raw.category_name) ?? null,
+    imageUrl: text(raw.image) ?? text(raw.image_url) ?? null,
   };
 }
 
@@ -282,7 +305,12 @@ export class OmsClient {
 
   /** المنتجات الفعّالة بالـ OMS (سعر · عروض · حالة مخزون). `null` = شكل غلط. */
   async getProducts(limit = OMS_PRODUCTS_PAGE_LIMIT): Promise<OmsProduct[] | null> {
-    const res = await this.request<{ items?: unknown }>("GET", `/api/v1/products?for=replies&limit=${limit}`);
+    // `fields=aliases` بيزيد الأسماء التانية للمنتج تحت نفس صلاحية
+    // `products.read` — بلا ما يشيل ولا حقل من الرد الأصلي.
+    const res = await this.request<{ items?: unknown }>(
+      "GET",
+      `/api/v1/products?for=replies&fields=aliases&limit=${limit}`
+    );
     return Array.isArray(res?.items) ? (res.items as Array<Record<string, unknown>>).map(mapV1Product) : null;
   }
 
