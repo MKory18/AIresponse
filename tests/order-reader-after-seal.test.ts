@@ -69,6 +69,8 @@ function provider(over: () => Over = () => ({})): AIProvider {
 }
 
 let n = 0;
+// توقيت صريح ومتصاعد: رسالتين بنفس الميلي ثانية (جهاز CI سريع) كانت بتلخبط «آخر رسالة عميل».
+const BASE = Date.now() - 3_600_000;
 async function say(text: string) {
   n += 1;
   return processIncomingMessage(db as never, {
@@ -83,6 +85,7 @@ async function say(text: string) {
     provider: "facebook",
     type: "TEXT",
     text,
+    sentAt: new Date(BASE + n * 1000),
   });
 }
 
@@ -117,10 +120,10 @@ async function connectOms() {
 /** محادثة كاملة ← قراءة ← طلب NEW. */
 async function readyOrder(over?: () => Over) {
   const m1 = await say("بدي ماء الكمأ");
-  await say("2 حبة 0964123348 درعا شارع (أ) أكيد ثبّتوا");
+  const m2 = await say("2 حبة 0964123348 درعا شارع (أ) أكيد ثبّتوا");
   conversationId = m1.conversationId;
   customerId = m1.customerId;
-  const last = (db._stores.message as any[]).filter((m) => m.conversationId === conversationId && m.senderType === "CUSTOMER").sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
+  const last = (db._stores.message as any[]).find((m) => m.id === m2.messageId);
   await read(last.id, provider(over));
   return orders()[0];
 }
