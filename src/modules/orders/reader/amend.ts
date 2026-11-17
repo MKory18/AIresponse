@@ -20,6 +20,41 @@ const log = childLogger("order-reader");
  */
 export const OMS_AUTO_AMEND = false;
 
+/**
+ * التعديل/الإلغاء الآلي بالـ OMS: **مطفي افتراضيًا** (تفعيل بالإنتاج = ضغطة المالك).
+ * بيتفعّل بعد ما الـ OMS ينشر نقطتي `amend`/`cancel` ويصدر المالك توكنًا جديدًا بصلاحيتهم: `OMS_AUTO_AMEND=1`.
+ * أي رفض (توكن قديم · طلب مش قابل للتعديل · الـ OMS واقف) بيرجّع للمسار المعتمد: ملاحظة + موظف — ما في حالة أسوأ من اليوم.
+ */
+export function omsAutoAmendEnabled(): boolean {
+  return process.env.OMS_AUTO_AMEND === "1";
+}
+
+const AUTO_FIELD: Record<string, "name" | "phone" | "city" | "address"> = {
+  recipientName: "name",
+  recipientPhone: "phone",
+  province: "city",
+  deliveryAddress: "address",
+};
+
+/** الفرق قابل للتعديل الآلي؟ حقول العميل والملاحظات بس (البنود/الهاتف الإضافي ← الملاحظة + الموظف). */
+export function autoAmendBody(diff: FieldDiff[]): { customer?: Record<string, string>; notes?: string } | null {
+  const customer: Record<string, string> = {};
+  let notes: string | undefined;
+  for (const x of diff) {
+    if (x.field === "notes") {
+      if (typeof x.to !== "string" || !x.to.trim()) return null;
+      notes = x.to;
+    } else if (AUTO_FIELD[x.field]) {
+      if (typeof x.to !== "string" || !x.to.trim()) return null;
+      customer[AUTO_FIELD[x.field]] = x.to;
+    } else {
+      return null;
+    }
+  }
+  if (Object.keys(customer).length === 0 && notes === undefined) return null;
+  return { ...(Object.keys(customer).length > 0 ? { customer } : {}), ...(notes !== undefined ? { notes } : {}) };
+}
+
 /** قابل للتعديل بالـ OMS = نفس قاعدة `chatEditable` عندهم. */
 export function isChatEditable(order: { omsStatus?: string | null; omsShippingStatus?: string | null }): boolean {
   const okStatus = ["NEW", "IN_PROGRESS", "NO_ANSWER", "FOLLOW_UP_REQUIRED", "POSTPONED"];
@@ -148,11 +183,40 @@ export async function requestChangeOnSealedOrder(db: Db, input: RequestAmendInpu
     return { action: kind, orderId: order.id };
   }
 
-  // ── (ب) تعديل آلي بالـ OMS: هيكل جاهز، مطفي ──
-  void OMS_AUTO_AMEND;
+  const version = await nextVersion(db, order.id);
+
+  // ── (ب) تعديل/إلغاء آلي بالـ OMS: بس لما مفعّل. أي رفض ← (ج) تحت ──
+  if (order.omsOrderId && omsAutoAmendEnabled()) {
+    const body = input.kind === "AMEND" ? autoAmendBody(diff) : null;
+    if (input.kind === "CANCEL" || body) {
+      try {
+        const { buildOmsClient } = await import("@/modules/oms/connection");
+        const client = await buildOmsClient(db as never, order.workspaceId);
+        // الانتقال المحلي لازم يصلح قبل ما نلمس الـ OMS (ما نلغي عندهم وبعدين نفشل عنا).
+        if (input.kind === "CANCEL") assertOrderTransition(order.status as never, "CANCELLED");
+        const key = `replies:${order.workspaceId}:${order.id}:rev${version}`;
+        if (input.kind === "CANCEL") await client.cancelOrder(order.omsOrderId, input.reason ?? "العميل تراجع بالمحادثة", key);
+        else await client.amendOrder(order.omsOrderId, body!, input.reason ?? "العميل غيّر بياناته بالمحادثة", key);
+        if (input.kind === "CANCEL") {
+          await d.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
+        } else {
+          const data: Record<string, unknown> = {};
+          for (const x of diff) data[x.field] = x.to;
+          await d.order.update({ where: { id: order.id }, data });
+        }
+        const appliedKind = input.kind === "CANCEL" ? "CANCEL_APPLIED" : "AMEND_APPLIED";
+        await d.orderRevision.create({
+          data: { workspaceId: order.workspaceId, orderId: order.id, version, kind: appliedKind, snapshot: {}, diff: JSON.parse(serialized), evidence: [], actor, omsState: "APPLIED" },
+        });
+        void publishRealtime(db as never, { workspaceId: order.workspaceId, type: "order.updated", conversationId: input.conversationId, entityId: order.id });
+        return { action: appliedKind, orderId: order.id };
+      } catch (err) {
+        log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "oms_auto_amend_fallback_to_note");
+      }
+    }
+  }
 
   // ── (ج) ملاحظة + بند «يحتاجك» ──
-  const version = await nextVersion(db, order.id);
   const text = `${input.kind === "CANCEL" ? "طلب إلغاء" : "طلب تعديل"} من المحادثة: ${describeDiff(diff, names)}${input.reason ? ` — ${input.reason}` : ""}`;
   let omsState: "NOTE_SENT" | "NEEDS_STAFF" = "NEEDS_STAFF";
   if (order.omsOrderId) {
