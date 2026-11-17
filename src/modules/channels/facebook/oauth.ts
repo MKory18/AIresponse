@@ -1,4 +1,6 @@
+import { createHmac } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
+import { decryptSecret, encryptSecret } from "@/core/crypto";
 import { getEnv } from "@/core/env";
 import { AuthenticationError } from "@/core/errors";
 import type { FacebookPageRef } from "./types";
@@ -32,29 +34,37 @@ export async function verifyOAuthState(
   }
 }
 
-/** Signed, short-lived token carrying the discovered pages to the selector. */
+/** S-03: مفتاح توقيع منفصل لتوكن اختيار الصفحات (مشتق من JWT_SECRET بمعرّف غرض). */
+function pagesKey(): Uint8Array {
+  return new Uint8Array(createHmac("sha256", getEnv().JWT_SECRET).update("fb_pages_selection:v1").digest());
+}
+
+/**
+ * Signed, short-lived token carrying the discovered pages to the selector.
+ * توكنات صفحات فيسبوك داخله معمّاة (AES-256-GCM).
+ */
 export async function createPagesSelectionToken(
   workspaceId: string,
   userId: string,
   pages: FacebookPageRef[]
 ): Promise<string> {
-  return new SignJWT({ workspaceId, userId, kind: "fb_pages", pages })
+  return new SignJWT({ workspaceId, userId, kind: "fb_pages", p: encryptSecret(JSON.stringify(pages)) })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("10m")
-    .sign(key());
+    .sign(pagesKey());
 }
 
 export async function verifyPagesSelectionToken(
   token: string
 ): Promise<{ workspaceId: string; userId: string; pages: FacebookPageRef[] }> {
   try {
-    const { payload } = await jwtVerify(token, key());
-    if (payload.kind !== "fb_pages") throw new Error("wrong kind");
+    const { payload } = await jwtVerify(token, pagesKey(), { algorithms: ["HS256"] });
+    if (payload.kind !== "fb_pages" || typeof payload.p !== "string") throw new Error("wrong kind");
     return {
       workspaceId: payload.workspaceId as string,
       userId: payload.userId as string,
-      pages: payload.pages as FacebookPageRef[],
+      pages: JSON.parse(decryptSecret(payload.p)) as FacebookPageRef[],
     };
   } catch {
     throw new AuthenticationError("Invalid or expired page selection token");
