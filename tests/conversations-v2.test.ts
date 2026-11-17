@@ -143,11 +143,11 @@ describe("الفقاعات", () => {
 describe("الصفحة والقيود", () => {
   const read = (p: string) => readFileSync(p, "utf8");
   const DIR = join(process.cwd(), "src", "app", "(dashboard)", "conversations", "v2");
-  it("بتختار النسخة من مفتاح الواجهة، والوارد الحالي محفوظ", () => {
+  it("الصفحة بتعرض الشاشة الجديدة بس (الوارد القديم انحذف بـ3.8)", () => {
     const p = read("src/app/(dashboard)/conversations/page.tsx");
-    expect(p).toContain("resolveUiVersion");
     expect(p).toContain("<ConversationsView />");
-    expect(p).toContain("<Inbox />");
+    expect(p).not.toContain("resolveUiVersion");
+    expect(p).not.toContain("<Inbox />");
   });
   it("مفتاح واحد للرد، تأكيد حذف للخطِر، وأزرار الكتابة بالصلاحيات", () => {
     const t = read(join(DIR, "thread-pane.tsx"));

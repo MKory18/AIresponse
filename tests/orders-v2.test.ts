@@ -37,11 +37,11 @@ describe("Drawer", () => {
 });
 
 describe("صفحة /orders", () => {
-  it("بتختار النسخة من مفتاح الواجهة؛ الصفحة الحالية محفوظة (v1 الافتراضي)", () => {
+  it("الصفحة بتعرض الجدول الجديد بس (القديمة انحذفت بـ3.8)", () => {
     const p = read("src/app/(dashboard)/orders/page.tsx");
-    expect(p).toContain("resolveUiVersion");
     expect(p).toContain("<OrdersView />");
-    expect(p).toContain("<LegacyOrders />");
+    expect(p).not.toContain("resolveUiVersion");
+    expect(p).not.toContain("LegacyOrders");
   });
 
   it("التبويبات من الخادم بعدّاداتها، وبحث، وعدد كلي، وحمّل المزيد", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NAV_GROUPS, NAV_GROUPS_V2, visibleGroups } from "@/lib/nav-model";
+import { NAV_GROUPS, visibleGroups } from "@/lib/nav-model";
 import { PAGE_KEYWORDS, normalizeQuery, searchPages } from "@/lib/nav-search";
 
 /**
@@ -62,7 +62,7 @@ describe("searchPages", () => {
 
   it("النتيجة فيها اسم المجموعة (للتمييز بين صفحتين متشابهتين)", () => {
     const hit = searchPages("المنتجات", all).find((h) => h.href === "/products");
-    expect(hit?.groupLabel).toBe("المبيعات");
+    expect(hit?.groupLabel).toBe("المتجر");
   });
 
   it("كلمات الصفحات المدموجة بتلاقي مكانها الجديد", () => {
@@ -73,15 +73,14 @@ describe("searchPages", () => {
 
 describe("كلمات الصفحات البديلة", () => {
   it("كل صفحة بالقائمة إلها كلمات (وإلا ما بتنلاقى)، ولا كلمات لصفحة مش موجودة", () => {
-    // الهيكلين: صفحة جديدة بتنضاف للجديد بحزمتها (2.3ب) ولازم تنلاقى بالبحث كمان.
-    const hrefs = [...NAV_GROUPS, ...NAV_GROUPS_V2].flatMap((g) => g.pages.map((p) => p.href));
+    const hrefs = NAV_GROUPS.flatMap((g) => g.pages.map((p) => p.href));
     for (const h of hrefs) expect(PAGE_KEYWORDS[h], `${h} بلا كلمات`).toBeTruthy();
     for (const k of Object.keys(PAGE_KEYWORDS)) expect(hrefs, `${k} مش بالقائمة`).toContain(k);
   });
 });
 
 describe("صندوق البحث بالشريط العلوي", () => {
-  const shell = readFileSync(join(process.cwd(), "src", "components", "app-shell.tsx"), "utf8");
+  const shell = readFileSync(join(process.cwd(), "src", "components", "shell-v2", "header-v2.tsx"), "utf8");
 
   it("combobox بأسهم وEnter وEscape واختصار «/» وCtrl+K، وبحث المحادثات بيضل", () => {
     expect(shell).toContain("searchPages(");

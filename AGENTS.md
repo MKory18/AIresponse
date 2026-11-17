@@ -88,7 +88,7 @@ npm run build
 | العقود | `contracts/` — الأصل (اقرأ `contracts/README.md`) |
 | المسارات | `/api/v1/*` (القدرة · حملات الكليبر · أحداث الأنظمة) · `/api/integrations/*` · `/api/webhooks/*` (قنوات: ميتا · واتساب · تيليغرام · انستغرام · تيك توك) |
 | الواجهة | `settings/ai` · `settings/team` · `settings/account` · «القنوات ← ربط الـ OMS» · بطاقة الـ OMS بصفحة الطلب · تبويب الامتثال بالمنتج · بطاقة الموافقة بالمحادثة |
-| التنقل | `src/lib/nav-model.ts` (مصدر الحقيقة: ٦ مجموعات + تبويباتها — بتصير ٧ بحزمة 2.3) · `components/app-sidebar.tsx` (المجموعات) · `components/group-tabs.tsx` (شريط التبويبات) · `components/nav-icons.ts` · `lib/nav-search.ts` (قفز سريع للصفحات من صندوق البحث) |
+| التنقل | `src/lib/nav-model.ts` (مصدر الحقيقة: ٧ مجموعات + تبويباتها — الواجهة القديمة ومفتاح `uiVersion` انحذفوا بحزمة 3.8) · `components/shell-v2/` (القشرة: الشريط الجانبي · الرأس · الشريط السفلي) · `components/group-tabs.tsx` (شريط التبويبات) · `components/nav-icons.ts` · `lib/nav-search.ts` (قفز سريع للصفحات من صندوق البحث) |
 | الثيمات | `src/lib/theme.ts` (المفاتيح · `resolveTheme` · سكربت ما قبل الرسم) · `globals.css` (متغيّرات كل ثيم) · `tailwind.config.ts` (ألوان من `var(--…)`) · `components/theme-picker.tsx` (المنتقي بـ«حسابي») · `components/brand-logo.tsx` (اللوجو = `app/icon.svg`) · `public/brand/ornaments` (زخارف SVG أقنعة) · `public/brand/themes` (رسمات GPT: دخول 3:4 · شريط الرئيسية 4:1) · `tests/theme-system.test.ts` · `tests/brand-logo.test.ts` |
 | الدليل | `src/lib/page-guides.ts` (الشرح + الخطوة الجاية + `visitGuide` أول زيارة) · `components/page-guide.tsx` · `modules/setup/progress.ts` + `components/setup-checklist.tsx` (بطاقة «ابدأ من هون» من بيانات المساحة) |
 

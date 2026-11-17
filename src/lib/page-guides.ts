@@ -1,4 +1,4 @@
-import { pageForPath, NAV_GROUPS, NAV_GROUPS_V2 } from "@/lib/nav-model";
+import { pageForPath, NAV_GROUPS } from "@/lib/nav-model";
 
 /**
  * الشرح جوّا كل صفحة — «شو هاي الصفحة» و«الخطوة الجاية».
@@ -136,7 +136,7 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
 /** شرح الصفحة الي بتخدم هالمسار (أطول رابط مطابق، مع الأسماء المستعارة). */
 export function guideForPath(pathname: string): { href: string; guide: PageGuide } | null {
   // الهيكلين (2.3ب): صفحة جديدة موجودة بالهيكل الجديد بس لسا إلها شرح.
-  const hit = pageForPath(pathname, NAV_GROUPS) ?? pageForPath(pathname, NAV_GROUPS_V2);
+  const hit = pageForPath(pathname, NAV_GROUPS);
   if (!hit) return null;
   const guide = PAGE_GUIDES[hit.page.href];
   return guide ? { href: hit.page.href, guide } : null;

@@ -9,7 +9,6 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 import { ThemePicker } from "@/components/theme-picker";
-import { UiVersionCard } from "@/components/settings/ui-version-card";
 import { WorkspaceTimezoneCard } from "@/components/settings/workspace-timezone-card";
 
 type Me = { id: string; email: string; name: string; isSuperAdmin: boolean };
@@ -132,7 +131,6 @@ export default function AccountPage() {
         </h2>
         <ThemePicker />
       </GlassCard>
-      <UiVersionCard />
       <WorkspaceTimezoneCard />
       {loadError && <ErrorState description={loadError} onRetry={() => void load()} />}
       {loading ? (
