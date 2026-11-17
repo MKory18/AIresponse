@@ -78,13 +78,16 @@ export async function listConversations(
     /** ISO dates bounding conversation activity (updatedAt). */
     dateFrom?: string;
     dateTo?: string;
+    /** 3.1: محادثات بعينها (تبويب «يحتاجك» · رابط `?id=` خارج الصفحة المحمّلة) — بنفس عزل المساحة. */
+    ids?: string[];
   }
-): Promise<Paginated<ConversationListRow>> {
+): Promise<Paginated<ConversationListRow> & { total: number }> {
   const limit = Math.min(params.limit ?? 30, 100);
   const where: Prisma.ConversationWhereInput = {
     workspaceId: params.workspaceId,
     deletedAt: null,
   };
+  if (params.ids) where.id = { in: params.ids };
   if (params.status) where.status = params.status;
   if (params.aiState) where.aiState = params.aiState;
   if (params.unreadOnly) where.unreadCount = { gt: 0 };
@@ -149,6 +152,8 @@ export async function listConversations(
     ];
   }
 
+  // 3.1: العدد الكلي من الخادم («عرض 30 من 212») — مش من الصفوف المحمّلة.
+  const total = await db.conversation.count({ where });
   const conversations = await db.conversation.findMany({
     where,
     include: {
@@ -250,7 +255,7 @@ export async function listConversations(
     }
   }
   const withPreview = enriched.map((c) => ({ ...c, lastMessage: previewByConv.get(c.id) ?? null }));
-  return { items: withPreview as unknown as ConversationListRow[], nextCursor: hasMore ? items[items.length - 1].id : null };
+  return { items: withPreview as unknown as ConversationListRow[], nextCursor: hasMore ? items[items.length - 1].id : null, total };
 }
 
 export async function getConversationDetail(db: Db, ctx: ActorContext, conversationId: string) {
