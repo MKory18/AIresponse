@@ -97,6 +97,7 @@ describe("الإنشاء: الميديا باير بصلاحية capacity.read،
     expect((await capacity(token)).status).toBe(200);
     const list = await json(await listGET(req("/api/settings/system-tokens")));
     expect(list.systems.map((s: Row) => s.key)).toEqual(expect.arrayContaining(["mediabuyer", "clipper"]));
+    expect(list.systems.find((s: Row) => s.key === "mediabuyer")).toMatchObject({ scopes: ["capacity.read"], optionalScopes: ["ads.read"] });
     expect(list.tokens).toHaveLength(1);
     const t = list.tokens[0];
     expect(t.name).toBe("ميديا باير الأردن");

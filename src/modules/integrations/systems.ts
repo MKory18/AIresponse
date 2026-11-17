@@ -53,6 +53,7 @@ export const INBOUND_EVENT_TYPES: Partial<Record<GenericSystem, readonly string[
 /** صلاحيات التوكنات الداخلة على سيستم 7 — مسماة وبأقل حد. */
 export const TOKEN_SCOPES = [
   "capacity.read",
+  "ads.read",
   "retarget.create",
   "retarget.read",
 ] as const;
@@ -60,9 +61,9 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
 /** أصحاب التوكنات وصلاحياتهم الافتراضية (لا أكثر). */
 export const TOKEN_PRESETS = {
-  mediabuyer: { nameAr: "الميديا باير", scopes: ["capacity.read"] },
+  mediabuyer: { nameAr: "الميديا باير", scopes: ["capacity.read"], optionalScopes: ["ads.read"] },
   clipper: { nameAr: "الكليبر", scopes: ["retarget.create", "retarget.read"] },
-} as const satisfies Record<string, { nameAr: string; scopes: readonly TokenScope[] }>;
+} as const satisfies Record<string, { nameAr: string; scopes: readonly TokenScope[]; optionalScopes?: readonly TokenScope[] }>;
 export type TokenSystem = keyof typeof TOKEN_PRESETS;
 export const TOKEN_SYSTEMS = Object.keys(TOKEN_PRESETS) as TokenSystem[];
 
