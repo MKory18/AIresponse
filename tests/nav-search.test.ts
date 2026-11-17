@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NAV_GROUPS, visibleGroups } from "@/lib/nav-model";
+import { NAV_GROUPS, NAV_GROUPS_V2, visibleGroups } from "@/lib/nav-model";
 import { PAGE_KEYWORDS, normalizeQuery, searchPages } from "@/lib/nav-search";
 
 /**
@@ -73,7 +73,8 @@ describe("searchPages", () => {
 
 describe("كلمات الصفحات البديلة", () => {
   it("كل صفحة بالقائمة إلها كلمات (وإلا ما بتنلاقى)، ولا كلمات لصفحة مش موجودة", () => {
-    const hrefs = NAV_GROUPS.flatMap((g) => g.pages.map((p) => p.href));
+    // الهيكلين: صفحة جديدة بتنضاف للجديد بحزمتها (2.3ب) ولازم تنلاقى بالبحث كمان.
+    const hrefs = [...NAV_GROUPS, ...NAV_GROUPS_V2].flatMap((g) => g.pages.map((p) => p.href));
     for (const h of hrefs) expect(PAGE_KEYWORDS[h], `${h} بلا كلمات`).toBeTruthy();
     for (const k of Object.keys(PAGE_KEYWORDS)) expect(hrefs, `${k} مش بالقائمة`).toContain(k);
   });

@@ -155,6 +155,7 @@ export const NAV_GROUPS_V2: NavGroup[] = [
     placement: "bottom",
     pages: [
       { href: "/channels", label: "الصفحات والقنوات", permission: "channels.read" },
+      { href: "/settings/integrations", label: "الربط", permission: "integrations.manage" },
       { href: "/settings/team", label: "الفريق", permission: "users.manage" },
       { href: "/settings/account", label: "حسابي", permission: null },
     ],

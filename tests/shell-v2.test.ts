@@ -50,7 +50,8 @@ describe("NAV_GROUPS_V2", () => {
 
   it("نفس صلاحية كل صفحة بالنسختين (الهيكل ما بيغيّر مين بيشوف شو)", () => {
     const v1 = new Map(NAV_GROUPS.flatMap((g) => g.pages.map((p) => [p.href, p.permission] as const)));
-    for (const g of NAV_GROUPS_V2) for (const p of g.pages) expect(p.permission, p.href).toBe(v1.get(p.href));
+    // الصفحات الجديدة بالهيكل الجديد بس (مثل /settings/integrations) ما إلها نظير بالقديم.
+    for (const g of NAV_GROUPS_V2) for (const p of g.pages) if (v1.has(p.href)) expect(p.permission, p.href).toBe(v1.get(p.href));
   });
 
   it("navGroupsFor بيختار حسب النسخة", () => {
@@ -165,5 +166,14 @@ describe("نقاط عامة", () => {
   it("pageForPath يفهم صفحات v2 الفرعية", () => {
     expect(pageForPath("/orders/abc", NAV_GROUPS_V2)?.group.key).toBe("orders");
     expect(pageForPath("/settings/ai", NAV_GROUPS_V2)?.group.key).toBe("agent");
+  });
+});
+
+describe("بنود «يحتاجك» بتودّي لصفحات موجودة (ولا رابط ميت)", () => {
+  it("كل href بخدمة «يحتاجك» إلو صفحة فعلية", () => {
+    const src = read("src/modules/attention/service.ts");
+    const hrefs = [...src.matchAll(/href: [`"](\/[a-z][a-z/-]*)/g)].map((m) => m[1]!);
+    expect(hrefs.length).toBeGreaterThan(5);
+    for (const h of new Set(hrefs)) expect(existsSync(pageFile(h)), `رابط ميت بـ«يحتاجك»: ${h}`).toBe(true);
   });
 });
