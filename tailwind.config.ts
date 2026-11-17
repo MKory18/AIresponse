@@ -61,7 +61,22 @@ const config: Config = {
           subtle: "rgb(var(--text-subtle) / <alpha-value>)",
         },
         line: "rgb(var(--line) / <alpha-value>)",
+        // 2.1: أدوار الواجهة الجديدة (03-UI-STRUCTURE §3.1) — من المتغيّرات، فكل ثيم بيبدّلها.
+        "border-strong": "rgb(var(--border-strong) / <alpha-value>)",
+        "on-primary": "rgb(var(--on-primary) / <alpha-value>)",
+        focus: "rgb(var(--focus) / <alpha-value>)",
+        success: { DEFAULT: "rgb(var(--success) / <alpha-value>)", soft: "rgb(var(--success-soft) / <alpha-value>)" },
+        warning: { DEFAULT: "rgb(var(--warning) / <alpha-value>)", soft: "rgb(var(--warning-soft) / <alpha-value>)" },
+        danger: { DEFAULT: "rgb(var(--danger) / <alpha-value>)", soft: "rgb(var(--danger-soft) / <alpha-value>)" },
+        info: { DEFAULT: "rgb(var(--info) / <alpha-value>)", soft: "rgb(var(--info-soft) / <alpha-value>)" },
+        sidebar: { DEFAULT: "rgb(var(--sidebar) / <alpha-value>)", fg: "rgb(var(--sidebar-fg) / <alpha-value>)" },
       },
+      // سلّم الخط (نفس الـOMS): 12 · 13 · 14 · 16 · 20 · 24 · 32 — ولا شي تحت 12.
+      fontSize: {
+        caption: ["13px", { lineHeight: "1.65" }],
+        display: ["32px", { lineHeight: "1.3" }],
+      },
+      transitionTimingFunction: { zaki: "cubic-bezier(0.2, 0, 0.1, 1)" },
       // `text-primary` = لون النص/الأيقونة على السطح (فاتح بالداكن)، مش لون
       // تعبئة الزر. `bg-primary` و`border-primary` بيضلّوا على `--primary`.
       textColor: {
@@ -78,10 +93,17 @@ const config: Config = {
         pop: "var(--shadow-pop)",
         glass: "var(--shadow-card)",
         glow: "0 0 0 1px rgb(15 108 189 / 0.25)",
+        // ارتفاعات الواجهة الجديدة: مسطّح (حد) · مرفوع · عائم (قوائم وحوارات).
+        raised: "var(--shadow-card)",
+        overlay: "var(--shadow-pop)",
       },
       // Fluent radii: controls 4px · surfaces 8px · dialogs 12px.
       borderRadius: {
         xl2: "1rem",
+        // أسماء صريحة للواجهة الجديدة: تحكم 6 · بطاقة 10 · درج/حوار 16.
+        control: "6px",
+        card: "10px",
+        sheet: "16px",
         lg: "4px",
         xl: "6px",
         "2xl": "8px",
