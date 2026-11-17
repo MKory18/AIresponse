@@ -249,6 +249,10 @@ export async function updateMember(
     if (input.status !== "ACTIVE" && input.status !== "SUSPENDED") {
       throw new AppError("Status must be ACTIVE or SUSPENDED", 422, "INVALID_STATUS");
     }
+    // S-01: الدعوة بتتفعّل بقبول صاحب الحساب (acceptInvite).
+    if (input.status === "ACTIVE" && member.status === "INVITED") {
+      throw new AppError("An invited member becomes active only when they accept the invitation", 422, "INVITE_NOT_ACCEPTED");
+    }
     data.status = input.status as "ACTIVE" | "SUSPENDED";
   }
   if (Object.keys(data).length === 0) {
@@ -414,6 +418,22 @@ export async function resetMemberPassword(
   }
   if (input.newPassword.length < 8 || input.newPassword.length > 128) {
     throw new AppError("Password must be 8-128 characters", 422, "INVALID_PASSWORD");
+  }
+  // S-01 (docs/HANDOVER-2026-10-27.md §4.1): الحساب مش ملك المساحة. إعادة
+  // التعيين من الإدارة لعضو فعّال وما إله عضوية بمساحة تانية فقط.
+  if (member.status !== "ACTIVE") {
+    throw new AppError("Only an active member's password can be reset", 403, "MEMBER_NOT_ACTIVE");
+  }
+  const memberships = (await db.workspaceMember.findMany({
+    where: { userId: member.userId },
+    select: { id: true, workspaceId: true },
+  })) as { id: string; workspaceId: string }[];
+  if (memberships.some((m) => m.workspaceId !== ctx.workspaceId)) {
+    throw new AppError(
+      "This account belongs to more than one workspace — the user must change the password from their own account settings",
+      403,
+      "USER_SHARED_ACROSS_WORKSPACES"
+    );
   }
   if (member.role === "OWNER") {
     assertOwnerRank(await getActorRole(db, ctx));

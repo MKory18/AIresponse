@@ -38,6 +38,10 @@ const envSchema = z.object({
   WORKER_POLL_INTERVAL_MS: z.string().optional(),
   LOG_LEVEL: z.string().default("info"),
   ALLOW_MOCK_AI: z.string().optional(),
+  // S-06: التسجيل العام وإنشاء المساحات (مسكّرين بالإنتاج افتراضيًا).
+  ALLOW_SIGNUP: z.string().optional(),
+  ALLOW_WORKSPACE_CREATE: z.string().optional(),
+  ALLOW_DEMO_SEED: z.string().optional(),
   AI_REQUEST_TIMEOUT_MS: z.string().optional(),
   AI_EXTRACTION_TIMEOUT_MS: z.string().optional(),
   AI_EXTRACTION_ATTEMPTS: z.string().optional(),

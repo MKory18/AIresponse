@@ -16,7 +16,7 @@ const HIGHLIGHTS = [
   { icon: TrendingUp, title: "نمو تقيسه", desc: "تحليلات المبيعات والأداء لحظة بلحظة" },
 ];
 
-export default function AuthForm({ mode }: { mode: "login" | "register" }) {
+export default function AuthForm({ mode, signupEnabled = false }: { mode: "login" | "register"; signupEnabled?: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -146,12 +146,16 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             </form>
             <p className="mt-4 text-center text-sm text-ink-muted">
               {mode === "login" ? (
-                <>
-                  ليس لديك حساب؟{" "}
-                  <Link href="/register" className="font-medium text-brand-600 hover:underline dark:text-brand-400">
-                    إنشاء حساب
-                  </Link>
-                </>
+                signupEnabled ? (
+                  <>
+                    ليس لديك حساب؟{" "}
+                    <Link href="/register" className="font-medium text-brand-600 hover:underline dark:text-brand-400">
+                      إنشاء حساب
+                    </Link>
+                  </>
+                ) : (
+                  <>الحسابات الجديدة بينفتحها مالك الفريق من «الفريق ← إنشاء حساب».</>
+                )
               ) : (
                 <>
                   لديك حساب؟{" "}

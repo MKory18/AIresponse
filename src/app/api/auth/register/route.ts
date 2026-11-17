@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
-import { ConflictError } from "@/core/errors";
+import { AppError, ConflictError } from "@/core/errors";
+import { isSignupAllowed } from "@/core/signup-gate";
 import { hashPassword } from "@/modules/auth/password";
 import { registerSchema } from "@/modules/auth/schemas";
 import { setSessionCookie } from "@/modules/auth/session";
@@ -11,8 +12,17 @@ import { childLogger } from "@/core/logger";
 const log = childLogger("auth.register");
 
 export const POST = createHandler(
-  { body: registerSchema, public: true, rateLimit: { limit: 5, windowMs: 60_000 }, rateLimitStrict: true },
-  async ({ body }) => {
+  { public: true, rateLimit: { limit: 5, windowMs: 60_000 }, rateLimitStrict: true },
+  async ({ req }) => {
+    // S-06: التسجيل العام مسكّر بالإنتاج. الرفض أول سطر — قبل قراءة الجسم
+    // وقبل أي لمس للقاعدة (جسم فاضي = 403 مش 422).
+    if (!isSignupAllowed()) {
+      throw new AppError("Sign-up is closed. Ask your workspace owner to create your account.", 403, "SIGNUP_DISABLED");
+    }
+    const raw = await req.json().catch(() => {
+      throw new AppError("Invalid JSON body", 400, "INVALID_BODY");
+    });
+    const body = registerSchema.parse(raw);
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
     if (existing) throw new ConflictError("An account with this email already exists");
 

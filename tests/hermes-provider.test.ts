@@ -130,12 +130,20 @@ describe("Hermes workspace selection", () => {
     expect(p.name).toBe("hermes");
   });
 
-  it("a public workspace customBaseUrl can override the ENV gateway", () => {
+  it("S-02: a workspace customBaseUrl on ANOTHER origin is ignored", () => {
     const p = getWorkspaceProvider(
       { provider: "hermes", responseModel: null, customBaseUrl: "https://hermes.example.com/v1" },
       { ...HERMES_ENV }
     );
-    expect((p as OpenAICompatibleProvider).endpointUrl).toBe("https://hermes.example.com/v1/chat/completions");
+    expect((p as OpenAICompatibleProvider).endpointUrl).toBe("http://127.0.0.1:8642/v1/chat/completions");
+  });
+
+  it("S-02: a workspace customBaseUrl on the SAME origin as HERMES_BASE_URL is honoured", () => {
+    const p = getWorkspaceProvider(
+      { provider: "hermes", responseModel: null, customBaseUrl: "http://127.0.0.1:8642/alt/v1" },
+      { ...HERMES_ENV }
+    );
+    expect((p as OpenAICompatibleProvider).endpointUrl).toBe("http://127.0.0.1:8642/alt/v1/chat/completions");
   });
 
   it("throws (fail-closed) when the Hermes key is absent", () => {
