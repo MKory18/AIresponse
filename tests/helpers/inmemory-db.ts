@@ -414,6 +414,7 @@ export function createFakeDb() {
   const agentCallLogRows: Row[] = [];
   const productComplianceRows: Row[] = [];
   const omsConnectionRows: Row[] = [];
+  const workerHeartbeatRows: Row[] = [];
   // Page catalogs.
   const catalogRows: Row[] = [];
   const catalogProductRows: Row[] = [];
@@ -449,6 +450,7 @@ export function createFakeDb() {
       agentCallLog: agentCallLogRows,
       productCompliance: productComplianceRows,
       omsConnection: omsConnectionRows,
+      workerHeartbeat: workerHeartbeatRows,
       catalog: catalogRows,
       catalogProduct: catalogProductRows,
       catalogPageAssignment: catalogPageAssignmentRows,
@@ -514,6 +516,7 @@ export function createFakeDb() {
     agentDraft: makeModel("agentDraft", agentDraftRows, { tokenId: null, payload: {}, status: "PENDING", idempotencyKey: null, resultRef: null, decidedBy: null, decidedAt: null, decisionNote: null, expiresAt: null }),
     agentCallLog: makeModel("agentCallLog", agentCallLogRows, { tokenId: null, errorCode: null, requestId: null, agentRef: null, dryRun: false, latencyMs: 0 }),
     productCompliance: makeModel("productCompliance", productComplianceRows, { classification: null, verdict: null, allowedClaims: [], bannedClaims: [], adRules: [], sourceUpdatedAt: null, fetchedAt: null, lastError: null }),
+    workerHeartbeat: makeModel("workerHeartbeat", workerHeartbeatRows, { cycles: 0, processed: 0, failed: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     omsConnection: makeModel("omsConnection", omsConnectionRows, { isActive: true, lastProductSyncAt: null, lastCustomerSyncAt: null, mode: "api", apiVersion: "legacy", webhookSecretEncrypted: null, webhookKey: null, autoHandoff: false, lastWebhookAt: null, lastOkAt: null, lastErrorAt: null, lastError: null }),
     catalog: makeModel("catalog", catalogRows, { description: null, isActive: true }),
     catalogProduct: makeModel("catalogProduct", catalogProductRows, { sortOrder: 0 }),
