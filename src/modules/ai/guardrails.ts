@@ -196,8 +196,17 @@ function foldArabic(text: string): string {
 const ORDER_PLACED_CLAIM = /(تم\s+(تاكيد|تثبيت|تسجيل|اعتماد)|ثبتنا|اكدنا|سجلنا|ثبتنالك|سجلنالك|انسجل)/u;
 const ORDER_WORD = /(الطلب|طلبك|طلبكم|طلبيتك)/u;
 
+/**
+ * قارئ الطلب (1.5) — صيغ إضافية لادعاء التثبيت بجذور الفعل بكل الضمائر، بشرط إن الفعل
+ * يلاصق كلمة الطلب: «سجّلت الطلب» · «أكدنالك طلبك» · «طلبك مؤكد/مثبّت/مسجّل/جاهز للتوصيل».
+ * «سجّلت بياناتك…» (العبارة المطلوبة قبل التثبيت) ما بتنحسب ادعاء.
+ */
+const ORDER_CLAIM_ADJACENT = /(?:اكد|ثبت|سجل|اعتمد)(?:ت|نا)(?:لك|لكم|ه|ها|و)?\s+(?:ال)?(?:طلب|طلبك|طلبكم|طلبيتك)(?![\p{L}])/u;
+const ORDER_STATE_CLAIM = /(?:طلبك|الطلب|طلبيتك)\s+(?:صار\s+|هلق\s+|الان\s+)?(?:مؤكد|مثبت|مسجل|جاهز\s+للتوصيل)/u;
+
 export function claimsOrderPlaced(response: string): boolean {
   const folded = foldArabic(response);
+  if (ORDER_CLAIM_ADJACENT.test(folded) || ORDER_STATE_CLAIM.test(folded)) return true;
   return ORDER_PLACED_CLAIM.test(folded) && ORDER_WORD.test(folded);
 }
 

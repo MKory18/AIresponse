@@ -184,6 +184,16 @@ export async function handleReadConversationJob(
         now: now(),
       });
     }
+    // الذكريات كانت بتجي من الاستخراج (اللي انشال بوضع READER): هلأ من القارئ.
+    if (mode === "READER" && result.verified.memories.length > 0) {
+      const { saveMemories } = await import("@/modules/ai/memory");
+      await saveMemories(db as never, {
+        workspaceId,
+        customerId: String(conversation.customerId),
+        source: `reader:${lastCustomer.id}`,
+        memories: result.verified.memories,
+      }).catch(() => undefined);
+    }
     void publishReadingUpdated(db, workspaceId, conversationId);
     await logUsage(db, {
       workspaceId,
