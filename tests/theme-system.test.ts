@@ -376,7 +376,7 @@ describe("أصول وزخارف الثيمات", () => {
     expect(read("src/components/auth-form.tsx")).toContain("data-showcase-dots");
     expect(read("src/components/auth-form.tsx")).toMatch(/<div data-showcase /);
     expect(read("src/components/app-sidebar.tsx")).toContain('data-pane="nav"');
-    expect(read("src/app/(dashboard)/dashboard/page.tsx")).toContain("data-hero");
+    expect(read("src/app/(dashboard)/dashboard/legacy-dashboard.tsx")).toContain("data-hero");
   });
 
   it("خط العناوين: بيتحمّل بلا preload (الافتراضي ما بيدفع بايت)، والافتراضي ما بيعرّفه", () => {
