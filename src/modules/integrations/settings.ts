@@ -24,6 +24,16 @@ export const integrationSettingsSchema = z
     serverCostUsdPerDay: z.string().regex(/^\d{1,6}\.\d{2}$/).nullable(),
     /** زر إيقاف باب الوكلاء (Hermes): كل نداء بيرجع 401 بلا ما ينحذف التوكن. */
     agentDoorPaused: z.boolean(),
+    /** قارئ الطلب (02-ORDER-FLOW §6): LEGACY_DRAFT = المسودة القديمة · READER_SHADOW = بيقرأ ويحفظ بس · READER = شغّال. */
+    orderMode: z.enum(["LEGACY_DRAFT", "READER_SHADOW", "READER"]),
+    /** مهلة التثبيت بالدقائق من آخر رسالة للعميل. */
+    orderSettleMinutes: z.number().int().min(2).max(120),
+    /** تثبيت الطلب النظيف تلقائيًا بعد المهلة. */
+    orderAutoSeal: z.boolean(),
+    /** عميل بعت بياناته وما قال «اي»: بيتثبّت (ضمني) أو بيحتاج موافقة صريحة. */
+    orderAgreementPolicy: z.enum(["EXPLICIT_OR_IMPLICIT", "EXPLICIT_ONLY"]),
+    /** رسالة «تم تثبيت طلبك» للعميل. */
+    orderConfirmMessage: z.boolean(),
   })
   .strict();
 
@@ -37,6 +47,11 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   trustClipperApprovals: false,
   serverCostUsdPerDay: null,
   agentDoorPaused: false,
+  orderMode: "LEGACY_DRAFT",
+  orderSettleMinutes: 10,
+  orderAutoSeal: true,
+  orderAgreementPolicy: "EXPLICIT_OR_IMPLICIT",
+  orderConfirmMessage: true,
 };
 
 /** يدمج المحفوظ مع الافتراضي حقلًا حقلًا (القيمة التالفة تسقط وحدها). */

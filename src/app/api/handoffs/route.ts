@@ -4,7 +4,7 @@ import { prisma } from "@/core/db/prisma";
 
 const listQuerySchema = z.object({
   status: z.enum(["OPEN", "CLAIMED", "RESOLVED", "CANCELLED"]).optional(),
-  reason: z.enum(["CUSTOMER_REQUEST", "COMPLAINT", "LOW_CONFIDENCE", "AI_FAILURE", "ORDER_BLOCKED", "PAYMENT_ISSUE", "INJECTION_DETECTED", "REPEATED_FAILURE", "MANUAL"]).optional(),
+  reason: z.enum(["CUSTOMER_REQUEST", "COMPLAINT", "LOW_CONFIDENCE", "AI_FAILURE", "ORDER_BLOCKED", "PAYMENT_ISSUE", "INJECTION_DETECTED", "REPEATED_FAILURE", "MANUAL", "ORDER_CHANGE_REQUEST"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   conversationId: z.string().cuid().optional(),
 });

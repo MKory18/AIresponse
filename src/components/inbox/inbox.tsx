@@ -51,6 +51,7 @@ const HANDOFF_REASONS: Record<string, string> = {
   INJECTION_DETECTED: "محاولة حقن",
   REPEATED_FAILURE: "فشل متكرر",
   MANUAL: "يدوي",
+  ORDER_CHANGE_REQUEST: "طلب تعديل على طلب مثبّت",
 };
 
 const ACTIVITY_LABELS: Record<string, string> = {
