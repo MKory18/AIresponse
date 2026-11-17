@@ -149,7 +149,7 @@ describe("كلمة مرور مؤقتة ← تغيير إلزامي", () => {
     // إعادة تعيين من الإدارة ← بترجع تنطلب
     await resetMemberPassword(db as Db, ownerCtx() as never, m.id, { newPassword: "Reset#12345" });
     expect(user().mustChangePassword).toBe(true);
-  });
+  }, 30_000); // 3 عمليات تعمية كلمة مرور — بتتأخّر تحت حمل الاختبارات الكاملة
 
   it("الشاشة الإلزامية بالـ layout بدل القشرة، بـ PasswordInput، ومن /api/auth/me", () => {
     const layout = src("src/app/(dashboard)/layout.tsx");
