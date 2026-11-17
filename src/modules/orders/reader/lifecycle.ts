@@ -34,7 +34,9 @@ export type ApplyOutcome =
   | { action: "UPDATED"; orderId: string; changed: string[] }
   | { action: "SETTLE_EXTENDED"; orderId: string }
   | { action: "CANCELLED"; orderId: string }
-  | { action: "PENDING"; orderId: string };
+  | { action: "PENDING"; orderId: string }
+  /** طلب مثبّت: تعديل/إلغاء عبر مسار §10.3 (محلي أو ملاحظة للـ OMS + بند «يحتاجك»). */
+  | { action: "CHANGE"; detail: import("./amend").AmendOutcome };
 
 type Row = Record<string, unknown>;
 type OpenOrder = {
@@ -94,6 +96,91 @@ export function diffOrder(order: OpenOrder, v: VerifiedReading): FieldDiff[] {
 }
 
 export async function applyReading(db: Db, input: ApplyReadingInput): Promise<ApplyOutcome> {
+  const outcome = await applyCore(db, input);
+  await afterApply(db, input, outcome);
+  return outcome;
+}
+
+/** تعديل/إلغاء على آخر طلب مثبّت (الحزمة 1.6). */
+async function sealedChange(db: Db, input: ApplyReadingInput, kind: "AMEND" | "CANCEL"): Promise<ApplyOutcome> {
+  const { requestChangeOnSealedOrder } = await import("./amend");
+  const r = await requestChangeOnSealedOrder(db, {
+    workspaceId: input.workspaceId,
+    conversationId: input.conversationId,
+    kind,
+    actor: { userId: null },
+    verified: input.verified,
+  });
+  return r.action === "NONE" ? { action: "NONE", reason: r.reason } : { action: "CHANGE", detail: r };
+}
+
+const HANDOFF_REASON: Record<string, "CUSTOMER_REQUEST" | "COMPLAINT" | "PAYMENT_ISSUE" | "MANUAL"> = {
+  CUSTOMER_REQUEST: "CUSTOMER_REQUEST",
+  COMPLAINT: "COMPLAINT",
+  PAYMENT_ISSUE: "PAYMENT_ISSUE",
+  OTHER: "MANUAL",
+};
+
+/**
+ * بعد التطبيق (best-effort — فشلها ما بيأثّر على القراءة ولا الطلب):
+ *  - `needsHuman` أو `AI_CLAIMED_NO_ORDER` ← بند «يحتاجك» **بلا تغيير `aiState`** (الوكيل بيكمّل يرد).
+ *  - ملف العميل: آخر قيمة متحقق منها بتغلب (مع سطر تدقيق) — مش «لا تستبدل».
+ */
+async function afterApply(db: Db, input: ApplyReadingInput, outcome: ApplyOutcome): Promise<void> {
+  const v = input.verified;
+  try {
+    const claimed = v.flags.includes("AI_CLAIMED_NO_ORDER");
+    if (v.needsHuman.value || claimed) {
+      const { createHandoff } = await import("@/modules/handoffs/handoff-service");
+      await createHandoff(db as never, {
+        workspaceId: input.workspaceId,
+        conversationId: input.conversationId,
+        customerId: input.customerId,
+        reason: v.needsHuman.value ? HANDOFF_REASON[String(v.needsHuman.reason)] ?? "MANUAL" : "MANUAL",
+        metadata: { source: "order_reader", needsHuman: v.needsHuman.value, aiClaimedNoOrder: claimed },
+      });
+    }
+  } catch (err) {
+    log.warn({ conversationId: input.conversationId, error: err instanceof Error ? err.message : String(err) }, "reader_handoff_failed");
+  }
+  try {
+    if (v.stage === "COMPLETE" && ["CREATED", "UPDATED", "SETTLE_EXTENDED"].includes(outcome.action)) {
+      await updateCustomerFromReading(db, input);
+    }
+  } catch (err) {
+    log.warn({ customerId: input.customerId, error: err instanceof Error ? err.message : String(err) }, "reader_customer_update_failed");
+  }
+}
+
+export async function updateCustomerFromReading(db: Db, input: ApplyReadingInput): Promise<string[]> {
+  const d = db as unknown as Record<string, Record<string, (a: unknown) => Promise<unknown>>>;
+  const r = input.verified.recipient;
+  const customer = (await d.customer.findUnique({ where: { id: input.customerId } })) as (Record<string, unknown> & { workspaceId: string }) | null;
+  if (!customer || customer.workspaceId !== input.workspaceId) return [];
+  const data: Record<string, unknown> = {};
+  const pick = (field: string, value: string | null) => {
+    if (value && (customer[field] ?? null) !== value) data[field] = value;
+  };
+  pick("name", r.name);
+  pick("phone", r.phone);
+  pick("address", r.address);
+  pick("province", r.province);
+  pick("city", r.city);
+  const fields = Object.keys(data);
+  if (fields.length === 0) return [];
+  await d.customer.update({ where: { id: input.customerId }, data });
+  const { recordAudit } = await import("@/modules/audit/service");
+  await recordAudit(db as never, {
+    workspaceId: input.workspaceId,
+    action: "customer.updated_from_reading",
+    entityType: "Customer",
+    entityId: input.customerId,
+    metadata: { fields },
+  }).catch(() => undefined);
+  return fields;
+}
+
+async function applyCore(db: Db, input: ApplyReadingInput): Promise<ApplyOutcome> {
   const d = db as unknown as Record<string, Record<string, (a: unknown) => Promise<unknown>>>;
   const { verified: v } = input;
 
@@ -109,7 +196,7 @@ export async function applyReading(db: Db, input: ApplyReadingInput): Promise<Ap
 
   // ── إلغاء ──
   if (declined) {
-    if (!open) return { action: "NONE", reason: "NOTHING_TO_CANCEL" };
+    if (!open) return sealedChange(db, input, "CANCEL");
     return cancelOpenOrder(db, input, open);
   }
 
@@ -121,8 +208,8 @@ export async function applyReading(db: Db, input: ApplyReadingInput): Promise<Ap
     return { action: "NONE", reason: `STAGE_${v.stage}` };
   }
 
-  // طلب مثبّت + تعديل = 1.6
-  if (!open && v.relation === "AMEND_LAST") return { action: "NONE", reason: "AMEND_AFTER_SEAL_NOT_YET" };
+  // طلب مثبّت + تعديل (§10.3)
+  if (!open && v.relation === "AMEND_LAST") return sealedChange(db, input, "AMEND");
 
   const lines = v.items.filter((i) => i.productId && i.quantity && i.quantity > 0);
   if (lines.length === 0) return { action: "NONE", reason: "NO_RESOLVED_ITEMS" };
@@ -158,6 +245,9 @@ async function createOrder(
   const reasons = computeReviewReasons(v);
   if (!breakdown.deliveryAvailable && !reasons.includes("AREA_NOT_SERVED")) reasons.push("AREA_NOT_SERVED");
   const status = reasons.length > 0 ? "CONFIRMATION_PENDING" : "NEW";
+  // الـ OMS بيرفض طلب بلا اسم (ORDER_MISSING_NAME): الاسم الناقص بيتعوّض من ملف العميل (اسم البروفايل).
+  const profile = (await d.customer.findUnique({ where: { id: input.customerId }, select: { name: true } })) as { name?: string | null } | null;
+  const recipientName = v.recipient.name ?? profile?.name ?? null;
 
   const existingCount = (await (d.order.count as (a: unknown) => Promise<number>)({
     where: { workspaceId: input.workspaceId, conversationId: input.conversationId, idempotencyKey: { startsWith: `reader:${input.workspaceId}:${input.conversationId}:` } },
@@ -183,7 +273,7 @@ async function createOrder(
         status,
         confirmationStatus: "PENDING",
         deliveryAddress: v.recipient.address,
-        recipientName: v.recipient.name,
+        recipientName,
         recipientPhone: v.recipient.phone,
         recipientAltPhone: v.recipient.altPhone,
         province: v.recipient.province,

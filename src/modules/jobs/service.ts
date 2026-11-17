@@ -43,6 +43,8 @@ export const JOB_TYPES = [
   "sync_oms_products",
   // قارئ الطلب (الحزمة 1.3): قراءة محادثة وحفظها بوضع الظل — بلا طلب ولا رسالة.
   "read_conversation",
+  // قارئ الطلب (1.6): رسالة «تم تثبيت طلبك» — نص حتمي، لحظة التثبيت بس.
+  "send_order_confirmation",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];

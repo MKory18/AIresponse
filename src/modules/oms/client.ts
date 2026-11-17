@@ -342,6 +342,25 @@ export class OmsClient {
       currency: totals?.currency ? String(totals.currency) : null,
     };
   }
+
+  /**
+   * فحص العميل بالـ OMS قبل الإرسال (قارئ الطلب 1.6): `GET /api/v1/customers/lookup`.
+   * الباب ممكن ما يدعمه لسا (404 = `OMS_REJECTED`): المستدعي بيعتبر الفشل «ما في معلومة» —
+   * الـ OMS نفسه بيرفض المحظور بـ 422 عند الإرسال.
+   */
+  async lookupCustomer(phone: string): Promise<{ found: boolean; blacklisted: boolean }> {
+    const res = await this.request<Record<string, unknown>>("GET", `/api/v1/customers/lookup?phone=${encodeURIComponent(phone)}`);
+    const customer = (res.customer ?? null) as Record<string, unknown> | null;
+    const blacklisted = res.blacklisted === true || customer?.blacklisted === true || customer?.is_blacklisted === true;
+    return { found: res.found === true || customer !== null, blacklisted };
+  }
+
+  /** ملاحظة على طلب انبعت (طلب تعديل من المحادثة) — نص حتمي بلا ذكاء. */
+  async addOrderNote(omsOrderId: string, note: string, idempotencyKey: string): Promise<void> {
+    await this.request<unknown>("POST", `/api/v1/orders/${encodeURIComponent(omsOrderId)}/notes`, { note }, {
+      "idempotency-key": idempotencyKey,
+    });
+  }
 }
 
 type Factory = (deps: OmsClientDeps) => OmsClient;
