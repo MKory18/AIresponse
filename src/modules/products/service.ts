@@ -1,6 +1,7 @@
 ﻿import type { Prisma, StockStatus } from "@prisma/client";
 import { customerFacingPriceTiers } from "./price-tiers";
 import { COMPARE_AT_PRICE_MESSAGE } from "./schemas";
+import { INCOMPLETE_WHERE } from "./readiness";
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
@@ -156,20 +157,27 @@ export async function listProducts(
     workspaceId: string;
     q?: string;
     category?: string;
-    status?: "active" | "inactive" | "archived" | "all";
+    status?: "active" | "inactive" | "archived" | "incomplete" | "all";
     cursor?: string;
     limit?: number;
   }
-): Promise<Paginated<Prisma.ProductGetPayload<{ include: { mediaLinks: { include: { mediaAsset: true } } } }>>> {
+): Promise<Paginated<Prisma.ProductGetPayload<{ include: { mediaLinks: { include: { mediaAsset: true } } } }>> & { total: number }> {
   const limit = Math.min(params.limit ?? 25, 100);
   const where: Prisma.ProductWhereInput = { workspaceId: params.workspaceId };
+  // البحث و«ناقصة المحتوى» الاتنين بـOR — بنجمعهم بـAND عشان ما يدوسوا على بعض.
+  const and: Prisma.ProductWhereInput[] = [];
   if (params.q) {
-    where.OR = [
-      { name: { contains: params.q, mode: "insensitive" } },
-      { sku: { contains: params.q, mode: "insensitive" } },
-      { tags: { has: params.q } },
-    ];
+    and.push({
+      OR: [
+        { name: { contains: params.q, mode: "insensitive" } },
+        { sku: { contains: params.q, mode: "insensitive" } },
+        { tags: { has: params.q } },
+        { aliases: { has: params.q } },
+      ],
+    });
   }
+  if (params.status === "incomplete") and.push(INCOMPLETE_WHERE);
+  if (and.length > 0) where.AND = and;
   if (params.category) where.category = params.category;
   if (params.status === "active") where.isActive = true;
   if (params.status === "inactive") where.isActive = false;
@@ -188,7 +196,9 @@ export async function listProducts(
   });
   const hasMore = products.length > limit;
   const items = hasMore ? products.slice(0, limit) : products;
-  return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+  // العدد الكلي من الخادم (مش من الصفوف المحمّلة).
+  const total = await db.product.count({ where });
+  return { items, nextCursor: hasMore ? items[items.length - 1].id : null, total };
 }
 
 export async function updateProduct(

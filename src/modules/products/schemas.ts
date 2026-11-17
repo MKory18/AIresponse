@@ -35,6 +35,8 @@ const productFieldsSchema = z.object({
   stockQty: z.number().int().min(0).max(1_000_000).optional(),
   category: z.string().trim().max(100).nullable().optional(),
   tags: z.array(z.string().trim().max(50)).max(30).optional(),
+  /** أسماء بديلة (بتنلاقى فيها البحث زي الاسم الأصلي). */
+  aliases: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
   benefits: z.array(z.string().trim().max(300)).max(20).optional(),
   ingredients: z.string().max(5000).nullable().optional(),
   usage: z.string().max(5000).nullable().optional(),
@@ -54,7 +56,7 @@ export const productUpdateSchema = productFieldsSchema.partial().extend({
 export const listParamsSchema = z.object({
   q: z.string().trim().max(100).optional(),
   category: z.string().trim().max(100).optional(),
-  status: z.enum(["active", "inactive", "archived", "all"]).optional(),
+  status: z.enum(["active", "inactive", "archived", "incomplete", "all"]).optional(),
   productId: z.string().cuid().optional(),
   type: z.enum(["IMAGE", "VIDEO", "AUDIO", "DOCUMENT"]).optional(),
   sentiment: z.string().trim().max(30).optional(),
