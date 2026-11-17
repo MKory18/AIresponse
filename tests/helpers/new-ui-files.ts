@@ -22,5 +22,6 @@ export function newUiFiles(): string[] {
   const v2 = [...walk(join(ROOT, "src", "app")), ...walk(join(ROOT, "src", "components"))].filter((f) =>
     relative(ROOT, f).split(sep).includes("v2")
   );
-  return [...kit, ...v2, join(ROOT, "src", "app", "dev", "ui", "gallery.tsx"), join(ROOT, "src", "lib", "api-client.ts")];
+  const attention = ["attention-panel.tsx", "health-banner.tsx", "use-attention.ts"].map((n) => join(ROOT, "src", "components", "attention", n));
+  return [...kit, ...attention, ...v2, join(ROOT, "src", "app", "dev", "ui", "gallery.tsx"), join(ROOT, "src", "lib", "api-client.ts")];
 }
