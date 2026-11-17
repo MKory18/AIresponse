@@ -1,0 +1,101 @@
+{
+  "note": "محادثة مرجعية مكتوبة (0.4) — أرقام وأسماء وهمية.",
+  "page": "كهربا",
+  "market": "SY",
+  "messages": [
+    {
+      "id": "msg-1",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "بدي كريم حرير",
+      "createdAt": "2026-11-10T10:00:00.000Z"
+    },
+    {
+      "id": "msg-2",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "تمام! كم عبوة؟",
+      "createdAt": "2026-11-10T10:00:45.000Z"
+    },
+    {
+      "id": "msg-3",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "عبوتين",
+      "createdAt": "2026-11-10T10:01:30.000Z"
+    },
+    {
+      "id": "msg-4",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "عبوتين بـ 40 USD. بعتلي رقمك وعنوانك",
+      "createdAt": "2026-11-10T10:02:15.000Z"
+    },
+    {
+      "id": "msg-5",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "0933111222 دمشق المزة",
+      "createdAt": "2026-11-10T10:03:00.000Z"
+    },
+    {
+      "id": "msg-6",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "أثبّت الطلب؟",
+      "createdAt": "2026-11-10T10:03:45.000Z"
+    },
+    {
+      "id": "msg-7",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "اي ثبتوه",
+      "createdAt": "2026-11-10T10:04:30.000Z"
+    }
+  ],
+  "modelOutput": {
+    "intent": "ORDERING",
+    "relation": "NEW",
+    "items": [
+      {
+        "productRef": "كريم حرير",
+        "quantity": 2,
+        "evidence": [
+          "m1",
+          "m3"
+        ]
+      }
+    ],
+    "customer": {
+      "name": null,
+      "altPhone": null,
+      "phone": "0933111222",
+      "city": "دمشق",
+      "address": "المزة",
+      "evidence": {
+        "phone": [
+          "m5"
+        ],
+        "address": [
+          "m5"
+        ]
+      }
+    },
+    "agreement": {
+      "state": "EXPLICIT",
+      "evidence": [
+        "m7"
+      ]
+    },
+    "cancelRequested": false,
+    "notes": null,
+    "openQuestions": [],
+    "aiClaimedConfirmed": false,
+    "needsHuman": {
+      "value": false,
+      "reason": null
+    },
+    "memories": [],
+    "confidence": 0.9
+  }
+}

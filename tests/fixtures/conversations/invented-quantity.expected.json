@@ -1,0 +1,17 @@
+{
+  "stage": "COLLECTING",
+  "phone": "0933111222",
+  "province": "حمص",
+  "items": [
+    {
+      "name": "كريم حرير",
+      "quantity": null
+    }
+  ],
+  "flags": [
+    "QUANTITY_UNGROUNDED"
+  ],
+  "missing": [
+    "quantity"
+  ]
+}

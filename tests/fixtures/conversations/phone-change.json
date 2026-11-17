@@ -1,0 +1,93 @@
+{
+  "note": "محادثة مرجعية مكتوبة (0.4) — أرقام وأسماء وهمية.",
+  "page": "كهربا",
+  "market": "SY",
+  "messages": [
+    {
+      "id": "msg-1",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "بدي ماء الكمأ واحد",
+      "createdAt": "2026-11-10T10:00:00.000Z"
+    },
+    {
+      "id": "msg-2",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "تمام رقمك وعنوانك؟",
+      "createdAt": "2026-11-10T10:00:45.000Z"
+    },
+    {
+      "id": "msg-3",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "0933111222 حلب الفرقان",
+      "createdAt": "2026-11-10T10:01:30.000Z"
+    },
+    {
+      "id": "msg-4",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "تمام",
+      "createdAt": "2026-11-10T10:02:15.000Z"
+    },
+    {
+      "id": "msg-5",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "لا غيّر رقمي لـ 0944555666",
+      "createdAt": "2026-11-10T10:03:00.000Z"
+    },
+    {
+      "id": "msg-6",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "اي ثبتوه",
+      "createdAt": "2026-11-10T10:03:45.000Z"
+    }
+  ],
+  "modelOutput": {
+    "intent": "ORDERING",
+    "relation": "NEW",
+    "items": [
+      {
+        "productRef": "ماء الكمأ",
+        "quantity": 1,
+        "evidence": [
+          "m1"
+        ]
+      }
+    ],
+    "customer": {
+      "name": null,
+      "altPhone": null,
+      "phone": "0944555666",
+      "city": "حلب",
+      "address": "الفرقان",
+      "evidence": {
+        "phone": [
+          "m5"
+        ],
+        "address": [
+          "m3"
+        ]
+      }
+    },
+    "agreement": {
+      "state": "EXPLICIT",
+      "evidence": [
+        "m6"
+      ]
+    },
+    "cancelRequested": false,
+    "notes": null,
+    "openQuestions": [],
+    "aiClaimedConfirmed": false,
+    "needsHuman": {
+      "value": false,
+      "reason": null
+    },
+    "memories": [],
+    "confidence": 0.9
+  }
+}

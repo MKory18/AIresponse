@@ -1,0 +1,13 @@
+{
+  "stage": "COMPLETE",
+  "phone": "0933111222",
+  "province": "دمشق",
+  "items": [
+    {
+      "name": "كريم حرير",
+      "quantity": 2
+    }
+  ],
+  "flags": [],
+  "missing": []
+}
