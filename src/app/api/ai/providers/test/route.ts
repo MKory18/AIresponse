@@ -4,7 +4,7 @@ import { prisma } from "@/core/db/prisma";
 import { getEnv } from "@/core/env";
 import { probeProviderEndpoint, probeProviderLink, normalizeHermesEndpoint } from "@/modules/ai/provider";
 import { decryptSecret } from "@/core/crypto";
-import { resolveModel } from "@/modules/ai/router";
+import { resolveHermesBase, resolveModel } from "@/modules/ai/router";
 import { assertEndpointResolvesPublic, assertHermesEndpointResolves, isHermesPrivateNetworkAllowed, assertCustomEndpointResolves, isCustomPrivateNetworkAllowed } from "@/modules/ai/endpoint-guard";
 
 const testSchema = z.object({
@@ -53,8 +53,8 @@ export const POST = createHandler(
     let endpoint: string;
     let model: string;
     if (choice === "hermes") {
-      const override = (settings?.customBaseUrl as string | null | undefined)?.trim();
-      const base = override || (env.HERMES_BASE_URL as string | undefined)?.trim();
+      // S-02: نفس قاعدة العنوان بمسار الرد (resolveHermesBase).
+      const base = resolveHermesBase(settings?.customBaseUrl as string | null | undefined, env.HERMES_BASE_URL as string | undefined);
       const hermesKey = (env.HERMES_API_KEY as string | undefined)?.trim();
       if (!base || !hermesKey) {
         return ok({ provider: "hermes", status: "needs_key", latencyMs: 0, detail: "HERMES_BASE_URL_OR_API_KEY_MISSING" });

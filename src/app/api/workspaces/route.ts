@@ -4,7 +4,8 @@ import { setSessionCookie } from "@/modules/auth/session";
 import { createWorkspaceForUser, listWorkspacesForUser, updateWorkspaceDetails } from "@/modules/workspaces/service";
 import { switchWorkspaceSchema } from "@/modules/auth/schemas";
 import { prisma } from "@/core/db/prisma";
-import { AuthorizationError } from "@/core/errors";
+import { AppError, AuthorizationError } from "@/core/errors";
+import { isWorkspaceCreateAllowed } from "@/core/signup-gate";
 import { z } from "zod";
 
 export const GET = createHandler({}, async ({ auth }) => {
@@ -13,8 +14,16 @@ export const GET = createHandler({}, async ({ auth }) => {
 });
 
 export const POST = createHandler(
-  { body: createWorkspaceSchema, rateLimit: { limit: 10, windowMs: 60_000 } },
-  async ({ body, auth }) => {
+  { rateLimit: { limit: 10, windowMs: 60_000 } },
+  async ({ req, auth }) => {
+    // S-06: مساحة إضافية لمستخدم موجود مسكّرة بالإنتاج إلا بـ ALLOW_WORKSPACE_CREATE.
+    if (!isWorkspaceCreateAllowed()) {
+      throw new AppError("Creating new workspaces is disabled.", 403, "WORKSPACE_CREATE_DISABLED");
+    }
+    const raw = await req.json().catch(() => {
+      throw new AppError("Invalid JSON body", 400, "INVALID_BODY");
+    });
+    const body = createWorkspaceSchema.parse(raw);
     const workspace = await createWorkspaceForUser(auth!.userId, body.name);
     await setSessionCookie({ userId: auth!.userId, workspaceId: workspace.id });
     return ok({ workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug } }, 201);
