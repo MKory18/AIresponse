@@ -3,6 +3,8 @@ import { prisma } from "@/core/db/prisma";
 import { AuthenticationError } from "@/core/errors";
 import { readSession } from "@/modules/auth/session";
 import { listWorkspacesForUser } from "@/modules/workspaces/service";
+import { getAuthContext } from "@/modules/auth/context";
+import { PERMISSIONS } from "@/modules/rbac/permissions";
 import { updateOwnProfile } from "@/modules/auth/profile";
 import { z } from "zod";
 
@@ -18,7 +20,18 @@ export const GET = createHandler({ public: true }, async () => {
 
   const workspaces = await listWorkspacesForUser(user.id);
   const activeWorkspace = workspaces.find((w) => w.id === session.workspaceId) ?? null;
-  return ok({ user, activeWorkspace, workspaces });
+
+  // 2.2: الدور والصلاحيات الفعلية (دور + إضافات) — الواجهة بتخفي اللي ما بيقدر عليه؛ الخادم هو الحكم.
+  let role: string | null = null;
+  let permissions: string[] = [];
+  try {
+    const auth = await getAuthContext();
+    role = auth.role;
+    permissions = PERMISSIONS.filter((p) => auth.can(p));
+  } catch {
+    // بلا عضوية فعّالة بالمساحة الحالية: لا دور ولا صلاحيات.
+  }
+  return ok({ user, activeWorkspace, workspaces, role, permissions, isSuperAdmin: user.isSuperAdmin });
 });
 
 const profileSchema = z.object({
