@@ -51,23 +51,21 @@ describe("Fluent design tokens", () => {
 });
 
 describe("Fluent app shell", () => {
-  it("sidebar is a flush navigation pane with a soft active state", () => {
-    const src = read("src/components/app-sidebar.tsx");
-    expect(src).toContain("bg-surface-2");
-    expect(src).toContain("border-e border-line");
-    expect(src).toContain("w-[280px]");
-    expect(src).toContain("bg-primary-soft");
-    expect(src).not.toMatch(/bg-gradient-to-l from-brand-600 via-brand-500/);
+  it("sidebar is a flat navigation pane on the sidebar roles (no blur, no gradients)", () => {
+    const src = read("src/components/shell-v2/sidebar-v2.tsx");
+    expect(src).toContain("bg-sidebar");
+    expect(src).toContain('data-pane="nav"');
+    expect(src).toContain("bg-primary text-on-primary");
+    expect(src).not.toMatch(/bg-gradient/);
     expect(src).not.toContain("backdrop-blur");
   });
 
-  it("topbar is a flat command bar with a muted search field", () => {
-    const src = read("src/components/app-shell.tsx");
+  it("topbar is a flat command bar", () => {
+    const src = read("src/components/shell-v2/header-v2.tsx");
     expect(src).toContain("h-14");
     expect(src).toContain("bg-surface-2");
-    expect(src).toContain("bg-surface-3");
-    expect(src).toContain("focus:border-primary");
     expect(src).not.toContain("lg:rounded-[20px]");
+    expect(src).not.toContain("backdrop-blur");
   });
 
   it("primary buttons are solid brand blue, 36px, without gradients", () => {

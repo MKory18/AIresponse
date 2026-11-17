@@ -127,6 +127,8 @@ let allStores: Record<string, Row[]> | null = null;
 const RELATIONS: Record<string, Record<string, string>> = {
   customer: { orders: "order", conversations: "conversation", attributionTouches: "attributionTouch" },
   conversation: { channel: "channel" },
+  // طلب ← أصنافه (فلتر `items: { some }` بكشف التكرار).
+  order: { items: "orderItem" },
 };
 // العلاقات الي ربطناها نحنا (مش الي جاية من بيانات الاختبار) بتنقرأ من جديد
 // بكل استعلام — وإلا طلب انضاف بعد أول استعلام ما بيبين بفلاتر العلاقات.
@@ -142,7 +144,8 @@ function attachRelations(name: string, row: Row) {
     if (key === "channel") {
       row[key] = (allStores.channel ?? []).find((c: Row) => c.id === row.channelId) ?? null;
     } else {
-      row[key] = (allStores[rel[key]] ?? []).filter((r: Row) => r.customerId === row.id);
+      const fk = name === "order" ? "orderId" : "customerId";
+      row[key] = (allStores[rel[key]] ?? []).filter((r: Row) => r[fk] === row.id);
     }
   }
 }

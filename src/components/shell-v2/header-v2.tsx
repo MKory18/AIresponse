@@ -85,6 +85,7 @@ function SearchBox({ groups }: { groups: readonly NavGroupView[] }) {
   return (
     <form
       role="search"
+      data-tour="search"
       className="relative hidden md:block"
       onSubmit={(e) => {
         e.preventDefault();
@@ -116,6 +117,7 @@ function SearchBox({ groups }: { groups: readonly NavGroupView[] }) {
         role="combobox"
         aria-expanded={open && hits.length > 0}
         aria-controls="search-hits"
+        aria-activedescendant={open && index >= 0 && hits[index] ? `search-hit-${index}` : undefined}
         aria-label="بحث"
         placeholder="بحث: عميل · رقم · طلب (Ctrl+K)"
         className="h-10 w-64 rounded-control border border-border-strong bg-surface-2 ps-9 pe-3 text-sm text-ink outline-none transition-[width] duration-150 ease-zaki placeholder:text-ink-subtle focus:w-80 focus:border-primary focus:ring-1 focus:ring-focus"
@@ -123,7 +125,7 @@ function SearchBox({ groups }: { groups: readonly NavGroupView[] }) {
       {open && hits.length > 0 && (
         <ul id="search-hits" role="listbox" className="absolute start-0 top-full z-50 mt-1 w-80 overflow-hidden rounded-card border border-line bg-surface-2 py-1 shadow-overlay">
           {hits.map((h, i) => (
-            <li key={`${h.kind}:${h.href}`} role="option" aria-selected={i === index}>
+            <li key={`${h.kind}:${h.href}`} id={`search-hit-${i}`} role="option" aria-selected={i === index}>
               <Link
                 href={h.href}
                 onMouseDown={(e) => e.preventDefault()}
@@ -186,8 +188,8 @@ export function HeaderV2({
   canTeam: boolean;
   onOpenMenu: () => void;
   onHelp: (() => void) | null;
-  /** الجولة السريعة مربوطة بمثبّتات `data-tour` (الهيكل القديم) — بتنضاف للجديد بحزمة لاحقة؛ بلا مثبّتات = null. */
-  onTour: (() => void) | null;
+  /** الجولة السريعة (مثبّتات `data-tour` بالشريط الجانبي وصندوق البحث). */
+  onTour: () => void;
 }) {
   const bell = useDropdown();
   const account = useDropdown();
@@ -252,12 +254,7 @@ export function HeaderV2({
                     <CircleHelp size={15} aria-hidden /> شو هاي الصفحة؟
                   </button>
                 )}
-                {onTour && (
-                  <button type="button" role="menuitem" onClick={() => { account.setOpen(false); onTour(); }} className={itemCls}>
-                    <Compass size={15} aria-hidden /> جولة سريعة
-                  </button>
-                )}
-                <form action="/api/auth/logout" method="post" onSubmit={() => setLoggingOut(true)}>
+$1                <form action="/api/auth/logout" method="post" onSubmit={() => setLoggingOut(true)}>
                   <button type="submit" role="menuitem" disabled={loggingOut} className={cn(itemCls, "text-danger hover:bg-danger-soft disabled:opacity-50")}>
                     <LogOut size={15} aria-hidden /> {loggingOut ? "…" : "تسجيل الخروج"}
                   </button>

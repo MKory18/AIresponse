@@ -13,15 +13,14 @@ import { TOUR_STEPS, shouldAutoStartTour } from "@/lib/guided-tour";
  */
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-const shell = read("src/components/app-shell.tsx");
-const sidebar = read("src/components/app-sidebar.tsx");
+const shell = read("src/components/shell-v2/app-shell-v2.tsx") + read("src/components/shell-v2/header-v2.tsx");
+const sidebar = read("src/components/shell-v2/sidebar-v2.tsx");
 
 describe("خطوات الجولة", () => {
   it("كل مجموعة بالقائمة إلها خطوة، وكل خطوة مجموعة إلها مجموعة حقيقية", () => {
     const groupSteps = TOUR_STEPS.filter((s) => s.target.startsWith("group-")).map((s) => s.target.slice(6));
     expect(groupSteps.sort()).toEqual(NAV_GROUPS.map((g) => g.key).sort());
-    expect(sidebar).toContain("tour={`group-${");
-    expect(sidebar).toContain("data-tour={tour}");
+    expect(sidebar).toContain("data-tour={`group-${group.key}`}");
   });
 
   it("الخطوات التانية مربوطة بعنصر موجود بالشريط العلوي", () => {
@@ -47,7 +46,7 @@ describe("متى بتشتغل لحالها", () => {
     expect(shouldAutoStartTour("/orders", null)).toBe(false);
   });
 
-  it("بترجع من زر «جولة» بالشريط العلوي", () => {
+  it("بترجع من «جولة سريعة» بقائمة الحساب", () => {
     expect(shell).toContain("startGuidedTour(");
   });
 });

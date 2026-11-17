@@ -16,6 +16,7 @@ function Item({ group, active, count, onNavigate }: { group: NavGroupView; activ
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       data-nav-group={group.key}
+      data-tour={`group-${group.key}`}
       className={cn(
         "flex min-h-10 items-center gap-3 rounded-control px-3 text-sm font-medium transition-colors duration-150 ease-zaki focus-visible:outline-2 focus-visible:outline-focus",
         active ? "bg-primary text-on-primary" : "text-sidebar-fg hover:bg-sidebar-fg/10"

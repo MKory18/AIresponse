@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { clearRateLimitMemory } from "@/core/api/rate-limit";
 import { hashToken } from "@/modules/integrations/tokens";
-import { NAV_GROUPS, NAV_GROUPS_V2 } from "@/lib/nav-model";
+import { NAV_GROUPS } from "@/lib/nav-model";
 import { guideForPath } from "@/lib/page-guides";
 import { GET as listGET, POST as createPOST } from "@/app/api/settings/system-tokens/route";
 import { POST as revokePOST } from "@/app/api/settings/system-tokens/[id]/revoke/route";
@@ -181,8 +181,8 @@ describe("الصلاحيات والعزل", () => {
 });
 
 describe("الصفحة بالتنقل والدليل", () => {
-  it("بمجموعة الإعدادات بالهيكلين وبصلاحية integrations.manage، وإلها شرح", () => {
-    for (const groups of [NAV_GROUPS, NAV_GROUPS_V2]) {
+  it("بمجموعة الإعدادات وبصلاحية integrations.manage، وإلها شرح", () => {
+    for (const groups of [NAV_GROUPS]) {
       const page = groups.flatMap((g) => g.pages).find((p) => p.href === "/settings/system-tokens");
       expect(page?.permission).toBe("integrations.manage");
     }

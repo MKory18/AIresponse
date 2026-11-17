@@ -147,11 +147,11 @@ describe("الواجهة", () => {
   });
 
   it("الوارد بيجيب البطاقة ويتحدّث لحظيًا (reading.updated · order.updated)", () => {
-    const inbox = src("src/components/inbox/inbox.tsx");
-    expect(inbox).toContain("/order-card");
-    expect(inbox).toContain('change.type === "reading.updated"');
-    expect(inbox).toContain('change.type === "order.updated"');
-    expect(inbox).toContain('card.mode === "LEGACY_DRAFT" ? null');
+    const panel = src("src/app/(dashboard)/conversations/v2/side-panel.tsx");
+    expect(panel).toContain("/order-card");
+    expect(panel).toContain('"reading.updated"');
+    expect(panel).toContain('"order.updated"');
+    expect(panel).toContain('c.mode === "LEGACY_DRAFT" ? null');
   });
 
   it("المسار بصلاحية orders.read والأزرار بصلاحياتها من الخادم", () => {
@@ -170,7 +170,7 @@ describe("الواجهة", () => {
   });
 
   it("قائمة الطلبات: عمود حالة واحد + تبويب «تحتاج مراجعة» (بلا عمود تلجرام ولا فلتر حالة التأكيد)", () => {
-    const page = src("src/app/(dashboard)/orders/legacy-orders.tsx");
+    const page = src("src/app/(dashboard)/orders/v2/orders-view.tsx");
     expect(page).toContain("orderStatusLabel");
     expect(page).toContain("ORDER_TABS");
     expect(page).not.toContain("<th>تلجرام</th>");
