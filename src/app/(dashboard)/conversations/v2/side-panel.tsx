@@ -5,6 +5,7 @@ import { api } from "@/lib/api-client";
 import { useRealtime } from "@/components/realtime/use-realtime";
 import { useToast } from "@/components/ui/toast";
 import { CustomerPanel } from "@/components/inbox/customer-panel";
+import { CustomerEditCard } from "./customer-edit-card";
 import type { CustomerDetail, DraftInfo } from "@/components/inbox/types";
 import type { OrderCardCan } from "@/components/orders/order-card";
 import type { OrderCardData } from "@/modules/orders/reader/card";
@@ -81,14 +82,17 @@ export function SidePanel({
   }
 
   return (
-    <CustomerPanel
-      customer={customer}
-      orderDrafts={drafts}
-      orderCard={card}
-      onOrderChanged={() => conversationId && void load(conversationId)}
-      pageName={pageName}
-      onRefreshProfile={refreshProfile}
-      onResetMemory={resetMemory}
-    />
+    <>
+      {customer && <CustomerEditCard key={customer.id} customer={customer} onSaved={setCustomer} />}
+      <CustomerPanel
+        customer={customer}
+        orderDrafts={drafts}
+        orderCard={card}
+        onOrderChanged={() => conversationId && void load(conversationId)}
+        pageName={pageName}
+        onRefreshProfile={refreshProfile}
+        onResetMemory={resetMemory}
+      />
+    </>
   );
 }

@@ -144,7 +144,7 @@ export function ListPane({
           </div>
         )}
         {!loading && !error && items.length === 0 && <ConversationListEmpty isFiltered={isFiltered} />}
-        {!loading && items.map((c) => <ConversationItem key={c.id} conversation={c} selected={c.id === selectedId} onSelect={onSelect} />)}
+        {!loading && items.map((c) => <ConversationItem key={c.id} conversation={c} selected={c.id === selectedId} onSelect={onSelect} showOrder />)}
       </div>
 
       {!loading && items.length > 0 && (

@@ -53,6 +53,8 @@ export interface ConversationListRow {
   lastMessage?: { text: string | null; createdAt: string } | null;
   /** Independent review flag: OPEN HumanHandoff exists (ownership unchanged). */
   hasOpenHandoff: boolean;
+  /** 3.1ب — آخر طلب بالمحادثة (حالته بشارة بالقائمة)؛ null = ما في طلب. */
+  lastOrder: { status: string; sealedAt: string | null; heldBy: string | null; omsStatus: string | null; omsShippingStatus: string | null } | null;
   /** Page-resolved persona (channel assignment → workspace default). */
   aiPersona: { id: string; name: string; source: "channel" | "workspace" } | null;
 }
@@ -254,7 +256,28 @@ export async function listConversations(
       });
     }
   }
-  const withPreview = enriched.map((c) => ({ ...c, lastMessage: previewByConv.get(c.id) ?? null }));
+  // 3.1ب: حالة آخر طلب لكل محادثة بالصفحة — استعلام واحد محدود (ولا N+1).
+  const orderRows = await (db as unknown as {
+    order: { findMany: (args: unknown) => Promise<Array<{ conversationId: string | null; status: string; sealedAt: Date | string | null; heldBy: string | null; omsStatus: string | null; omsShippingStatus: string | null }>> };
+  }).order.findMany({
+    where: { workspaceId: params.workspaceId, conversationId: { in: enriched.map((c) => c.id) } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: enriched.length * 3,
+    select: { conversationId: true, status: true, sealedAt: true, heldBy: true, omsStatus: true, omsShippingStatus: true },
+  }).catch(() => []);
+  const lastOrderByConv = new Map<string, ConversationListRow["lastOrder"]>();
+  for (const o of orderRows) {
+    if (o.conversationId && !lastOrderByConv.has(o.conversationId)) {
+      lastOrderByConv.set(o.conversationId, {
+        status: o.status,
+        sealedAt: o.sealedAt ? new Date(o.sealedAt).toISOString() : null,
+        heldBy: o.heldBy ?? null,
+        omsStatus: o.omsStatus ?? null,
+        omsShippingStatus: o.omsShippingStatus ?? null,
+      });
+    }
+  }
+  const withPreview = enriched.map((c) => ({ ...c, lastMessage: previewByConv.get(c.id) ?? null, lastOrder: lastOrderByConv.get(c.id) ?? null }));
   return { items: withPreview as unknown as ConversationListRow[], nextCursor: hasMore ? items[items.length - 1].id : null, total };
 }
 
