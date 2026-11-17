@@ -51,6 +51,10 @@ jobs:
       - name: Secret scan
         run: npm run scan:secrets
 
+      # الحزمة 0.2: AGENTS.md ما بيذكر مسار مش موجود بالكود.
+      - name: AGENTS.md paths
+        run: npm run check:agents
+
       - name: Production build
         run: npm run build
 
