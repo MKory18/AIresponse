@@ -6,6 +6,7 @@ import {
   Workflow,
   ChartNoAxesCombined,
   Settings,
+  Store,
 } from "lucide-react";
 import type { LucideProps } from "lucide-react";
 import type { ComponentType } from "react";
@@ -25,4 +26,5 @@ export const NAV_ICONS: Record<string, ComponentType<LucideProps>> = {
   Workflow,
   ChartNoAxesCombined,
   Settings,
+  Store,
 };

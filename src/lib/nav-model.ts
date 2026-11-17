@@ -104,6 +104,69 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 /**
+ * خريطة الواجهة الجديدة (2.3ب، 03-UI-STRUCTURE §1): ٧ مجموعات. بتتفعّل بـ`uiVersion = "v2"` (مفتاح المساحة أو كوكي المعاينة).
+ * ⚠️ الصفحات الجديدة (`/delivery` · `/assistant/order-rules` · `/settings/integrations`) بتنضاف مع حزمها (3.4 · 3.5 · 3.6).
+ * ⚠️ وصفحات «التحويلات» و«الوسائط» و«الآراء» و«مختبر التجميع» لسا بمكانها لحد ما يبنى بديلها بحزمة 3.x — ما منلغي ميزة قبل بديلها.
+ */
+export const NAV_GROUPS_V2: NavGroup[] = [
+  { key: "today", label: "اليوم", icon: "LayoutDashboard", placement: "main", pages: [{ href: "/dashboard", label: "اليوم", permission: "analytics.read" }] },
+  {
+    key: "chats",
+    label: "المحادثات",
+    icon: "MessageSquare",
+    placement: "main",
+    pages: [
+      { href: "/conversations", label: "المحادثات", permission: "conversations.read" },
+      { href: "/handoffs", label: "يحتاجك", permission: "handoffs.read" },
+      { href: "/customers", label: "العملاء", permission: "customers.read" },
+      { href: "/intelligence", label: "مختبر التجميع", permission: "conversations.read" },
+    ],
+  },
+  { key: "orders", label: "الطلبات", icon: "ShoppingBag", placement: "main", pages: [{ href: "/orders", label: "الطلبات", permission: "orders.read" }] },
+  {
+    key: "store",
+    label: "المتجر",
+    icon: "Store",
+    placement: "main",
+    pages: [
+      { href: "/products", label: "المنتجات", permission: "products.read" },
+      { href: "/catalogs", label: "مجموعات الصفحات", permission: "catalogs.read" },
+    ],
+  },
+  {
+    key: "agent",
+    label: "الوكيل الذكي",
+    icon: "Sparkles",
+    placement: "main",
+    pages: [
+      { href: "/personas", label: "الشخصية", permission: "personas.read" },
+      { href: "/knowledge", label: "المعلومات", permission: "knowledge.read" },
+      { href: "/media", label: "الوسائط", permission: "media.read" },
+      { href: "/feedback", label: "آراء العملاء", permission: "feedback.read" },
+      { href: "/ai/playground", label: "التجربة", permission: "ai.configure" },
+      { href: "/settings/ai", label: "التشغيل", permission: "ai.configure" },
+    ],
+  },
+  { key: "reports", label: "التقارير", icon: "ChartNoAxesCombined", placement: "main", pages: [{ href: "/analytics", label: "التقارير", permission: "analytics.read" }] },
+  {
+    key: "settings",
+    label: "الإعدادات",
+    icon: "Settings",
+    placement: "bottom",
+    pages: [
+      { href: "/channels", label: "الصفحات والقنوات", permission: "channels.read" },
+      { href: "/settings/team", label: "الفريق", permission: "users.manage" },
+      { href: "/settings/account", label: "حسابي", permission: null },
+    ],
+  },
+];
+
+/** خريطة التنقل حسب نسخة الواجهة. */
+export function navGroupsFor(version: "v1" | "v2"): NavGroup[] {
+  return version === "v2" ? NAV_GROUPS_V2 : NAV_GROUPS;
+}
+
+/**
  * روابط قديمة اندمجت صفحتها بغيرها: الرابط بيضل شغّال وبيحوّل لمكانه الجديد
  * (صفحة `page.tsx` صغيرة بتنادي `redirectToMerged`). مطابقة **حرفية** للمسار —
  * `/settings` بتحوّل، بس `/settings/ai` و`/settings/team` صفحات حقيقية.

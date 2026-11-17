@@ -34,6 +34,8 @@ export const integrationSettingsSchema = z
     orderAgreementPolicy: z.enum(["EXPLICIT_OR_IMPLICIT", "EXPLICIT_ONLY"]),
     /** رسالة «تم تثبيت طلبك» للعميل. */
     orderConfirmMessage: z.boolean(),
+    /** نسخة الواجهة (2.3ب): v1 الحالية · v2 الجديدة. كوكي المعاينة `zr-ui` بيغلبها لصاحبه بس. */
+    uiVersion: z.enum(["v1", "v2"]),
   })
   .strict();
 
@@ -52,6 +54,7 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   orderAutoSeal: true,
   orderAgreementPolicy: "EXPLICIT_OR_IMPLICIT",
   orderConfirmMessage: true,
+  uiVersion: "v1",
 };
 
 /** يدمج المحفوظ مع الافتراضي حقلًا حقلًا (القيمة التالفة تسقط وحدها). */

@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { readSession } from "@/modules/auth/session";
 import { prisma } from "@/core/db/prisma";
@@ -6,9 +6,12 @@ import { AuthenticationError, AuthorizationError } from "@/core/errors";
 import { getAuthContext, type AuthContext } from "@/modules/auth/context";
 import { decidePageAccess, PATH_HEADER } from "@/modules/auth/page-guard";
 import { listWorkspacesForUser } from "@/modules/workspaces/service";
-import { NAV_GROUPS, visibleGroups } from "@/lib/nav-model";
+import { navGroupsFor, visibleGroups } from "@/lib/nav-model";
+import { UI_VERSION_COOKIE, resolveUiVersion } from "@/lib/ui-version";
+import { getIntegrationSettings } from "@/modules/integrations/settings";
 import { PERMISSIONS } from "@/modules/rbac/permissions";
 import { AppShell } from "@/components/app-shell";
+import { AppShellV2 } from "@/components/shell-v2/app-shell-v2";
 import { ToastProvider } from "@/components/ui/toast";
 import { ForcePasswordChange } from "@/components/auth/force-password-change";
 import { InactiveWorkspace } from "@/components/auth/inactive-workspace";
@@ -52,10 +55,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
     );
   }
 
+  // 2.3ب: نسخة الواجهة — كوكي المعاينة (بيغلب) ثم إعداد المساحة ثم v1. الهيكل والحارس والقشرة من نفس النسخة.
+  const settings = await getIntegrationSettings(prisma as never, auth.workspaceId);
+  const uiVersion = resolveUiVersion({ cookie: cookies().get(UI_VERSION_COOKIE)?.value, setting: settings.uiVersion });
+  const navGroups = navGroupsFor(uiVersion);
+
   // 2.2: حارس الصفحة من الخادم — رابط صفحة ممنوعة مباشرة بيرجّع لأول صفحة مسموحة (`?denied=1`).
   const pathname = headers().get(PATH_HEADER);
   if (pathname) {
-    const decision = decidePageAccess(pathname, auth.can);
+    const decision = decidePageAccess(pathname, auth.can, navGroups);
     if (decision.kind === "redirect") redirect(decision.to);
   }
 
@@ -63,16 +71,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
     where: { id: auth.workspaceId },
     select: { name: true },
   });
-  const groups = visibleGroups(NAV_GROUPS, auth.can);
+  const groups = visibleGroups(navGroups, auth.can);
+  const Shell = uiVersion === "v2" ? AppShellV2 : AppShell;
   const permissions = PERMISSIONS.filter((p) => auth!.can(p));
 
   return (
     <ToastProvider>
       <PermissionsProvider permissions={permissions}>
-        <AppShell groups={groups} workspaceName={workspace?.name ?? ""} userName={user.name}>
+        <Shell groups={groups} workspaceName={workspace?.name ?? ""} userName={user.name}>
           <DeniedNotice />
           {children}
-        </AppShell>
+        </Shell>
       </PermissionsProvider>
     </ToastProvider>
   );
