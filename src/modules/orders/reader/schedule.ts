@@ -16,6 +16,10 @@ const log = childLogger("order-reader");
  */
 export const READ_DEBOUNCE_MS = 45_000;
 
+/** رد واحد للرشقة بوضع READER: مهمة الرد بتتأجّل 6 ثواني، وأقدم رسالة بلا رد عمرها > 20 ثانية بتنردّ هلأ. */
+export const REPLY_BATCH_DELAY_MS = 6_000;
+export const REPLY_BATCH_CAP_MS = 20_000;
+
 export type OrderMode = "LEGACY_DRAFT" | "READER_SHADOW" | "READER";
 
 export async function getOrderMode(db: Db, workspaceId: string): Promise<OrderMode> {

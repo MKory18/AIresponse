@@ -106,8 +106,12 @@ export async function runResponse(
   // 🔧 حالة الطلب من منطق الطلب الحتمي: `true` في رقم طلب · `false` المسودة
   // لسا بتتجمع فأي ادعاء تثبيت مرفوض · `undefined` ما في سياق طلب أبدًا
   // (القاعدة مطفية، فردود الأسئلة العادية ما بيتغيّر سلوكها).
-  const orderPlaced: boolean | undefined =
-    orderResult?.action === "ORDER_CONFIRMED" || orderResult?.action === "ORDER_UPDATED"
+  const readerContext = ext.readerContext;
+  // قارئ الطلب (1.5): حالة الطلب الحقيقية بالقاعدة (مثبّت = sealedAt) مش المسودة.
+  if (readerContext) allowedNumbers.push(...readerContext.allowedNumbers);
+  const orderPlaced: boolean | undefined = readerContext
+    ? readerContext.orderPlaced
+    : orderResult?.action === "ORDER_CONFIRMED" || orderResult?.action === "ORDER_UPDATED"
       ? true
       : orderResult &&
           ["ASK_MISSING_FIELD", "REQUEST_CONFIRMATION", "DRAFT_UPDATED", "RULES_BLOCKED"].includes(orderResult.action)
@@ -169,6 +173,9 @@ export async function runResponse(
       summary: scrubRecalledText(recallGuard, conversation.summary) || null,
       // رقم الزبون وعنوانه ما بيوصلوا الموديل — بيوصله إنهم محفوظين بس.
       orderSummary: orderResult?.summaryText ? redactSummaryContacts(orderResult.summaryText) : null,
+      orderCard: readerContext?.orderCard ?? null,
+      priceTable: readerContext?.priceTable ?? null,
+      recentOrders: readerContext?.recentOrders ?? null,
       sales: salesPlan
         ? {
             primary: salesPlan.primary
@@ -195,7 +202,7 @@ export async function runResponse(
     extractionUser,
     `النية: ${extraction.intent} (ثقة ${extraction.confidence})`,
     `الخطة: ${JSON.stringify(plan)}`,
-    responseInstruction(persona, { media: replyMedia.outcome }),
+    responseInstruction(persona, { media: replyMedia.outcome, seller: Boolean(readerContext) }),
   ].join("\n\n");
 
   let responseText = "";

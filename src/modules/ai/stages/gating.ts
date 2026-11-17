@@ -13,6 +13,8 @@ import { loadAISettings, logUsage, getWorkspaceProvider, type AISettingsLike } f
 import { PROMPT_VERSIONS, type PersonaConfig } from "../prompts";
 import { resolveChannelPersona } from "../channel-persona";
 import { recordAudit } from "@/modules/audit/service";
+import { isReaderReplyMode } from "@/modules/orders/reader/reply-context";
+import { REPLY_BATCH_CAP_MS } from "@/modules/orders/reader/schedule";
 import type { Db } from "@/modules/customers/service";
 import type {
   AIExecutionResult,
@@ -178,6 +180,32 @@ export async function runGating(
       logTimings("SKIPPED", { supersededBy });
       return { terminal: { status: "SKIPPED", error: reason } };
     }
+  }
+
+  // 3a'. قارئ الطلب (1.5) — رد واحد للرشقة: إذا في رسالة عميل أحدث (وهالرسالة أصغر من 20 ثانية)
+  // مهمة الأحدث بترد على الكل، وهاي بتنتهي SKIPPED · SUPERSEDED_BY (مغطّاة برد أحدث مش متجاهلة).
+  // أقدم رسالة بلا رد عمرها > 20 ثانية بتنردّ هلأ (العميل اللي بيكتب كتير ما بيستنى).
+  const readerReplyMode = await isReaderReplyMode(db, params.workspaceId);
+  if (readerReplyMode && !params.dryRun && newerInbound.length > 0 && Date.now() - msgCreated.getTime() < REPLY_BATCH_CAP_MS) {
+    const supersededBy = newerInbound[0].id;
+    await logUsage(db, {
+      workspaceId: params.workspaceId,
+      conversationId: conversation.id,
+      messageId: message.id,
+      purpose: "RESPONSE",
+      provider: "none",
+      model: "none",
+      promptVersion: PROMPT_VERSIONS.RESPONSE,
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: Date.now() - pipelineStarted,
+      success: true,
+      status: "SKIPPED",
+      error: `SUPERSEDED_BY:${supersededBy}`,
+    });
+    log.info({ conversationId: conversation.id, messageId: message.id, supersededBy }, "ai_batched_into_newer_reply");
+    logTimings("SKIPPED", { supersededBy, batched: true });
+    return { terminal: { status: "SKIPPED", error: `SUPERSEDED_BY:${supersededBy}` } };
   }
 
   // 3b. Per-conversation ordering: never answer a message while an OLDER
@@ -445,8 +473,20 @@ export async function runGating(
     address: (customer as { address?: string | null }).address ?? null,
   };
   const trustedContacts = customerPII.phone ? [customerPII.phone] : [];
-  const customerText = message.text ?? "[رسالة وسائط]";
   const recentMessages = recentMessagesRaw as { id: string; senderType: string; direction: string; text: string | null }[];
+  // READER: «رسالة العميل الحالية» = كل رسائله المتتالية اللي بلا رد (مجموعة بأسطر).
+  let customerText = message.text ?? "[رسالة وسائط]";
+  if (readerReplyMode) {
+    const batch: string[] = [];
+    let started = false;
+    for (const m of recentMessages) {
+      if (m.id === message.id) started = true;
+      if (!started) continue;
+      if (m.direction !== "INBOUND" || m.senderType !== "CUSTOMER") break;
+      batch.push(m.text && m.text.length > 500 ? m.text.slice(0, 500) : m.text ?? "[وسائط]");
+    }
+    if (batch.length > 1) customerText = batch.reverse().join("\n");
+  }
   // Bound per-message chars so one huge turn can't blow up every prompt.
   for (const m of recentMessages) {
     if (m.text && m.text.length > 500) m.text = m.text.slice(0, 500);

@@ -94,6 +94,8 @@ export interface ExtractionReady {
   catalogBoundary?: string;
   /** أسماء منتجات خارج كتالوج الصفحة لفلترة نص الموديل؛ null = بلا كتالوجات. */
   recallGuard?: import("../catalog-boundary").RecallGuard | null;
+  /** قارئ الطلب (1.5): سياق الرد من القاعدة — موجود بوضع READER فقط. */
+  readerContext?: import("@/modules/orders/reader/reply-context").ReaderReplyContext;
 }
 
 export type { Db };
