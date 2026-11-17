@@ -20,6 +20,14 @@ export const conversationListQuerySchema = listQuerySchema.extend({
   channelId: z.string().cuid().optional(),
   dateFrom: z.string().datetime({ offset: true }).optional(),
   dateTo: z.string().datetime({ offset: true }).optional(),
+  /** 3.1: تبويب «يحتاجك» (نفس بنود `/api/attention`) أو «جديدة» (غير مقروءة). */
+  view: z.enum(["all", "attention", "new"]).optional(),
+  /** 3.1: محادثات بعينها (حتى 30). */
+  ids: z
+    .string()
+    .max(1200)
+    .optional()
+    .transform((v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 30) : undefined)),
 });
 
 export const updateCustomerSchema = z
