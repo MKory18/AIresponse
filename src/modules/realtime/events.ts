@@ -17,7 +17,10 @@ export type RealtimeEventType =
   | "message.outbound"
   | "conversation.updated"
   | "order.created"
-  | "order.telegram";
+  | "order.telegram"
+  // قارئ الطلب (1.4): قراءة المحادثة اتحدّثت · طلب اتغيّر (معرّفات فقط).
+  | "reading.updated"
+  | "order.updated";
 
 export interface RealtimeEvent {
   v: 1;
