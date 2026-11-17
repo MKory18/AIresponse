@@ -130,6 +130,7 @@ export const NAV_GROUPS_V2: NavGroup[] = [
     placement: "main",
     pages: [
       { href: "/products", label: "المنتجات", permission: "products.read" },
+      { href: "/delivery", label: "التوصيل", permission: "products.read" },
       { href: "/catalogs", label: "مجموعات الصفحات", permission: "catalogs.read" },
     ],
   },
