@@ -16,7 +16,9 @@ function secretKey(): Uint8Array {
 }
 
 export async function createSessionToken(payload: SessionPayload): Promise<string> {
-  return new SignJWT({ ...payload })
+  // S-03 (docs/HANDOVER-2026-10-27.md §4.1): `kind` يُفرض بعد الحمولة
+  // وبيتطلبه التحقق.
+  return new SignJWT({ ...payload, kind: "session" })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
@@ -28,6 +30,7 @@ export async function verifySessionToken(token: string): Promise<SessionPayload 
     // OCR-2026-10-16: تثبيت الخوارزمية — لا قبول عائلات توقيع بديلة عند
     // تلاعب برأس التوكن (alg confusion).
     const { payload } = await jwtVerify(token, secretKey(), { algorithms: ["HS256"] });
+    if (payload.kind !== "session") return null;
     if (typeof payload.userId !== "string") return null;
     return {
       userId: payload.userId,
