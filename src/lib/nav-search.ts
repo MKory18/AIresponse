@@ -49,6 +49,7 @@ export const PAGE_KEYWORDS: Record<string, string> = {
   "/delivery": "توصيل رسم التوصيل محافظات مناطق شحن اجور توصيل مجاني",
   "/assistant/order-rules": "قواعد الطلب قارئ الطلب تثبيت مهلة التثبيت وضع القارئ تلقائي موافقة رسالة التأكيد ظل",
   "/settings/integrations": "ربط اوامس oms تيليجرام تلغرام تكامل توكن مزامنة المنتجات",
+  "/settings/system-tokens": "توكنات الأنظمة توكن مفتاح ميديا باير mediabuyer كليبر clipper قدرة الرد capacity ربط نظام api",
   "/settings/team": "فريق موظفين اعضاء صلاحيات دعوة اعدادات مساحة العمل",
   "/settings/account": "حسابي حساب بريد كلمة المرور باسورد ثيم مظهر داكن فاتح",
 };
