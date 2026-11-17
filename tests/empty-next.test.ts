@@ -41,11 +41,11 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
     ["src/app/(dashboard)/customers/page.tsx", 'title="لا يوجد عملاء بعد"'],
     ["src/app/(dashboard)/handoffs/page.tsx", 'title="لا توجد تحويلات"'],
     ["src/app/(dashboard)/catalogs/page.tsx", 'title="لا كتالوجات بعد"'],
-    ["src/app/(dashboard)/feedback/page.tsx", 'title="لا توجد آراء"'],
+    ["src/app/(dashboard)/feedback/feedback-body.tsx", 'title="لا توجد آراء"'],
     ["src/app/(dashboard)/settings/team/team-view.tsx", 'title="لا أعضاء"'],
     ["src/app/(dashboard)/intelligence/page.tsx", 'title="لا محادثات بعد"'],
-    ["src/app/(dashboard)/knowledge/page.tsx", "title={t.knowledge.emptyTitle}"],
-    ["src/app/(dashboard)/media/page.tsx", "title={t.media.emptyTitle}"],
+    ["src/app/(dashboard)/knowledge/knowledge-body.tsx", "title={t.knowledge.emptyTitle}"],
+    ["src/app/(dashboard)/media/media-body.tsx", "title={t.media.emptyTitle}"],
   ];
 
   it.each(SITES)("%s ← %s", (file, marker) => {
