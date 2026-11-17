@@ -76,13 +76,12 @@ describe("Fluent app shell", () => {
   });
 });
 
-describe("Fluent product grid", () => {
-  it("uses a fluid grid, gray image wells and real categories only", () => {
-    const src = read("src/app/(dashboard)/products/page.tsx");
-    expect(src).toMatch(/xl:grid-cols-3/);
-    expect(src).toContain("object-contain");
-    expect(src).toContain("bg-surface-3/70");
-    // Tabs come from loaded products — no invented category list.
-    expect(src).toMatch(/new Set\(products\.map\(\(p\) => p\.category\)/);
+describe("Fluent products table", () => {
+  it("is the shared data table with real filters only (no invented categories) and thumbnails on image wells", () => {
+    const src = read("src/app/(dashboard)/products/v2/products-view.tsx");
+    expect(src).toContain("<DataTable");
+    expect(src).toContain("bg-surface-3");
+    expect(src).toContain("object-cover");
+    expect(src).not.toMatch(/new Set\(/);
   });
 });
