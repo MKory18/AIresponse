@@ -1,7 +1,7 @@
 import { findPhoneCandidates } from "@/modules/ai/privacy-gate";
 import { isGrounded } from "@/modules/intelligence/fields";
 import { matchProductByName, normalizeProductName, type NameCandidate } from "@/modules/products/name-match";
-import { DEFAULT_MAX_ORDER_QUANTITY, PROVINCES_BY_MARKET, KNOWN_PROVINCES, normalizePhone, parseQuantity } from "../primitives";
+import { DEFAULT_MAX_ORDER_QUANTITY, PROVINCES_BY_MARKET, KNOWN_PROVINCES, normalizePhone, parseQuantity, toWesternDigits } from "../primitives";
 import type { OrderFieldKey } from "../required-fields";
 import type { OrderReading } from "./schema";
 import type { ReaderMessage } from "./transcript";
@@ -158,9 +158,20 @@ function collectPhones(messages: ReaderMessage[], market: string | null): PhoneC
   return [...byKey.values()];
 }
 
+/**
+ * الأرقام الطويلة (هواتف) بتنشال قبل قراءة الكمية: «2 حبة 0964123348 درعا» رسالة عادية
+ * وكانت بتنعدّ «كمية ملتبسة» لأن فيها رقمين. مجموعات الأرقام المفصولة بفراغ/شرطة
+ * (0964 123 348) بتنضم أول.
+ */
+export function maskPhoneNumbers(text: string): string {
+  return toWesternDigits(text)
+    .replace(/(?<=\d{3})[\s\-.](?=\d{3})/g, "")
+    .replace(/\d{7,}/g, " ");
+}
+
 function quantityGrounded(q: number, customerTexts: string[], max: number): boolean {
   if (q === 1) return true;
-  return customerTexts.some((t) => parseQuantity(t, { max: Math.max(max, q) }).value === q);
+  return customerTexts.some((t) => parseQuantity(maskPhoneNumbers(t), { max: Math.max(max, q) }).value === q);
 }
 
 /** منتج وحيد ← تمام · أكتر ← ملتبس · ولا واحد ← مجهول. */

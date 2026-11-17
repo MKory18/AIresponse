@@ -55,6 +55,15 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
     log.error({ err }, "integration_deliveries_failed");
   }
 
+  // قارئ الطلب (1.4): تثبيت الطلبات اللي خلصت مهلتها — كل دورة، بلا إرسال لبرّا.
+  // مساحة بلا READER أو بدون orderAutoSeal = تخطّي (استعلام خفيف على settleAt).
+  try {
+    const { sealDueOrders } = await import("@/modules/orders/settle");
+    await sealDueOrders(db, now);
+  } catch (err) {
+    log.error({ err }, "order_seal_sweep_failed");
+  }
+
   const fiveMin = due("capacity", FIVE_MIN, t);
   const hourly = due("hourly", HOUR, t);
   if (!fiveMin && !hourly) return;

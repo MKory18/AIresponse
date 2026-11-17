@@ -368,3 +368,28 @@ describe("§16 سيناريوهات القارئ", () => {
     ).rejects.toThrow(/invalid/);
   });
 });
+
+describe("الكمية مع رقم هاتف بنفس الرسالة", () => {
+  it("«2 حبة 0964123348 درعا» = كمية 2 (الهاتف ما بيربّك الكمية)", async () => {
+    const { maskPhoneNumbers } = await import("@/modules/orders/reader/verify");
+    expect(parseQuantity(maskPhoneNumbers("2 حبة 0964123348 درعا شارع (أ)")).value).toBe(2);
+    expect(parseQuantity(maskPhoneNumbers("بدي 3 قطع رقمي 0964 123 348")).value).toBe(3);
+    expect(parseQuantity(maskPhoneNumbers("٢ حبة ٠٩٦٤١٢٣٣٤٨")).value).toBe(2);
+    // بلا هاتف: السلوك القديم بالحرف
+    expect(parseQuantity(maskPhoneNumbers("اثنين")).value).toBe(2);
+  });
+
+  it("المدقّق: كمية 2 ورقم الهاتف بنفس الرسالة ← COMPLETE بلا QUANTITY_UNGROUNDED", () => {
+    const msgs = [
+      msg("a", "CUSTOMER", "بدي ماء الكمأ", 1),
+      msg("b", "CUSTOMER", "2 حبة 0964123348 درعا شارع (أ) أكيد ثبّتوا", 2),
+    ];
+    const v = verifyReading(
+      raw({ items: [{ productRef: "ماء الكمأ", quantity: 2, evidence: ["m2"] }], customer: { evidence: { phone: ["m2"], address: ["m2"] } }, agreement: { state: "EXPLICIT", evidence: ["m2"] }, aiClaimedConfirmed: false }),
+      ctxFor({}, msgs as never)
+    );
+    expect(v.flags).not.toContain("QUANTITY_UNGROUNDED");
+    expect(v.stage).toBe("COMPLETE");
+    expect(v.items[0].quantity).toBe(2);
+  });
+});

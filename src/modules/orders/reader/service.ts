@@ -4,6 +4,7 @@ import type { AIProvider } from "@/modules/ai/provider";
 import { saveNoneReading, saveShadowReading, markReadingFailed } from "./apply";
 import { shouldReadConversation } from "./filter";
 import { getOrderMode } from "./schedule";
+import { publishRealtime } from "@/modules/realtime/events";
 import { readConversation } from "./read";
 import type { CatalogProduct } from "./verify";
 import { normalizeOrderFields, DEFAULT_ORDER_FIELDS, type OrderFieldKey } from "@/modules/orders/required-fields";
@@ -26,6 +27,8 @@ export interface ReadJobResult {
   success: boolean;
   error?: string;
   deferMs?: number;
+  /** نتيجة تطبيق القراءة (READER فقط). */
+  applied?: import("./lifecycle").ApplyOutcome | null;
   /** سبب النتيجة (للاختبارات والسجل). */
   outcome?:
     | "LEGACY_DRAFT"
@@ -165,6 +168,23 @@ export async function handleReadConversationJob(
       readThroughAt: new Date(lastCustomer.createdAt),
       now: now(),
     });
+    // READER فقط: القراءة بتتحوّل لطلب (إنشاء · تحديث · إلغاء). الظل = القراءة بس.
+    let applied: unknown = null;
+    if (mode === "READER") {
+      const { applyReading } = await import("./lifecycle");
+      const { getIntegrationSettings } = await import("@/modules/integrations/settings");
+      const settings = await getIntegrationSettings(db, workspaceId);
+      applied = await applyReading(db, {
+        workspaceId,
+        conversationId,
+        customerId: String(conversation.customerId),
+        verified: result.verified,
+        readVersion: saved.version,
+        orderSettleMinutes: settings.orderSettleMinutes,
+        now: now(),
+      });
+    }
+    void publishReadingUpdated(db, workspaceId, conversationId);
     await logUsage(db, {
       workspaceId,
       conversationId,
@@ -179,8 +199,8 @@ export async function handleReadConversationJob(
       latencyMs: result.usage.latencyMs ?? Date.now() - started,
       success: true,
     });
-    log.info({ conversationId, stage: result.verified.stage, version: saved.version, reason: decision.reason }, "reading_saved");
-    return { success: true, outcome: "READ" };
+    log.info({ conversationId, stage: result.verified.stage, version: saved.version, reason: decision.reason, applied }, "reading_saved");
+    return { success: true, outcome: "READ", applied: applied as ReadJobResult["applied"] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await markReadingFailed(db, { workspaceId, conversationId, error: message }).catch(() => undefined);
@@ -207,8 +227,8 @@ export async function callReader(db: Db, input: CallReaderInput) {
   const provider = input.deps?.provider ?? getWorkspaceProvider(settings);
   const model = resolveModel(settings, "EXTRACTION").model;
   const customer = (await (db as unknown as { customer: { findUnique: (a: unknown) => Promise<unknown> } }).customer
-    .findUnique({ where: { id: input.customerId }, select: { name: true, phone: true, email: true, address: true } })
-    .catch(() => null)) as { name?: string | null; phone?: string | null; email?: string | null; address?: string | null } | null;
+    .findUnique({ where: { id: input.customerId }, select: { name: true, phone: true, email: true, address: true, isBlacklisted: true } })
+    .catch(() => null)) as { name?: string | null; phone?: string | null; email?: string | null; address?: string | null; isBlacklisted?: boolean | null } | null;
   const required: OrderFieldKey[] = input.channel
     ? normalizeOrderFields(input.channel.orderRequiredFields)
     : [...DEFAULT_ORDER_FIELDS];
@@ -224,6 +244,7 @@ export async function callReader(db: Db, input: CallReaderInput) {
       products: input.products,
       required,
       customerName: customer?.name ?? null,
+      isBlacklisted: customer?.isBlacklisted === true,
     },
   });
   return { result, provider, model };
@@ -262,6 +283,14 @@ export async function replayConversation(db: Db, workspaceId: string, conversati
   if (!decision.read) return { decision, verified: null as null };
   const { result } = await callReader(db, { workspaceId, customerId: conversation.customerId, channel, messages, products, deps, now: new Date() });
   return { decision, verified: result.verified };
+}
+
+async function publishReadingUpdated(db: Db, workspaceId: string, conversationId: string) {
+  try {
+    await publishRealtime(db as never, { workspaceId, type: "reading.updated", conversationId });
+  } catch {
+    // best-effort
+  }
 }
 
 /** منتجات الصفحة المسموحة؛ مساحة بلا كتالوجات = كل المنتجات الفعّالة. */
