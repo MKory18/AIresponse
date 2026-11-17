@@ -23,5 +23,7 @@ export function newUiFiles(): string[] {
     relative(ROOT, f).split(sep).includes("v2")
   );
   const attention = ["attention-panel.tsx", "health-banner.tsx", "use-attention.ts"].map((n) => join(ROOT, "src", "components", "attention", n));
-  return [...kit, ...attention, ...v2, join(ROOT, "src", "app", "dev", "ui", "gallery.tsx"), join(ROOT, "src", "lib", "api-client.ts")];
+  const shell = ["app-shell-v2", "sidebar-v2", "header-v2", "bottom-bar"].map((n) => join(ROOT, "src", "components", "shell-v2", `${n}.tsx`));
+  const extra = [join(ROOT, "src", "components", "settings", "ui-version-card.tsx"), join(ROOT, "src", "lib", "attention-counts.ts"), join(ROOT, "src", "lib", "ui-version.ts")];
+  return [...kit, ...attention, ...shell, ...extra, ...v2, join(ROOT, "src", "app", "dev", "ui", "gallery.tsx"), join(ROOT, "src", "lib", "api-client.ts")];
 }
