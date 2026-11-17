@@ -40,7 +40,7 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
   const SITES: [string, string][] = [
     ["src/app/(dashboard)/customers/page.tsx", 'title="لا يوجد عملاء بعد"'],
     ["src/app/(dashboard)/handoffs/page.tsx", 'title="لا توجد تحويلات"'],
-    ["src/app/(dashboard)/catalogs/page.tsx", 'title="لا كتالوجات بعد"'],
+    ["src/app/(dashboard)/catalogs/v2/groups-table.tsx", "title={S.groupsEmpty}"],
     ["src/app/(dashboard)/feedback/feedback-body.tsx", 'title="لا توجد آراء"'],
     ["src/app/(dashboard)/settings/team/team-view.tsx", 'title="لا أعضاء"'],
     ["src/app/(dashboard)/intelligence/page.tsx", 'title="لا محادثات بعد"'],
