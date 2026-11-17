@@ -143,6 +143,7 @@ export const NAV_GROUPS_V2: NavGroup[] = [
       { href: "/knowledge", label: "المعلومات", permission: "knowledge.read" },
       { href: "/media", label: "الوسائط", permission: "media.read" },
       { href: "/feedback", label: "آراء العملاء", permission: "feedback.read" },
+      { href: "/assistant/order-rules", label: "قواعد الطلب", permission: "ai.configure" },
       { href: "/ai/playground", label: "التجربة", permission: "ai.configure" },
       { href: "/settings/ai", label: "التشغيل", permission: "ai.configure" },
     ],
