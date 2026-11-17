@@ -24,6 +24,11 @@ export async function getActorRole(
   return row.role ?? null;
 }
 
+/** هل هالدور «مالك»؟ مكان واحد لفحص الرتبة (04-PERMISSIONS §6: ولا `role ===` برّا rbac/ و members/). */
+export function isOwnerRole(role: string | null | undefined): boolean {
+  return role === "OWNER";
+}
+
 export interface OwnerGuardOptions {
   code?: string;
   message?: string;

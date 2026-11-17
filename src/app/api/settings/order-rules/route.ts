@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
 import { getIntegrationSettings } from "@/modules/integrations/settings";
+import { isOwnerRole } from "@/modules/rbac/owner-guard";
 import { changeOrderRules, shadowReadiness } from "@/modules/orders/reader/cutover";
 
 /**
@@ -20,7 +21,7 @@ export const GET = createHandler({ permission: "ai.configure" }, async ({ auth }
       orderConfirmMessage: settings.orderConfirmMessage,
     },
     readiness,
-    canChangeMode: auth!.role === "OWNER",
+    canChangeMode: isOwnerRole(auth!.role),
   });
 });
 

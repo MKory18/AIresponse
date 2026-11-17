@@ -19,7 +19,9 @@ export const POST = createHandler(
         discountPercent: z.number().min(0).max(90).optional(),
       })
       .strict(),
-    permission: "conversations.read",
+    // 4.1: بيكلّف نداء ذكاء: لازم صلاحية الرد + حد سرعة (كان conversations.read بلا حد).
+    permission: "conversations.reply",
+    rateLimit: { limit: 12, windowMs: 60_000 },
   },
   async ({ auth, body, params }) => {
     const { id } = params as Params;

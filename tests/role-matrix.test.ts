@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CAPABILITIES, ROLE_BLURB, ROLE_OPTIONS, RoleBlurbs, RoleMatrix } from "@/components/role-matrix";
+import { CAPABILITIES, ROLE_BLURB, ROLE_OPTIONS, RoleBlurbs, RoleMatrix, roleCan } from "@/components/role-matrix";
 import { ROLE_PERMISSIONS, hasPermission, isPermission } from "@/modules/rbac/permissions";
 
 /**
@@ -36,18 +36,18 @@ describe("الأدوار", () => {
 });
 
 describe("الصفوف", () => {
-  it("كل صف بصلاحية صحيحة، وبلا تكرار (صلاحية ولا اسم)", () => {
-    for (const c of CAPABILITIES) expect(isPermission(c.perm), c.perm).toBe(true);
-    expect(new Set(CAPABILITIES.map((c) => c.perm)).size).toBe(CAPABILITIES.length);
+  it("كل صف من مجالات الصلاحيات (04 §4.3): رموز صحيحة، وبلا تكرار", () => {
+    for (const c of CAPABILITIES) for (const p of c.perms) expect(isPermission(p), p).toBe(true);
+    expect(new Set(CAPABILITIES.map((c) => c.id)).size).toBe(CAPABILITIES.length);
     expect(new Set(CAPABILITIES.map((c) => c.label)).size).toBe(CAPABILITIES.length);
   });
 
-  it("المالك والمدير العام: كل الصفوف", () => {
-    for (const c of CAPABILITIES) {
-      expect(can("OWNER", c.perm), c.perm).toBe(true);
-      expect(can("ADMIN", c.perm), c.perm).toBe(true);
-    }
-    expect(new Set(ROLE_PERMISSIONS.ADMIN)).toEqual(new Set(ROLE_PERMISSIONS.OWNER));
+  it("المالك: كل الصفوف. الشريك الإداري: كل الصفوف ما عدا «يحذف الطلبات نهائيًا» و«إدارة المالكين»", () => {
+    for (const c of CAPABILITIES) expect(roleCan("OWNER", c), c.id).toBe(true);
+    const partnerNo = CAPABILITIES.filter((c) => !roleCan("ADMIN", c)).map((c) => c.id).sort();
+    expect(partnerNo).toEqual(["orders.delete", "settings.owners"]);
+    const gap = ROLE_PERMISSIONS.OWNER!.filter((p) => !ROLE_PERMISSIONS.ADMIN!.includes(p)).sort();
+    expect(gap).toEqual(["orders.delete", "team.owners"]);
   });
 });
 
@@ -87,7 +87,7 @@ describe("الجدول (العرض)", () => {
     const yes = (out.match(/data-can="yes"/g) ?? []).length;
     const no = (out.match(/data-can="no"/g) ?? []).length;
     const expectedYes = CAPABILITIES.reduce(
-      (n, c) => n + ROLE_OPTIONS.filter((r) => ROLE_PERMISSIONS[r.value]!.includes(c.perm)).length,
+      (n, c) => n + ROLE_OPTIONS.filter((r) => c.perms.every((p) => ROLE_PERMISSIONS[r.value]!.includes(p))).length,
       0
     );
     expect(yes).toBe(expectedYes);

@@ -17,6 +17,6 @@ export const GET = createHandler(
   async ({ auth, query }) => {
     const result = await listOrders(prisma, { workspaceId: auth!.workspaceId, ...query });
     // حذف الطلبات للمالك فقط — الواجهة تخفي إجراء الحذف عن غيره.
-    return ok({ ...result, canDelete: auth!.role === "OWNER" });
+    return ok({ ...result, canDelete: auth!.can("orders.delete") });
   }
 );

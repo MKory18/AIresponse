@@ -1,6 +1,7 @@
 import { Check, Minus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { hasPermission, type Permission } from "@/modules/rbac/permissions";
+import { areaLevels } from "@/modules/rbac/areas";
 
 /**
  * «شو بيقدر كل دور؟» — جدول للقراءة بصفحة الفريق.
@@ -15,7 +16,7 @@ import { hasPermission, type Permission } from "@/modules/rbac/permissions";
 /** الأدوار المتاحة للاختيار — مصدر واحد للأسماء (القوائم + الجدول). SUPER_ADMIN داخلي. */
 export const ROLE_OPTIONS = [
   { value: "OWNER", label: "مالك" },
-  { value: "ADMIN", label: "مدير عام" },
+  { value: "ADMIN", label: "شريك إداري" },
   { value: "MANAGER", label: "مشرف" },
   { value: "SALES_AGENT", label: "موظف مبيعات" },
   { value: "SUPPORT_AGENT", label: "موظف دعم" },
@@ -24,39 +25,29 @@ export const ROLE_OPTIONS = [
 
 /** سطر لكل دور بلغة المالك — بيظهر تحت قائمة الدور وفوق الجدول. */
 export const ROLE_BLURB: Record<string, string> = {
-  OWNER: "مالك — صاحب الحساب، كل شي بما فيه الفريق والإعدادات.",
-  ADMIN: "مدير عام — نفس صلاحيات المالك.",
-  MANAGER: "مشرف — بيدير الشغل اليومي وبيعتمد الخصم والحملات، بس ما بيدير الفريق ولا مساحة العمل.",
-  SALES_AGENT: "موظف مبيعات — بيرد على العملاء وبيعدّل بياناتهم وبيكتب الطلبات وبيستلم التحويلات؛ الباقي قراءة بس.",
-  SUPPORT_AGENT: "موظف دعم — بيرد على العملاء وبيعدّل بياناتهم وبيستلم التحويلات وبيشوف الطلبات بدون تعديل؛ الباقي قراءة بس.",
+  OWNER: "مالك — كل شي، وهو الوحيد اللي بيدير المالكين وبيحذف الطلبات نهائيًا.",
+  ADMIN: "شريك إداري — كل شي ما عدا إدارة المالكين والحذف النهائي للطلبات.",
+  MANAGER: "مشرف — بيدير الشغل اليومي والوكيل الذكي والمتجر وبيعتمد الخصم والحملات، بلا الفريق ولا الربط ولا مساحة العمل.",
+  SALES_AGENT: "موظف مبيعات — بيرد وبيستلم المحادثات وبيثبّت الطلبات وبيعدّلها وبيلغيها؛ الباقي قراءة بس.",
+  SUPPORT_AGENT: "موظف دعم — بيرد وبيستلم المحادثات؛ بيشوف الطلبات بلا تعديل. الباقي قراءة بس.",
   VIEWER: "مشاهد — بيشوف بس، ما بيرد ولا بيعدّل.",
 };
 
-/** الصفوف: قدرة بلغة عادية ← الصلاحية الي بتحدّدها. مرتّبة من الشغل اليومي للإدارة. */
-export const CAPABILITIES: ReadonlyArray<{ label: string; perm: Permission }> = [
-  { label: "يشوف المحادثات والعملاء والطلبات", perm: "conversations.read" },
-  { label: "يرد على العملاء (يرسل رسائل)", perm: "channels.send_human" },
-  { label: "يعدّل بيانات العملاء", perm: "customers.write" },
-  { label: "يكتب الطلبات ويعدّلها", perm: "orders.write" },
-  { label: "يعطي خصم ضمن السقف", perm: "orders.discount" },
-  { label: "يعتمد خصم فوق السقف", perm: "orders.discount.approve" },
-  { label: "يشوف سعر الجملة", perm: "products.wholesale" },
-  { label: "يستلم التحويلات من الذكاء ويحلّها", perm: "handoffs.claim" },
-  { label: "يوزّع المحادثات على الموظفين", perm: "conversations.assign" },
-  { label: "يحذف المحادثات", perm: "conversations.delete" },
-  { label: "يعدّل المنتجات والكتالوجات", perm: "products.write" },
-  { label: "يعدّل شخصية الوكيل والمعرفة", perm: "personas.write" },
-  { label: "يضبط الذكاء الاصطناعي", perm: "ai.configure" },
-  { label: "يربط القنوات", perm: "channels.connect" },
-  { label: "يشغّل الأتمتة والمتابعات", perm: "automation.write" },
-  { label: "ينشئ الحملات", perm: "campaigns.write" },
-  { label: "يعتمد الحملات وينشرها", perm: "campaigns.approve" },
-  { label: "يشوف استهلاك الذكاء", perm: "usage.read" },
-  { label: "يشوف أداء الموظفين", perm: "analytics.agents" },
-  { label: "يغيّر الإعدادات", perm: "settings.manage" },
-  { label: "يدير الفريق وصلاحياتهم", perm: "users.manage" },
-  { label: "يدير مساحة العمل", perm: "workspace.manage" },
-];
+/**
+ * الصفوف: مستوى من كل مجال (`PERMISSION_AREAS` — 04-PERMISSIONS §4.3) بدل القائمة اليدوية.
+ * الدور «يقدر» بالصف لو ملك **كل** رموز المستوى. قواعد «مالك بس» صارت رموز فبتظهر صح.
+ */
+export const CAPABILITIES: ReadonlyArray<{ id: string; label: string; perms: readonly Permission[]; perm: Permission }> = areaLevels().map((l) => ({
+  id: l.id,
+  label: l.label,
+  perms: l.level.perms,
+  perm: l.level.perms[0]!,
+}));
+
+/** هل الدور بيملك كل رموز الصف؟ (مصدر واحد للجدول والاختبارات) */
+export function roleCan(role: string, cap: { perms: readonly Permission[] }, memberPermissions: string[] = []): boolean {
+  return cap.perms.every((p) => hasPermission(role, memberPermissions, p));
+}
 
 /** الأدوار بسطر لكل واحد — فوق الجدول. */
 export function RoleBlurbs({ className }: { className?: string }) {
@@ -95,12 +86,12 @@ export function RoleMatrix({ className }: { className?: string }) {
         </thead>
         <tbody>
           {CAPABILITIES.map((c) => (
-            <tr key={c.perm}>
+            <tr key={c.id}>
               <th scope="row" className="sticky start-0 bg-surface-2 px-4 py-3 text-start text-[13px] font-medium text-ink">
                 {c.label}
               </th>
               {ROLE_OPTIONS.map((r) => {
-                const can = hasPermission(r.value, [], c.perm);
+                const can = roleCan(r.value, c);
                 return (
                   <td key={r.value} data-can={can ? "yes" : "no"} className="text-center">
                     {can ? (
