@@ -174,7 +174,6 @@ describe("P12 × main — ولا اسم مزار داخلي بأي نص مرئي
     "src/app/(dashboard)/settings/page.tsx",
     "src/app/(dashboard)/settings/ai/page.tsx",
     "src/components/products/compliance-card.tsx",
-    "src/components/inbox/marketing-card.tsx",
   ];
   /** النص المرئي تقريبًا = المصدر بلا تعليقات وبلا المعرّفات التقنية المسموحة. */
   const visible = (src: string) =>

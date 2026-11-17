@@ -68,12 +68,11 @@ describe("القوائم", () => {
 
 describe("صفحة /dashboard", () => {
   const read = (p: string) => readFileSync(p, "utf8");
-  it("بتختار النسخة من مفتاح الواجهة، واللوحة الحالية محفوظة (v1 الافتراضي)", () => {
+  it("الصفحة بتعرض «اليوم» بس (اللوحة القديمة انحذفت بـ3.8)", () => {
     const p = read("src/app/(dashboard)/dashboard/page.tsx");
-    expect(p).toContain("resolveUiVersion");
     expect(p).toContain("<TodayView />");
-    expect(p).toContain("<LegacyDashboard />");
-    expect(read("src/app/(dashboard)/dashboard/legacy-dashboard.tsx")).toContain("data-hero");
+    expect(p).not.toContain("resolveUiVersion");
+    expect(p).not.toContain("LegacyDashboard");
   });
 
   it("الأزرار والأقسام من القاموس: ولا كلمة ممنوعة بملفات «اليوم»، ولا ملف فوق 300 سطر", () => {

@@ -5,7 +5,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   NAV_GROUPS,
-  NAV_GROUPS_V2,
   NAV_REDIRECTS,
   groupLanding,
   pageForPath,
@@ -61,9 +60,9 @@ const OLD_NAV_HREFS = [
 ];
 
 describe("هيكل القائمة", () => {
-  it("٦ مجموعات بمفاتيح فريدة", () => {
-    expect(NAV_GROUPS).toHaveLength(6);
-    expect(new Set(NAV_GROUPS.map((g) => g.key)).size).toBe(6);
+  it("٧ مجموعات بمفاتيح فريدة", () => {
+    expect(NAV_GROUPS).toHaveLength(7);
+    expect(new Set(NAV_GROUPS.map((g) => g.key)).size).toBe(7);
   });
 
   it("ولا صفحة بتتكرر بأكتر من مجموعة", () => {
@@ -72,8 +71,7 @@ describe("هيكل القائمة", () => {
   });
 
   it("ولا صفحة ضايعة: كل صفحة بلوحة التحكم إلها مجموعة", () => {
-    // 2.3ب: صفحة جديدة بتنضاف للهيكل الجديد (NAV_GROUPS_V2) بحزمتها؛ المهم ما تكون بلا مجموعة بأي هيكل.
-    const orphans = dashboardRoutes().filter((r) => !pageForPath(r, NAV_GROUPS) && !pageForPath(r, NAV_GROUPS_V2));
+    const orphans = dashboardRoutes().filter((r) => !pageForPath(r, NAV_GROUPS));
     expect(orphans, `صفحات بلا مجموعة: ${orphans.join(" ")}`).toEqual([]);
   });
 
@@ -96,8 +94,8 @@ describe("هيكل القائمة", () => {
     }
   });
 
-  it("ولا تكرار: بعد تركيز النظام على الردود والطلبات، القائمة ١٩ تبويب (مع توكنات الأنظمة)", () => {
-    expect(NAV_GROUPS.flatMap((g) => g.pages)).toHaveLength(19);
+  it("ولا تكرار: القائمة ٢٢ صفحة (مع التوصيل وقواعد الطلب والربط وتوكنات الأنظمة)", () => {
+    expect(NAV_GROUPS.flatMap((g) => g.pages)).toHaveLength(22);
   });
 
   it("كل صفحة بالقائمة موجودة فعلًا (ولا تبويب بيودّي لـ ٤٠٤)", () => {
@@ -134,7 +132,7 @@ describe("مطابقة المسار بالصفحة", () => {
 
   it("/settings/ai بتتبع «التشغيل» بمجموعة الذكاء، والرابط المدموج بيتبع مكانه الجديد", () => {
     expect(hit("/settings/ai")?.page.label).toBe("التشغيل");
-    expect(hit("/settings/ai")?.group.key).toBe("ai");
+    expect(hit("/settings/ai")?.group.key).toBe("agent");
     expect(hit("/settings")?.page.href).toBe("/settings/account");
     expect(hit("/ai/studio")?.page.href).toBe("/settings/ai");
     expect(hit("/workflows")?.page.href).toBe("/dashboard");
@@ -148,14 +146,14 @@ describe("مطابقة المسار بالصفحة", () => {
   });
 
   it("صفحات التفاصيل بتتبع صفحة القائمة", () => {
-    expect(hit("/orders/abc123")?.group.key).toBe("sales");
+    expect(hit("/orders/abc123")?.group.key).toBe("orders");
     expect(hit("/products/p1")?.page.label).toBe("المنتجات");
-    expect(hit("/catalogs/c9")?.page.label).toBe("الكتالوجات");
+    expect(hit("/catalogs/c9")?.page.label).toBe("مجموعات الصفحات");
   });
 
   it("الرابط القديم /order-warehouse بيتبع مجموعة الطلبات", () => {
     expect(hit("/order-warehouse")?.page.href).toBe("/orders");
-    expect(hit("/order-warehouse")?.group.key).toBe("sales");
+    expect(hit("/order-warehouse")?.group.key).toBe("orders");
   });
 
   it("بادئة مش مطابقة بتنرفض (/ordersX مش /orders)", () => {
@@ -183,7 +181,7 @@ describe("الصلاحيات بالقائمة", () => {
       "/conversations",
       "/intelligence",
     ]);
-    for (const hidden of ["sales", "ai", "automation", "reports", "home"]) expect(keys).not.toContain(hidden);
+    for (const hidden of ["orders", "store", "agent", "reports", "today"]) expect(keys).not.toContain(hidden);
   });
 
   it("«حسابي» ظاهرة لكل عضو حتى بلا ولا صلاحية", () => {
@@ -221,7 +219,7 @@ describe("شريط التبويبات", () => {
 
   it("بيعرض كل صفحات المجموعة بترتيبها", () => {
     const html = render("/conversations");
-    const labels = ["الوارد", "التحويلات", "العملاء", "مختبر التجميع"];
+    const labels = ["المحادثات", "يحتاجك", "العملاء", "مختبر التجميع"];
     let at = -1;
     for (const l of labels) {
       const i = html.indexOf(l, at + 1);
