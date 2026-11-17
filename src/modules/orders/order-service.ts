@@ -418,31 +418,7 @@ export async function createOrderFromDraft(
     );
   }
 
-  // ترحيل الطلب لتلجرام — مرة واحدة عند إنشاء الطلب الرسمي (المسودة ما بتترحّل).
-  // المصدر الأول: إعدادات المساحة (نفس اللي تنحفظ من الواجهة)، وبعدها متغيرات البيئة.
-  try {
-    await deliverOrderTelegram(db, { workspaceId: ctx.workspaceId, userId: ctx.userId, orderId: order.id });
-  } catch (err) {
-    // الإشعار ما بيوقف إنشاء الطلب؛ الفشل بينحفظ كمهمة إعادة محاولة.
-    await enqueueJob(db, {
-      workspaceId: ctx.workspaceId,
-      type: "notify_order_telegram",
-      payload: { orderId: order.id, userId: ctx.userId },
-      runAfter: new Date(Date.now() + 30_000),
-      idempotencyKey: `tg-order:${ctx.workspaceId}:${order.id}`,
-      maxAttempts: 8,
-    }).catch(() => undefined);
-    log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_telegram_failed");
-  }
-
-  // ربط الـ OMS: الطلب المؤكد بينزل بالـ OMS كمهمة مستقلة (إذا الإرسال
-  // التلقائي مفعّل) — فشلها أو انقطاع الـ OMS ما بيوقف إنشاء الطلب أبدًا.
-  try {
-    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
-    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, order.id);
-  } catch (err) {
-    log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_oms_enqueue_failed");
-  }
+  await runOrderCreatedHooks(db, ctx, order.id);
 
   return {
     orderId: order.id,
@@ -453,6 +429,38 @@ export async function createOrderFromDraft(
     created: true,
     rules,
   };
+}
+
+/**
+ * ما بعد إنشاء الطلب الرسمي (مشترك بين طلب المسودة والطلب اليدوي): إشعار تلجرام وترحيل الـ OMS التلقائي.
+ * الفشل بالاتنين ما بيوقف الطلب أبدًا.
+ */
+export async function runOrderCreatedHooks(db: Db, ctx: ActorContext, orderId: string): Promise<void> {
+  // ترحيل الطلب لتلجرام — مرة واحدة عند إنشاء الطلب الرسمي (المسودة ما بتترحّل).
+  // المصدر الأول: إعدادات المساحة (نفس اللي تنحفظ من الواجهة)، وبعدها متغيرات البيئة.
+  try {
+    await deliverOrderTelegram(db, { workspaceId: ctx.workspaceId, userId: ctx.userId, orderId: orderId });
+  } catch (err) {
+    // الإشعار ما بيوقف إنشاء الطلب؛ الفشل بينحفظ كمهمة إعادة محاولة.
+    await enqueueJob(db, {
+      workspaceId: ctx.workspaceId,
+      type: "notify_order_telegram",
+      payload: { orderId: orderId, userId: ctx.userId },
+      runAfter: new Date(Date.now() + 30_000),
+      idempotencyKey: `tg-order:${ctx.workspaceId}:${orderId}`,
+      maxAttempts: 8,
+    }).catch(() => undefined);
+    log.warn({ orderId: orderId, error: err instanceof Error ? err.message : String(err) }, "order_telegram_failed");
+  }
+
+  // ربط الـ OMS: الطلب المؤكد بينزل بالـ OMS كمهمة مستقلة (إذا الإرسال
+  // التلقائي مفعّل) — فشلها أو انقطاع الـ OMS ما بيوقف إنشاء الطلب أبدًا.
+  try {
+    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
+    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, orderId);
+  } catch (err) {
+    log.warn({ orderId: orderId, error: err instanceof Error ? err.message : String(err) }, "order_oms_enqueue_failed");
+  }
 }
 
 /** Validated status transition â€” the only way an order status changes. */

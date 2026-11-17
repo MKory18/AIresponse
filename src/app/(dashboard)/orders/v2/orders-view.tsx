@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api-client";
 import { ORDER_TABS, orderStatusLabel, type OrderTab } from "@/lib/order-status";
@@ -13,6 +13,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { DateTime, Money } from "@/components/ui/formatted";
 import { StatusChip, type Tone } from "@/components/ui/status-chip";
 import { Countdown } from "@/components/ui/countdown";
+import { Can } from "@/components/auth/permissions";
+import { ManualOrderDrawer } from "./manual-order-drawer";
 import { OrderDrawer } from "./order-drawer";
 import { ORDERS_STRINGS as S } from "./strings";
 import { useOrders, type OrderRow } from "./use-orders";
@@ -60,6 +62,7 @@ export function OrdersView() {
   const params = useSearchParams();
   const [tab, setTab] = useState<OrderTab>("all");
   const [q, setQ] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
   const { rows, total, counts, loading, loadingMore, error, hasMore, loadMore, reload } = useOrders(tab, q);
 
   const openId = params.get("order");
@@ -110,7 +113,8 @@ export function OrdersView() {
         ))}
       </div>
 
-      <div className="relative max-w-md">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="relative w-full max-w-md">
         <Search size={16} aria-hidden className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
         <input
           type="search"
@@ -120,6 +124,12 @@ export function OrdersView() {
           aria-label={S.search}
           className="h-10 w-full rounded-control border border-border-strong bg-surface-2 ps-9 pe-3 text-sm text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:ring-1 focus:ring-focus"
         />
+      </div>
+      <Can permission="orders.write">
+        <Button onClick={() => setManualOpen(true)}>
+          <Plus size={16} aria-hidden /> {S.manualButton}
+        </Button>
+      </Can>
       </div>
 
       {error && (
@@ -147,6 +157,7 @@ export function OrdersView() {
       />
 
       <OrderDrawer order={open} onClose={() => setOpen(null)} onChanged={() => void reload()} />
+      <ManualOrderDrawer open={manualOpen} onClose={() => setManualOpen(false)} onCreated={(id) => { void reload(); setOpen(id); }} />
     </div>
   );
 }
