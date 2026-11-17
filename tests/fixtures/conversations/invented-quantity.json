@@ -1,0 +1,79 @@
+{
+  "note": "محادثة مرجعية مكتوبة (0.4) — أرقام وأسماء وهمية.",
+  "page": "كهربا",
+  "market": "SY",
+  "messages": [
+    {
+      "id": "msg-1",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "بدي كريم حرير",
+      "createdAt": "2026-11-10T10:00:00.000Z"
+    },
+    {
+      "id": "msg-2",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "رقمك وعنوانك؟",
+      "createdAt": "2026-11-10T10:00:45.000Z"
+    },
+    {
+      "id": "msg-3",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "0933111222 حمص الوعر",
+      "createdAt": "2026-11-10T10:01:30.000Z"
+    },
+    {
+      "id": "msg-4",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "اي",
+      "createdAt": "2026-11-10T10:02:15.000Z"
+    }
+  ],
+  "modelOutput": {
+    "intent": "ORDERING",
+    "relation": "NEW",
+    "items": [
+      {
+        "productRef": "كريم حرير",
+        "quantity": 5,
+        "evidence": [
+          "m1"
+        ]
+      }
+    ],
+    "customer": {
+      "name": null,
+      "altPhone": null,
+      "phone": "0933111222",
+      "city": "حمص",
+      "address": "الوعر",
+      "evidence": {
+        "phone": [
+          "m3"
+        ],
+        "address": [
+          "m3"
+        ]
+      }
+    },
+    "agreement": {
+      "state": "EXPLICIT",
+      "evidence": [
+        "m4"
+      ]
+    },
+    "cancelRequested": false,
+    "notes": null,
+    "openQuestions": [],
+    "aiClaimedConfirmed": false,
+    "needsHuman": {
+      "value": false,
+      "reason": null
+    },
+    "memories": [],
+    "confidence": 0.9
+  }
+}
