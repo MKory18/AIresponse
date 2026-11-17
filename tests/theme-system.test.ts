@@ -297,11 +297,30 @@ describe.each(COMBOS)("تباين الثيم «%s» (داكن: %s)", (key, dark)
     }
   });
 
-  it("النص الأبيض على تعبئة الأزرار ≥ 4.5:1", () => {
-    expect(contrast(WHITE, s("primary")), "white/primary").toBeGreaterThanOrEqual(4.5);
-    expect(contrast(WHITE, s("primary-hover")), "white/primary-hover").toBeGreaterThanOrEqual(4.5);
+  it("النص فوق تعبئة الأزرار (`--on-primary`) ≥ 4.5:1", () => {
+    // 2.1: الأدوار الجديدة بكل ثيم — النص فوق التعبئة من `--on-primary` (بالداكن مش دايمًا أبيض).
+    const onFill = rgb(p["on-primary"]!);
+    expect(contrast(onFill, s("primary")), "on-primary/primary").toBeGreaterThanOrEqual(4.5);
+    expect(contrast(onFill, s("primary-hover")), "on-primary/primary-hover").toBeGreaterThanOrEqual(4.5);
+    // الأصناف القديمة (`bg-brand-500 text-white`) بتضل بنص أبيض: سلّم brand لازم يضل صالح لها.
     expect(contrast(WHITE, s("brand-500")), "white/brand-500").toBeGreaterThanOrEqual(4.5);
     expect(contrast(WHITE, s("brand-600")), "white/brand-600").toBeGreaterThanOrEqual(4.5);
+    // الثيمات القديمة: الزر الأساسي لسا بنص أبيض بالحرف.
+    if (key !== "zaki") {
+      expect(contrast(WHITE, s("primary")), "white/primary").toBeGreaterThanOrEqual(4.5);
+      expect(contrast(WHITE, s("primary-hover")), "white/primary-hover").toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("أدوار الواجهة الجديدة معرّفة بكل ثيم والحالات مقروءة على خلفياتها الخفيفة", () => {
+    for (const v of ["on-primary", "border-strong", "success-soft", "warning-soft", "danger-soft", "info-soft", "sidebar", "sidebar-fg", "focus"]) {
+      expect(p[v], `--${v} ناقص`).toBeTruthy();
+    }
+    for (const st of ["success", "warning", "danger", "info"]) {
+      expect(contrast(s(st), s(`${st}-soft`)), `${st} على ${st}-soft`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(contrast(s("sidebar-fg"), s("sidebar")), "sidebar-fg/sidebar").toBeGreaterThanOrEqual(4.5);
+    expect(contrast(s("focus"), s("surface-2")), "focus/surface-2").toBeGreaterThanOrEqual(3);
   });
 
   it("لون التمييز النصي ≥ 4.5:1 وحلقة التركيز ≥ 3:1", () => {

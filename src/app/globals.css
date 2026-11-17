@@ -25,6 +25,15 @@
   --danger: 196 43 43;
   --info: 0 95 184;
   --line: 224 224 224;
+  --on-primary: 255 255 255;
+  --border-strong: 160 160 160;
+  --success-soft: 233 245 233;
+  --warning-soft: 250 240 220;
+  --danger-soft: 250 232 232;
+  --info-soft: 235 243 252;
+  --sidebar: 16 42 67;
+  --sidebar-fg: 190 206 222;
+  --focus: 15 108 189;
   --surface-1: 243 243 243;
   --surface-2: 255 255 255;
   --surface-3: 247 247 247;
@@ -95,6 +104,15 @@
   --danger: 242 128 128;
   --info: 98 171 245;
   --line: 61 61 61;
+  --on-primary: 255 255 255;
+  --border-strong: 110 110 110;
+  --success-soft: 20 44 24;
+  --warning-soft: 50 38 12;
+  --danger-soft: 56 24 24;
+  --info-soft: 15 44 71;
+  --sidebar: 24 24 24;
+  --sidebar-fg: 209 209 209;
+  --focus: 71 158 245;
   --surface-1: 31 31 31;
   --surface-2: 39 39 39;
   --surface-3: 45 45 45;
@@ -154,6 +172,15 @@ h1,
   --danger: 176 32 32;
   --info: 0 95 184;
   --line: 222 211 181;
+  --on-primary: 255 255 255;
+  --border-strong: 176 163 130;
+  --success-soft: 233 245 233;
+  --warning-soft: 250 240 220;
+  --danger-soft: 250 232 232;
+  --info-soft: 224 238 228;
+  --sidebar: 11 61 46;
+  --sidebar-fg: 232 224 200;
+  --focus: 15 81 50;
   --surface-1: 246 240 225;
   --surface-2: 255 252 245;
   --surface-3: 238 231 213;
@@ -208,6 +235,15 @@ h1,
   --danger: 242 128 128;
   --info: 98 171 245;
   --line: 44 66 100;
+  --on-primary: 255 255 255;
+  --border-strong: 86 112 150;
+  --success-soft: 20 44 40;
+  --warning-soft: 50 38 12;
+  --danger-soft: 56 24 32;
+  --info-soft: 16 54 56;
+  --sidebar: 6 33 27;
+  --sidebar-fg: 232 224 200;
+  --focus: 217 184 108;
   --surface-1: 11 22 38;
   --surface-2: 17 33 58;
   --surface-3: 24 44 75;
@@ -383,6 +419,133 @@ h1,
   filter: hue-rotate(-48deg) saturate(0.9);
 }
 
+
+/* ═══════════════════════════ ثيم «zaki» (2.1) ═══════════════════════════
+   هوية المنظومة (نفس عيلة الـ OMS): تيل غامق على أبيض بالفاتح، وسماوي على كحلي بالداكن.
+   الأدوار الجديدة (`--on-primary` · `--border-strong` · `*-soft` · `--sidebar*` · `--focus`) بكل الثيمات.
+   مبدئيًا خيار بمنتقي «حسابي» — بيصير الافتراضي مع الواجهة الجديدة (2.3). التباين مفحوص بـ tests/theme-system.test.ts. */
+[data-theme="zaki"]:not(.dark) {
+  color-scheme: light;
+  --background: 255 255 255;
+  --surface: 244 248 250;
+  --surface-glass: 244 248 250;
+  --surface-elevated: 244 248 250;
+  --surface-muted: 233 240 243;
+  --border: 213 225 230;
+  --border-glass: 213 225 230;
+  --text: 12 50 82;
+  --text-muted: 74 98 114;
+  --text-subtle: 95 108 117;
+  --brand: 26 99 130;
+  --brand-strong: 23 96 121;
+  --primary: 26 99 130;
+  --primary-hover: 23 96 121;
+  --primary-soft: 233 241 244;
+  --primary-fg: 26 99 130;
+  --success: 30 122 58;
+  --warning: 154 91 18;
+  --danger: 180 35 24;
+  --info: 26 99 130;
+  --line: 213 225 230;
+  --surface-1: 255 255 255;
+  --surface-2: 244 248 250;
+  --surface-3: 233 240 243;
+  --surface-hover: 220 231 236;
+  --accent: 54 181 204;
+  --accent-fg: 26 99 130;
+  --showcase: 10 26 46;
+  --shadow-card: 0 1px 2px rgb(12 50 82 / 0.06), 0 0 2px rgb(12 50 82 / 0.06);
+  --shadow-pop: 0 8px 20px rgb(12 50 82 / 0.16);
+  --glass-shadow: 0 1px 2px rgb(12 50 82 / 0.06), 0 0 2px rgb(12 50 82 / 0.06);
+  --brand-50: 233 241 244;
+  --brand-100: 205 228 236;
+  --brand-200: 150 210 224;
+  --brand-300: 96 190 210;
+  --brand-400: 54 160 190;
+  --brand-500: 26 99 130;
+  --brand-600: 23 85 112;
+  --brand-700: 18 70 94;
+  --brand-800: 14 55 75;
+  --brand-900: 10 40 56;
+  --brand-950: 6 26 38;
+  --logo-from: 54 181 204;
+  --logo-via: 26 99 130;
+  --logo-to: 10 26 46;
+  --logo-spark: 186 230 253;
+  --logo-glow: 54 181 204;
+  --logo-bubble: 255 255 255;
+  --on-primary: 255 255 255;
+  --border-strong: 169 186 197;
+  --success-soft: 233 242 240;
+  --warning-soft: 247 240 228;
+  --danger-soft: 247 236 234;
+  --info-soft: 233 241 244;
+  --sidebar: 10 26 46;
+  --sidebar-fg: 159 182 194;
+  --focus: 26 99 130;
+}
+
+[data-theme="zaki"].dark {
+  color-scheme: dark;
+  --background: 5 15 31;
+  --surface: 10 26 46;
+  --surface-glass: 10 26 46;
+  --surface-elevated: 15 36 56;
+  --surface-muted: 15 36 56;
+  --border: 28 58 82;
+  --border-glass: 28 58 82;
+  --text: 230 241 244;
+  --text-muted: 159 182 194;
+  --text-subtle: 135 154 168;
+  --brand: 54 181 204;
+  --brand-strong: 96 218 219;
+  --primary: 54 181 204;
+  --primary-hover: 96 218 219;
+  --primary-soft: 14 42 62;
+  --primary-fg: 54 181 204;
+  --success: 79 184 101;
+  --warning: 232 151 58;
+  --danger: 230 94 82;
+  --info: 54 181 204;
+  --line: 28 58 82;
+  --surface-1: 5 15 31;
+  --surface-2: 10 26 46;
+  --surface-3: 15 36 56;
+  --surface-hover: 22 48 74;
+  --accent: 54 181 204;
+  --accent-fg: 54 181 204;
+  --showcase: 10 26 46;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 2px rgb(0 0 0 / 0.45);
+  --shadow-pop: 0 8px 20px rgb(0 0 0 / 0.5);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 2px rgb(0 0 0 / 0.45);
+  --brand-50: 233 241 244;
+  --brand-100: 205 228 236;
+  --brand-200: 150 210 224;
+  --brand-300: 96 190 210;
+  --brand-400: 54 160 190;
+  --brand-500: 26 99 130;
+  --brand-600: 23 85 112;
+  --brand-700: 18 70 94;
+  --brand-800: 14 55 75;
+  --brand-900: 10 40 56;
+  --brand-950: 6 26 38;
+  --logo-from: 54 181 204;
+  --logo-via: 26 99 130;
+  --logo-to: 10 26 46;
+  --logo-spark: 186 230 253;
+  --logo-glow: 54 181 204;
+  --logo-bubble: 255 255 255;
+  --on-primary: 4 24 43;
+  --border-strong: 72 98 118;
+  --success-soft: 17 42 52;
+  --warning-soft: 32 38 47;
+  --danger-soft: 32 33 50;
+  --info-soft: 14 42 62;
+  --sidebar: 10 26 46;
+  --sidebar-fg: 159 182 194;
+  --focus: 96 218 219;
+}
+
 /* ═══════════════════════ ثيم «المدينة الليلية» ═══════════════════════
    غروب نيون على مدينة ساحلية — ليلي دائمًا (بيفرض .dark) فكتلة وحدة بدل اتنتين.
    بنفسجي غامق للأسطح، ووردي للتعبئة، وسماوي للتمييز والتركيز، وأصفر/برتقالي للشمس.
@@ -410,6 +573,15 @@ h1,
   --danger: 251 113 133;
   --info: 56 189 248;
   --line: 66 42 120;
+  --on-primary: 255 255 255;
+  --border-strong: 110 84 170;
+  --success-soft: 14 50 40;
+  --warning-soft: 56 42 8;
+  --danger-soft: 60 16 32;
+  --info-soft: 62 17 74;
+  --sidebar: 18 8 33;
+  --sidebar-fg: 220 200 240;
+  --focus: 34 211 238;
   --surface-1: 18 8 33;
   --surface-2: 28 15 52;
   --surface-3: 38 22 72;
