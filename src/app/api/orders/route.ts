@@ -8,6 +8,8 @@ const listQuerySchema = z.object({
   confirmationStatus: z.enum(["PENDING", "CONFIRMED_BY_CUSTOMER", "CONFIRMED_BY_AGENT", "DECLINED"]).optional(),
   customerId: z.string().cuid().optional(),
   productId: z.string().cuid().optional(),
+  tab: z.enum(["all", "review", "awaiting", "sealed", "cancelled"]).optional(),
+  q: z.string().max(64).optional(),
   cursor: z.string().max(64).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
