@@ -1,0 +1,86 @@
+{
+  "note": "محادثة مرجعية مكتوبة (0.4) — أرقام وأسماء وهمية.",
+  "page": "متجر عمان",
+  "market": "JO",
+  "messages": [
+    {
+      "id": "msg-1",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "بدي طاقية إنبات الشعر",
+      "createdAt": "2026-11-10T10:00:00.000Z"
+    },
+    {
+      "id": "msg-2",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "كم عدد؟",
+      "createdAt": "2026-11-10T10:00:45.000Z"
+    },
+    {
+      "id": "msg-3",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "وحدة",
+      "createdAt": "2026-11-10T10:01:30.000Z"
+    },
+    {
+      "id": "msg-4",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "0791234567 عمان تلاع العلي",
+      "createdAt": "2026-11-10T10:02:15.000Z"
+    },
+    {
+      "id": "msg-5",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "اي ثبتوها",
+      "createdAt": "2026-11-10T10:03:00.000Z"
+    }
+  ],
+  "modelOutput": {
+    "intent": "ORDERING",
+    "relation": "NEW",
+    "items": [
+      {
+        "productRef": "طاقية إنبات الشعر",
+        "quantity": 1,
+        "evidence": [
+          "m3"
+        ]
+      }
+    ],
+    "customer": {
+      "name": null,
+      "altPhone": null,
+      "phone": "0791234567",
+      "city": "عمان",
+      "address": "تلاع العلي",
+      "evidence": {
+        "phone": [
+          "m4"
+        ],
+        "address": [
+          "m4"
+        ]
+      }
+    },
+    "agreement": {
+      "state": "EXPLICIT",
+      "evidence": [
+        "m5"
+      ]
+    },
+    "cancelRequested": false,
+    "notes": null,
+    "openQuestions": [],
+    "aiClaimedConfirmed": false,
+    "needsHuman": {
+      "value": false,
+      "reason": null
+    },
+    "memories": [],
+    "confidence": 0.9
+  }
+}

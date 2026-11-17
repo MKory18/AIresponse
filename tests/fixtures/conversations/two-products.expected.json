@@ -1,0 +1,17 @@
+{
+  "stage": "COMPLETE",
+  "phone": "0955666777",
+  "province": "اللاذقية",
+  "items": [
+    {
+      "name": "كريم حرير",
+      "quantity": 1
+    },
+    {
+      "name": "ماء الكمأ",
+      "quantity": 2
+    }
+  ],
+  "flags": [],
+  "missing": []
+}

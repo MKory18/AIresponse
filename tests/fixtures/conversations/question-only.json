@@ -1,0 +1,63 @@
+{
+  "note": "محادثة مرجعية مكتوبة (0.4) — أرقام وأسماء وهمية.",
+  "page": "كهربا",
+  "market": "SY",
+  "messages": [
+    {
+      "id": "msg-1",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "قديش سعر كريم حرير؟",
+      "createdAt": "2026-11-10T10:00:00.000Z"
+    },
+    {
+      "id": "msg-2",
+      "senderType": "AI",
+      "type": "TEXT",
+      "text": "20 USD",
+      "createdAt": "2026-11-10T10:00:45.000Z"
+    },
+    {
+      "id": "msg-3",
+      "senderType": "CUSTOMER",
+      "type": "TEXT",
+      "text": "تمام شكرا",
+      "createdAt": "2026-11-10T10:01:30.000Z"
+    }
+  ],
+  "modelOutput": {
+    "intent": "INTERESTED",
+    "relation": "NEW",
+    "items": [
+      {
+        "productRef": "كريم حرير",
+        "quantity": null,
+        "evidence": [
+          "m1"
+        ]
+      }
+    ],
+    "customer": {
+      "name": null,
+      "phone": null,
+      "altPhone": null,
+      "city": null,
+      "address": null,
+      "evidence": {}
+    },
+    "agreement": {
+      "state": "NONE",
+      "evidence": []
+    },
+    "cancelRequested": false,
+    "notes": null,
+    "openQuestions": [],
+    "aiClaimedConfirmed": false,
+    "needsHuman": {
+      "value": false,
+      "reason": null
+    },
+    "memories": [],
+    "confidence": 0.9
+  }
+}
