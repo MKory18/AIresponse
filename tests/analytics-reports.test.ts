@@ -235,7 +235,7 @@ describe("L-21: زمن الحل (من updatedAt) انشال", () => {
     const r = await getConversationAnalytics(db as unknown as Db, WS, { range: "last_7_days" });
     expect(Object.keys(r)).not.toContain("resolution");
     expect(readFileSync("src/app/api/analytics/export/route.ts", "utf8")).not.toContain("resolution.");
-    expect(readFileSync("src/app/(dashboard)/analytics/legacy-analytics.tsx", "utf8")).not.toContain("زمن الحل");
+    expect(readdirSync("src/app/(dashboard)/analytics/v2").map((f) => readFileSync(join("src/app/(dashboard)/analytics/v2", f), "utf8")).join("\n")).not.toContain("زمن الحل");
   });
 });
 
@@ -252,11 +252,10 @@ describe("المسارات والصلاحيات", () => {
     expect(x).toContain("recordAudit");
     expect(x).toContain("text/csv");
   });
-  it("الصفحة بتختار النسخة من مفتاح الواجهة والقديمة محفوظة، والروابط القديمة بتتحوّل", () => {
+  it("الصفحة بتعرض التقارير الجديدة بس (القديمة انحذفت بـ3.8)، والروابط القديمة بتتحوّل", () => {
     const p = read("src/app/(dashboard)/analytics/page.tsx");
-    expect(p).toContain("resolveUiVersion");
     expect(p).toContain("<ReportsView />");
-    expect(p).toContain("<LegacyAnalytics />");
+    expect(p).not.toContain("resolveUiVersion");
     const m = read("src/app/(dashboard)/analytics/v2/model.ts");
     for (const old of ["overview", "trends", "products", "ai", "exec", "agents", "campaigns", "automation"]) expect(m).toContain(old);
   });

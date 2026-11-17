@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { pageForPath, type NavGroupView } from "@/lib/nav-model";
@@ -8,6 +8,8 @@ import { guideForPath } from "@/lib/page-guides";
 import { countsByGroup } from "@/lib/attention-counts";
 import { GroupTabs, TABS_HEIGHT } from "@/components/group-tabs";
 import { PageGuidePanel } from "@/components/page-guide";
+import { TOUR_SEEN_KEY, shouldAutoStartTour } from "@/lib/guided-tour";
+import { startGuidedTour } from "@/components/guided-tour";
 import { HealthBannerView } from "@/components/attention/health-banner";
 import { useAttention } from "@/components/attention/use-attention";
 import { SidebarV2 } from "./sidebar-v2";
@@ -16,9 +18,9 @@ import { BottomBar } from "./bottom-bar";
 
 /**
  * قشرة الواجهة الجديدة (2.3ب، 03 §2): شريط جانبي كحلي بعدّادات · رأس (عنوان · بحث شامل · «يحتاجك» · الحساب) ·
- * شريط العطل · تبويبات المجموعة · شريط سفلي بالجوال. بتتفعّل بـ`uiVersion = v2` والهيكل القديم بيضل لحاله.
+ * شريط العطل · تبويبات المجموعة · شريط سفلي بالجوال. القشرة الوحيدة بعد حذف القديمة (3.8).
  *
- * الشرح: ما بيظهر لحاله — من «شو هاي الصفحة؟» بقائمة الحساب. الجولة: بتنضاف مع مثبّتاتها بحزمة لاحقة.
+ * الشرح: ما بيظهر لحاله — من «شو هاي الصفحة؟» بقائمة الحساب. الجولة السريعة: مرة وحدة أول دخول للرئيسية، وبترجع من قائمة الحساب.
  */
 export function AppShellV2({
   groups,
@@ -45,6 +47,39 @@ export function AppShellV2({
   // صندوق المحادثات شاشة كاملة بارتفاع محسوب — بلا حشوة، والشرح فوقه طبقة.
   const fullBleed = pathname === "/conversations";
 
+  // Esc بيسكّر شرح الصفحة.
+  useEffect(() => {
+    if (!guideOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setGuideOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [guideOpen]);
+
+  const runTour = () => {
+    setGuideOpen(false);
+    startGuidedTour(() => {
+      try {
+        localStorage.setItem(TOUR_SEEN_KEY, "1");
+      } catch {
+        /* تخزين محجوب */
+      }
+    });
+  };
+  useEffect(() => {
+    let seen: string | null = "1";
+    try {
+      seen = localStorage.getItem(TOUR_SEEN_KEY);
+    } catch {
+      /* تخزين محجوب: ما منشغّلها لحالها */
+    }
+    if (!shouldAutoStartTour(pathname, seen)) return;
+    const timer = setTimeout(runTour, 700); // بعد ما ترسم القائمة
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
   return (
     <div data-shell="v2" className="min-h-screen bg-surface-1" style={{ "--shell-extra": tabGroup ? TABS_HEIGHT : "0px" } as React.CSSProperties}>
       <SidebarV2
@@ -67,7 +102,7 @@ export function AppShellV2({
             canTeam={canTeam}
             onOpenMenu={() => setMenuOpen(true)}
             onHelp={guideHit ? () => setGuideOpen((o) => !o) : null}
-            onTour={null}
+            onTour={runTour}
           />
           {tabGroup && hit && <GroupTabs group={tabGroup} activeHref={hit.page.href} />}
           {guideOpen && guideHit && fullBleed && (

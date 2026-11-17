@@ -44,8 +44,6 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
     ["src/app/(dashboard)/feedback/page.tsx", 'title="لا توجد آراء"'],
     ["src/app/(dashboard)/settings/team/team-view.tsx", 'title="لا أعضاء"'],
     ["src/app/(dashboard)/intelligence/page.tsx", 'title="لا محادثات بعد"'],
-    ["src/app/(dashboard)/analytics/legacy-analytics.tsx", 'title="لا بيانات منتجات بهالفترة"'],
-    ["src/app/(dashboard)/orders/legacy-orders.tsx", "title={t.orders.emptyTitle}"],
     ["src/app/(dashboard)/knowledge/page.tsx", "title={t.knowledge.emptyTitle}"],
     ["src/app/(dashboard)/media/page.tsx", "title={t.media.emptyTitle}"],
   ];
@@ -65,7 +63,7 @@ describe("الحالات الفاضية الفعلية بتدلّ على الخ�
     const hrefs = files.flatMap((f) =>
       [...read(join("src", f)).matchAll(/<EmptyNext href="([^"]+)"/g)].map((m) => m[1]!)
     );
-    expect(hrefs.length).toBeGreaterThanOrEqual(5);
+    expect(hrefs.length).toBeGreaterThanOrEqual(3);
     for (const h of hrefs) expect(pageForPath(h, NAV_GROUPS), h).toBeTruthy();
   });
 });

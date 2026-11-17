@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NAV_GROUPS, NAV_GROUPS_V2, pageForPath } from "@/lib/nav-model";
+import { NAV_GROUPS, pageForPath } from "@/lib/nav-model";
 import { PAGE_GUIDES, guideForPath, visitGuide } from "@/lib/page-guides";
 
 // `next/link` بيحتاج سياق الراوتر — للاختبار بنرجّعه <a> عادي.
@@ -23,7 +23,7 @@ import { PageGuidePanel } from "@/components/page-guide";
  * جديدة بلا شرح = الاختبار بيفشل.
  */
 
-const NAV_HREFS = [...new Set([...NAV_GROUPS, ...NAV_GROUPS_V2].flatMap((g) => g.pages.map((p) => p.href)))];
+const NAV_HREFS = [...new Set(NAV_GROUPS.flatMap((g) => g.pages.map((p) => p.href)))];
 
 describe("تغطية الشرح", () => {
   it("كل صفحة بالقائمة إلها شرح — ولا شرح ليتيم", () => {
@@ -184,11 +184,12 @@ describe("اللوحة", () => {
 });
 
 describe("ربط القشرة", () => {
-  const shell = readFileSync(join(process.cwd(), "src/components/app-shell.tsx"), "utf8");
+  const shell = readFileSync(join(process.cwd(), "src/components/shell-v2/app-shell-v2.tsx"), "utf8");
+  const header = readFileSync(join(process.cwd(), "src/components/shell-v2/header-v2.tsx"), "utf8");
 
-  it("زر «؟» بالشريط العلوي معنون ومرتبط بالحالة", () => {
-    expect(shell).toContain('aria-label="شرح هذه الصفحة"');
-    expect(shell).toContain("aria-expanded={guideOpen}");
+  it("«شو هاي الصفحة؟» بقائمة الحساب ومرتبط بحالة الشرح", () => {
+    expect(header).toContain("شو هاي الصفحة؟");
+    expect(shell).toContain("onHelp={guideHit ? () => setGuideOpen((o) => !o) : null}");
   });
 
   it("الرأس والتبويبات ثابتين مع التمرير (غلاف sticky واحد)", () => {
