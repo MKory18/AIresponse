@@ -15,6 +15,7 @@ import { providerLabel, publicDetail } from "@/lib/provider-labels";
 import { GLM_ZAKIAI_PRESET, aiConnectionMode } from "@/lib/ai-connection";
 import { AiStatusCard, TASK_AR, type TaskInfo } from "./ai-status-card";
 import { WhyNoReplyCard } from "./why-no-reply-card";
+import { OrderRulesCard } from "./order-rules-card";
 import { RiskNote, FixNote } from "@/components/integrations/ui";
 
 /** طھط­طھ ظ‡ط§ظ„ط­ط¯ ط§ظ„ط±ط¯ ط§ظ„ط¹ط±ط¨ظٹ ط¨ظٹظ†ظ‚ط·ط¹ â€” ط§ظ„ظ‚ظٹط§ط³ ظ…ظ† ظ…ط³ط§ط­ط© ط­ظ‚ظٹظ‚ظٹط©: ظ،ظ ظ  ظˆط­ط¯ط© = ظ¢ظ§ ط­ط±ظپ. */
@@ -345,6 +346,8 @@ export default function AISettingsPage() {
       <AiStatusCard key={statusKey} onTasks={setTasks} />
 
       <WhyNoReplyCard />
+
+      <OrderRulesCard />
 
       <Section
         icon={<Power size={15} />}
