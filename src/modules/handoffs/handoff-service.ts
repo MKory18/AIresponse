@@ -7,7 +7,8 @@ import type { ActorContext, Db } from "@/modules/customers/service";
 
 export type HandoffReason =
   | "CUSTOMER_REQUEST" | "COMPLAINT" | "LOW_CONFIDENCE" | "AI_FAILURE"
-  | "ORDER_BLOCKED" | "PAYMENT_ISSUE" | "INJECTION_DETECTED" | "REPEATED_FAILURE" | "MANUAL";
+  | "ORDER_BLOCKED" | "PAYMENT_ISSUE" | "INJECTION_DETECTED" | "REPEATED_FAILURE" | "MANUAL"
+  | "ORDER_CHANGE_REQUEST";
 
 export type HandoffPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 
@@ -22,6 +23,7 @@ const MIN_PRIORITY: Record<HandoffReason, HandoffPriority> = {
   CUSTOMER_REQUEST: "NORMAL",
   LOW_CONFIDENCE: "NORMAL",
   MANUAL: "NORMAL",
+  ORDER_CHANGE_REQUEST: "HIGH",
 };
 
 const PRIORITY_ORDER: Record<HandoffPriority, number> = { LOW: 0, NORMAL: 1, HIGH: 2, URGENT: 3 };

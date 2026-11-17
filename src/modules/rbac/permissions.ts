@@ -9,6 +9,10 @@ export const PERMISSIONS = [
   "orders.write",
   "orders.discount",
   "orders.discount.approve",
+  // قارئ الطلب (04-PERMISSIONS §4.1): تثبيت/إيقاف · إلغاء · اعتماد طلب تعديل بعد التثبيت.
+  "orders.seal",
+  "orders.cancel",
+  "orders.amend",
   "products.read",
   "products.write",
   "products.wholesale",
@@ -107,6 +111,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "orders.discount",
     "products.wholesale",
     "orders.discount.approve",
+    "orders.seal",
+    "orders.cancel",
+    "orders.amend",
     // P9 — الحملات: إنشاء/تحرير/جدولة + الاعتماد والنشر (المدير).
     "campaigns.read",
     "campaigns.write",
@@ -122,6 +129,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     // P8 — خصم ضمن السقف فقط. رؤية سعر الجملة والاعتماد فوق السقف ليست
     // لهما (صلاحيتا MANAGER) — إنفاذ من الخادم، لا من الواجهة.
     "orders.discount",
+    "orders.seal",
+    "orders.cancel",
     // P9 — قراءة الحملات فقط؛ الإنشاء/الاعتماد لصلاحيات أعلى.
     "campaigns.read",
   ],
