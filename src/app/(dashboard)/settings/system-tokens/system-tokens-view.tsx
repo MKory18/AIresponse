@@ -28,10 +28,12 @@ interface SystemOption {
   key: string;
   nameAr: string;
   scopes: string[];
+  optionalScopes: string[];
 }
 
 const SCOPE_LABELS: Record<string, string> = {
   "capacity.read": "قراءة قدرة الرد (محادثات بلا رد · زمن أول رد)",
+  "ads.read": "قراءة إشارات الإعلانات (أعداد لكل إعلان ولكل يوم بس — بلا بيانات عملاء)",
   "retarget.create": "إنشاء حملات إعادة الاستهداف",
   "retarget.read": "قراءة نتائج الحملات",
 };
@@ -50,6 +52,7 @@ export function SystemTokensView() {
   const [system, setSystem] = useState("mediabuyer");
   const [name, setName] = useState("");
   const [days, setDays] = useState("90");
+  const [extra, setExtra] = useState<Record<string, boolean>>({ "ads.read": true });
   const [busy, setBusy] = useState(false);
   const [fresh, setFresh] = useState<{ token: string; view: TokenView } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -69,13 +72,20 @@ export function SystemTokensView() {
     void load();
   }, [load]);
 
+  const picked = systems.find((s) => s.key === system);
+
   async function create() {
     setBusy(true);
     setCopied(false);
     try {
       const d = await api<{ token: string; view: TokenView }>("/api/settings/system-tokens", {
         method: "POST",
-        json: { system, ...(name.trim() ? { name: name.trim() } : {}), expiresInDays: Number(days) },
+        json: {
+          system,
+          ...(name.trim() ? { name: name.trim() } : {}),
+          expiresInDays: Number(days),
+          scopes: [...(picked?.scopes ?? []), ...(picked?.optionalScopes ?? []).filter((s) => extra[s])],
+        },
       });
       setFresh(d);
       setName("");
@@ -108,7 +118,6 @@ export function SystemTokensView() {
   }
 
   if (forbidden) return <p className="text-sm text-ink-muted">ما عندك صلاحية تدير توكنات الأنظمة.</p>;
-  const picked = systems.find((s) => s.key === system);
 
   return (
     <div className="space-y-4">
@@ -143,6 +152,12 @@ export function SystemTokensView() {
             الصلاحيات: {picked.scopes.map((s) => SCOPE_LABELS[s] ?? s).join(" · ")}. ما بيقدر يعمل غيرها.
           </p>
         )}
+        {(picked?.optionalScopes ?? []).map((s) => (
+          <label key={s} className="flex w-fit cursor-pointer items-center gap-2 text-sm text-ink-muted">
+            <input type="checkbox" checked={Boolean(extra[s])} onChange={(e) => setExtra({ ...extra, [s]: e.target.checked })} className="h-4 w-4 accent-brand-500" />
+            {SCOPE_LABELS[s] ?? s}
+          </label>
+        ))}
         <Callout
           risk="التوكن بيفتح للنظام اللي بياخده قراءة بيانات من موقعك. ما بنرجّع نصه بعد هالمرة، ولو تسرّب بيقدر أي حدا يستعمله."
           fix="انسخه مباشرة وحطّه بالنظام التاني. إذا تسرّب أو ضاع: أوقفه من القائمة تحت وسوّي واحد جديد."

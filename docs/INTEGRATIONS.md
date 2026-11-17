@@ -11,6 +11,7 @@
 | **Zaki OMS** | الردود ← الـ OMS | الطلب المؤكد (يدوي اليوم · API لما ينبنى الباب) + الإسناد | يدوي: نص «إدخال الطلب بالذكاء» · API: `POST {OMS}/api/v1/orders` | توكن OMS + Idempotency-Key |
 | | الـ OMS ← الردود | حالات الطلب: إنشاء · تأكيد · شحن · تسليم · مرتجع · إلغاء | `POST /api/webhooks/oms/{key}` | توقيع التطبيق `sha256=` على `ts.body` (ts بالميلي) |
 | **الميديا باير** | الميديا باير ← الردود | قدرة الرد | `GET /api/v1/capacity` | توكن `zr_mb_…` بصلاحية `capacity.read` بس |
+| | الميديا باير ← الردود | إشارات الإعلانات (أعداد لكل إعلان ولكل يوم · خلية < 5 محادثات محذوفة · بلا بيانات عميل) | `GET /api/v1/ad-signals?since=` | نفس التوكن بصلاحية `ads.read` (اختيارية عند الإنشاء من «الإعدادات ← توكنات الأنظمة») |
 | | الردود ← الميديا باير | `capacity.alert` | `POST {MB}/api/v1/webhooks/replies` | HMAC hex على `ts.body` (ts بالثواني) |
 | **الكليبر** | الكليبر ← الردود | حملة إعادة تواصل · حالتها | `POST/GET /api/v1/retarget-campaigns` | توكن `zr_clp_…` (`retarget.create` · `retarget.read`) + Idempotency-Key |
 | | الردود ← الكليبر | `conversation.coded` · `retarget.result` · `opt_out` · التحقق من الرمز | `POST {CLP}/api/v1/webhooks/replies` · `GET {CLP}/api/v1/codes/{code}` | HMAC · توكن الكليبر |

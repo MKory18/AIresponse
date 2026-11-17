@@ -22,7 +22,10 @@ const createSchema = z
 
 export const GET = createHandler({ permission: "integrations.manage" }, async ({ auth }) => {
   const tokens = await listIntegrationTokens(prisma as unknown as Db, auth!.workspaceId);
-  const systems = TOKEN_SYSTEMS.map((key) => ({ key, nameAr: TOKEN_PRESETS[key].nameAr, scopes: [...TOKEN_PRESETS[key].scopes] }));
+  const systems = TOKEN_SYSTEMS.map((key) => {
+    const preset = TOKEN_PRESETS[key];
+    return { key, nameAr: preset.nameAr, scopes: [...preset.scopes], optionalScopes: [...(("optionalScopes" in preset ? preset.optionalScopes : []) as readonly string[])] };
+  });
   return ok({ tokens, systems });
 });
 
