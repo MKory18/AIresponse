@@ -41,6 +41,8 @@ export const JOB_TYPES = [
   // ربط الـ OMS (باب /api/v1): إرسال طلب مؤكد · مزامنة المنتجات الساعية.
   "handoff_order_to_oms",
   "sync_oms_products",
+  // قارئ الطلب (الحزمة 1.3): قراءة محادثة وحفظها بوضع الظل — بلا طلب ولا رسالة.
+  "read_conversation",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
