@@ -596,12 +596,12 @@ describe("P6-14/15 RBAC pins (all P6 routes deny without permission)", () => {
     const { POST: PUB } = await import("@/app/api/personas/[id]/versions/[version]/publish/route");
     const r3 = await PUB(post("/api/personas/x/versions/2/publish", {}), { params: { id: "x", version: "2" } } as never);
     expect(r3.status).toBe(403);
-    expect(seenPermissions).toEqual(["personas.write"]);
+    expect(seenPermissions).toEqual(["personas.publish"]); // 4.1: النشر صلاحية مستقلة
     seenPermissions.length = 0;
     const { POST: RB } = await import("@/app/api/personas/[id]/versions/[version]/rollback/route");
     const r4 = await RB(post("/api/personas/x/versions/2/rollback", {}), { params: { id: "x", version: "2" } } as never);
     expect(r4.status).toBe(403);
-    expect(seenPermissions).toEqual(["personas.write"]);
+    expect(seenPermissions).toEqual(["personas.publish"]);
   });
 
   it("channel persona binding requires channels.connect", async () => {

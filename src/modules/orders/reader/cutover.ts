@@ -1,5 +1,6 @@
 import { AppError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
+import { isOwnerRole } from "@/modules/rbac/owner-guard";
 import type { Db } from "@/modules/jobs/service";
 import { integrationSettingsSchema, getIntegrationSettings, type IntegrationSettings } from "@/modules/integrations/settings";
 import { summarizeShadow } from "./report";
@@ -168,7 +169,7 @@ export async function changeOrderRules(
   const modeChanging = parsed.orderMode !== undefined && parsed.orderMode !== current.orderMode;
 
   // تغيير الوضع قرار المالك (قاعدة AGENTS: أي تفعيل إنتاجي = المالك بيكبس).
-  if (modeChanging && ctx.role !== "OWNER") {
+  if (modeChanging && !isOwnerRole(ctx.role)) {
     throw new AppError("تغيير وضع قارئ الطلب للمالك فقط", 403, "OWNER_ONLY");
   }
 

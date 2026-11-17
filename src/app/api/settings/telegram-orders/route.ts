@@ -31,7 +31,7 @@ const bodySchema = z.object({
 });
 
 export const GET = createHandler(
-  { permission: "settings.manage" },
+  { permission: "integrations.manage" },
   async ({ auth }) => {
     const settings = await prisma.telegramOrderSettings.findUnique({
       where: { workspaceId: auth!.workspaceId },
@@ -46,7 +46,7 @@ export const GET = createHandler(
 );
 
 export const PUT = createHandler(
-  { body: bodySchema, permission: "settings.manage" },
+  { body: bodySchema, permission: "integrations.manage" },
   async ({ auth, body }) => {
     const workspaceId = auth!.workspaceId;
     const existing = await prisma.telegramOrderSettings.findUnique({ where: { workspaceId } });
