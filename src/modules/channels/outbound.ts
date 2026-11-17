@@ -88,7 +88,7 @@ export async function sendHumanReply(
   db: Db,
   params: { workspaceId: string; conversationId: string; userId: string; text: string; idempotencyKey?: string; mediaId?: string | null }
 ): Promise<DispatchOutboundResult> {
-  return dispatchOutbound(db, {
+  const result = await dispatchOutbound(db, {
     workspaceId: params.workspaceId,
     conversationId: params.conversationId,
     sourceMessageId: params.idempotencyKey ?? `human:${params.userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
@@ -97,6 +97,22 @@ export async function sendHumanReply(
     senderId: params.userId,
     mediaId: params.mediaId ?? undefined,
   });
+  // قارئ الطلب (1.3): الموظف ممكن يثبّت تفاصيل مع العميل — القارئ بيقرأ ردّه كمان.
+  // LEGACY_DRAFT = ولا شي. فشل الجدولة ما بيأثّر على الإرسال أبدًا.
+  if (result.deliveryStatus === "SENT" || result.deliveryStatus === "QUEUED") {
+    try {
+      const { scheduleConversationRead } = await import("@/modules/orders/reader/schedule");
+      await scheduleConversationRead(db, {
+        workspaceId: params.workspaceId,
+        conversationId: params.conversationId,
+        messageId: result.messageId,
+        trigger: "STAFF",
+      });
+    } catch {
+      // best-effort
+    }
+  }
+  return result;
 }
 
 /**

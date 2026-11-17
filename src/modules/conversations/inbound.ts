@@ -395,6 +395,22 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     await enqueueCustomerIntel();
   }
 
+  // قارئ الطلب (الحزمة 1.3): بالوضعين وبغض النظر عن مين ماسك المحادثة. وضع
+  // LEGACY_DRAFT (الافتراضي) = ولا مهمة. فشلها ما بيوقف الرسالة ولا الرد.
+  if (sendMode !== "UNKNOWN") {
+    try {
+      const { scheduleConversationRead } = await import("@/modules/orders/reader/schedule");
+      await scheduleConversationRead(db, {
+        workspaceId: input.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        trigger: "CUSTOMER",
+      });
+    } catch (err) {
+      childLogger("pipeline").warn({ err, messageId: message.id }, "read_schedule_failed");
+    }
+  }
+
   return {
     conversationId: conversation.id,
     messageId: message.id,
