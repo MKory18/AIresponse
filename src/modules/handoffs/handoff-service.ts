@@ -3,6 +3,7 @@ import { AppError, NotFoundError } from "@/core/errors";
 import { makeEvent, eventBus } from "@/core/events/bus";
 import { recordAudit } from "@/modules/audit/service";
 import { publishRealtime } from "@/modules/realtime/events";
+import { hasPermission } from "@/modules/rbac/permissions";
 import type { ActorContext, Db } from "@/modules/customers/service";
 
 export type HandoffReason =
@@ -194,11 +195,16 @@ export async function routeHandoff(
   const handoff = await getOwnedHandoff(db, workspaceId, handoffId);
   if (handoff.status !== "OPEN") throw new AppError("Handoff not open", 422, "INVALID_HANDOFF_STATE");
 
+  // 4.1: كل عضو نشط بيملك handoffs.claim (الدور + إضافات العضو) — مش قائمة أدوار بالاسم.
   const members = await db.workspaceMember.findMany({
-    where: { workspaceId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN", "MANAGER", "SALES_AGENT", "SUPPORT_AGENT"] } },
+    where: { workspaceId, status: "ACTIVE" },
     include: { user: { select: { id: true, availability: true } } },
   });
-  const candidates = members.filter((m) => m.user.availability !== "OFFLINE");
+  const candidates = members.filter(
+    (m) =>
+      m.user.availability !== "OFFLINE" &&
+      hasPermission(String(m.role), ((m as { permissions?: string[] }).permissions ?? []) as string[], "handoffs.claim")
+  );
   if (candidates.length === 0) throw new AppError("No available agents", 422, "NO_AGENTS");
 
   let chosen: string;

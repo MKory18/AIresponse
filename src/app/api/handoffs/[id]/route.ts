@@ -1,6 +1,6 @@
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
-import { claimHandoff, releaseHandoff, resolveHandoff, routeHandoff } from "@/modules/handoffs/handoff-service";
+import { claimHandoff, getOwnedHandoff, releaseHandoff, resolveHandoff, routeHandoff } from "@/modules/handoffs/handoff-service";
 import { z } from "zod";
 
 type Params = { id: string };
@@ -22,6 +22,9 @@ export const POST = createHandler(
         return ok(handoff);
       }
       case "release": {
+        // 4.1: تحويل مستلمه موظف تاني بيحتاج «يوزّع على الموظفين» — صاحبه بيقدر يفلّته.
+        const existing = (await getOwnedHandoff(prisma, auth!.workspaceId, id)) as { assignedTo?: string | null };
+        if (existing.assignedTo && existing.assignedTo !== auth!.userId) auth!.require("conversations.assign");
         const handoff = await releaseHandoff(prisma, ctx, id);
         return ok(handoff);
       }
@@ -33,6 +36,8 @@ export const POST = createHandler(
         return ok(handoff);
       }
       case "route": {
+        // 4.1: توزيع/إسناد لغير نفسك = conversations.assign (كان handoffs.claim).
+        auth!.require("conversations.assign");
         const handoff = await routeHandoff(prisma, auth!.workspaceId, id, body.strategy ?? "LEAST_LOADED");
         return ok(handoff);
       }

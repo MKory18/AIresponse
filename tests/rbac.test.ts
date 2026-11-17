@@ -70,6 +70,7 @@ describe("RBAC", () => {
 
   it("validates permission names", () => {
     expect(isPermission("orders.read")).toBe(true);
-    expect(isPermission("orders.delete")).toBe(false);
+    expect(isPermission("orders.destroy")).toBe(false);
+    expect(isPermission("orders.delete")).toBe(true); // 4.1: الحذف النهائي صار رمز
   });
 });

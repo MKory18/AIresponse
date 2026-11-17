@@ -3,6 +3,7 @@ import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 import { rebuildRange } from "@/modules/analytics/aggregation";
 import { AppError } from "@/core/errors";
+import { hasPermission } from "@/modules/rbac/permissions";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -19,16 +20,16 @@ const bodySchema = z.object({
 export const POST = createHandler(
   { body: bodySchema, rateLimit: { limit: 5, windowMs: 60_000 } },
   async ({ auth, body }) => {
-    if (!auth!.can("workspace.manage") && !auth!.can("settings.manage")) {
-      // Only SUPER_ADMIN/OWNER/ADMIN reach here through settings.manage.
-      throw new AppError("Rebuild requires super admin", 403, "AUTHORIZATION_ERROR");
-    }
-    const membership = await prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId: body.workspaceId, userId: auth!.userId } },
-    });
+    // 4.1: الصلاحية لازم تكون على **نفس المساحة المستهدفة** (كان بيتحقق من المساحة الحالية بس)
+    // وبعضوية ACTIVE — عضو بمساحة تانية ما بيعيد بناء مساحة مش إله.
     const isSuper = await prisma.user.findUnique({ where: { id: auth!.userId }, select: { isSuperAdmin: true } });
-    if (!isSuper?.isSuperAdmin && !membership) {
-      throw new AppError("Cannot rebuild another workspace", 403, "AUTHORIZATION_ERROR");
+    if (!isSuper?.isSuperAdmin) {
+      const membership = (await prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: body.workspaceId, userId: auth!.userId } },
+      })) as { role: string; status: string; permissions?: string[] } | null;
+      const allowed =
+        membership && membership.status === "ACTIVE" && hasPermission(membership.role, membership.permissions ?? [], "settings.manage");
+      if (!allowed) throw new AppError("Rebuild requires settings access on the target workspace", 403, "AUTHORIZATION_ERROR");
     }
 
     const from = new Date(body.from);

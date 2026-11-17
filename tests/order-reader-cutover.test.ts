@@ -169,7 +169,7 @@ describe("المسار والواجهة", () => {
     const r = src("src/app/api/settings/order-rules/route.ts");
     expect(r.match(/permission: "ai\.configure"/g)).toHaveLength(2);
     expect(r).toContain(".strict()");
-    expect(r).toContain("canChangeMode: auth!.role === \"OWNER\"");
+    expect(r).toContain("canChangeMode: isOwnerRole(auth!.role)");
     expect(src("src/modules/orders/reader/cutover.ts")).toContain('"OWNER_ONLY"');
   });
 

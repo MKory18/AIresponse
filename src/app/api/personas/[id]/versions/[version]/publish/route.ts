@@ -7,9 +7,9 @@ type Params = { id: string; version: string };
 /**
  * POST publish a DRAFT snapshot onto the live persona (bump version).
  * This is the ONLY path that changes production instructions — explicit,
- * audited, and reversible via rollback. Permission: personas.write.
+ * audited, and reversible via rollback. Permission: personas.publish.
  */
-export const POST = createHandler({ permission: "personas.write" }, async ({ auth, params }) => {
+export const POST = createHandler({ permission: "personas.publish" }, async ({ auth, params }) => {
   const { id, version } = params as Params;
   const v = Number(version);
   if (!Number.isInteger(v) || v <= 0) {

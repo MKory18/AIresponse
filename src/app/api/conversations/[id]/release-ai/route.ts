@@ -5,7 +5,7 @@ import { releaseConversationToAI } from "@/modules/conversations/service";
 type Params = { id: string };
 
 export const POST = createHandler(
-  { permission: "conversations.reply" },
+  { permission: "conversations.takeover" },
   async ({ auth, params, req }) => {
     const { id } = params as Params;
     const ctx = { ...auth!, ip: req.headers.get("x-forwarded-for") ?? undefined };

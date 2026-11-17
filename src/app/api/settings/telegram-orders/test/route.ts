@@ -10,7 +10,7 @@ import { getTelegramClient, TelegramApiError } from "@/modules/channels/telegram
  * لا يرسل أي بيانات زبون — نص ثابت. التوكن لا يظهر بالنتيجة أو اللوج.
  */
 export const POST = createHandler(
-  { permission: "settings.manage", rateLimit: { limit: 5, windowMs: 60_000 } },
+  { permission: "integrations.manage", rateLimit: { limit: 5, windowMs: 60_000 } },
   async ({ auth }) => {
     const settings = await prisma.telegramOrderSettings.findUnique({
       where: { workspaceId: auth!.workspaceId },

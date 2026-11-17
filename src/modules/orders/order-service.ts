@@ -749,10 +749,16 @@ export async function deleteOrder(db: Db, ctx: ActorContext, orderId: string) {
     | null;
   if (!order || order.workspaceId !== ctx.workspaceId) throw new NotFoundError("Order");
 
-  await requireWorkspaceOwner(db, ctx, {
-    code: "OWNER_ONLY_ORDERS",
-    message: "حذف الطلبات متاح للمالك فقط",
-  });
+  // 4.1: الحذف النهائي رمز (`orders.delete` — للمالك افتراضيًا). المسار بيفرضه، وهون دفاع ثاني:
+  // سياق فيه `can` بيتحقق منه، وبدونه (استدعاء داخلي) بيرجع لفحص المالك القديم.
+  const ctxCan = (ctx as { can?: (p: string) => boolean }).can;
+  if (typeof ctxCan === "function") {
+    if (!ctxCan.call(ctx, "orders.delete")) {
+      throw new AppError("حذف الطلبات للمالك فقط", 403, "OWNER_ONLY_ORDERS");
+    }
+  } else {
+    await requireWorkspaceOwner(db, ctx, { code: "OWNER_ONLY_ORDERS", message: "حذف الطلبات متاح للمالك فقط" });
+  }
 
   // الترتيب صريح (بنود ثم الطلب): مضمون على القاعدة الحقيقية بالقيد Cascade
   // وعلى البديل بالذاكرة بالحذف المباشر — نفس النتيجة بالحالتين.

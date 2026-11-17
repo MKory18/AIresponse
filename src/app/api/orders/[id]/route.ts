@@ -17,13 +17,13 @@ export const GET = createHandler(
     });
     // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع للمتصفح أبدًا.
     const safe = withoutClickSecrets(order);
-    return ok({ ...safe, timeline, canWrite: auth!.can("orders.write"), canDelete: auth!.role === "OWNER" });
+    return ok({ ...safe, timeline, canWrite: auth!.can("orders.write"), canDelete: auth!.can("orders.delete") });
   }
 );
 
 /** حذف نهائي — صلاحية orders.write + المالك (OWNER) فقط (الحارس بالخدمة). */
 export const DELETE = createHandler(
-  { permission: "orders.write" },
+  { permission: "orders.delete" },
   async ({ auth, params, req }) => {
     const { id } = params as Params;
     const result = await deleteOrder(
