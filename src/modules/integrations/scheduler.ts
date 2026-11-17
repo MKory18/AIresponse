@@ -64,6 +64,16 @@ export async function runIntegrationScheduler(db: Db, now = new Date()): Promise
     log.error({ err }, "order_seal_sweep_failed");
   }
 
+  // مزامنة حالة طلبات الـ OMS (1.7): مهمة لكل مساحة ربطها فعّال كل 10 دقايق.
+  if (due("omsStatus", 2 * FIVE_MIN, t)) {
+    try {
+      const { enqueueOmsStatusSyncs } = await import("@/modules/oms/status-sync");
+      await enqueueOmsStatusSyncs(db, now);
+    } catch (err) {
+      log.error({ err }, "oms_status_enqueue_failed");
+    }
+  }
+
   const fiveMin = due("capacity", FIVE_MIN, t);
   const hourly = due("hourly", HOUR, t);
   if (!fiveMin && !hourly) return;

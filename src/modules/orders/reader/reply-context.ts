@@ -1,6 +1,7 @@
 import type { Db } from "@/modules/jobs/service";
 import { getOrderMode } from "./schedule";
 import { parseOffers } from "@/modules/sales/plan-builder";
+import { omsStatusLabel } from "@/modules/oms/status-sync";
 
 /**
  * سياق مسار الرد بوضع القارئ (الحزمة 1.5) — كله حتمي من قاعدة البيانات:
@@ -81,7 +82,7 @@ export async function buildReaderReplyContext(
     const currency = String(order.currency ?? "");
     lines.push(
       sealed
-        ? `الحالة: مثبّت · رقم الطلب ${order.orderNumber} · عند فريق التأكيد · التعديل: غير ممكن من هون`
+        ? `الحالة: مثبّت · رقم الطلب ${order.orderNumber} · عند فريق التأكيد${omsStatusLabel(order.omsStatus as string | null, order.omsShippingStatus as string | null) ? ` (عند الـ OMS: ${omsStatusLabel(order.omsStatus as string | null, order.omsShippingStatus as string | null)})` : ""} · التعديل: غير ممكن من هون`
         : state === "AWAITING_SEAL"
           ? "الحالة: بانتظار التثبيت — يتثبّت تلقائيًا خلال دقائق"
           : "الحالة: قيد المراجعة من الفريق"
@@ -140,13 +141,14 @@ export async function buildReaderReplyContext(
     where: { workspaceId: input.workspaceId, customerId: input.customerId },
     orderBy: { createdAt: "desc" },
     take: 3,
-  })) as Array<Row & { orderNumber: string; status: string; sealedAt?: Date | null; omsStatus?: string | null; createdAt: Date }>;
+  })) as Array<Row & { orderNumber: string; status: string; sealedAt?: Date | null; omsStatus?: string | null; omsShippingStatus?: string | null; createdAt: Date }>;
   const recentOrders = recent.length
     ? `طلبات العميل الأخيرة:\n${recent
         .map((o) => {
           const sealed = !!o.sealedAt || !["NEW", "CONFIRMATION_PENDING"].includes(o.status);
           const label = sealed ? STATUS_AR[o.status] ?? o.status : STATUS_AR[o.status] ?? "قيد الإنشاء";
-          return `${sealed ? o.orderNumber : "طلب غير مثبّت بعد"} · ${label}${o.omsStatus ? ` · عند الـ OMS: ${o.omsStatus}` : ""} · ${new Date(o.createdAt).toISOString().slice(0, 10)}`;
+          const atOms = omsStatusLabel(o.omsStatus, o.omsShippingStatus);
+          return `${sealed ? o.orderNumber : "طلب غير مثبّت بعد"} · ${label}${atOms ? ` · عند الـ OMS: ${atOms}` : ""} · ${new Date(o.createdAt).toISOString().slice(0, 10)}`;
         })
         .join("\n")}`
     : null;
