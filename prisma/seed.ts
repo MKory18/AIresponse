@@ -6,6 +6,13 @@ const DEMO_PASSWORD = "Demo#2026!";
 
 const MIN = 60 * 1000;
 
+// S-06: بيانات الديمو (admin@demo.local + كلمة سر معروفة) ممنوعة بالإنتاج
+// إلا بتصريح صريح — وإلا أي حدا بيدخل بحساب الديمو.
+if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "1") {
+  console.error("Refusing to seed demo data in production (set ALLOW_DEMO_SEED=1 to override).");
+  process.exit(1);
+}
+
 async function main() {
   // Idempotent seed. Demo data is only for local development / docker-compose.
   // Every step checks for existing data first, so a partially applied seed
