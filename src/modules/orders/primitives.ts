@@ -23,15 +23,32 @@ export interface NormalizedPhone {
  * Never "corrects" digits — an ambiguous number stays invalid for ordering
  * rather than being guessed.
  */
-export function normalizePhone(raw: string): NormalizedPhone {
+export function normalizePhone(raw: string, market?: string | null): NormalizedPhone {
   let digits = toWesternDigits(raw).replace(/\D/g, "");
   if (!digits) return { valid: false, canonical: "", reason: "EMPTY" };
 
   if (digits.startsWith("00963")) digits = `0${digits.slice(5)}`;
   else if (digits.startsWith("963") && digits.length >= 12) digits = `0${digits.slice(3)}`;
+  // الأردن (قارئ الطلب): بس لما السوق معروف — التوقيع القديم بلا سوق ما بيتغيّر.
+  if (market === "JO") {
+    if (digits.startsWith("00962")) digits = `0${digits.slice(5)}`;
+    else if (digits.startsWith("962") && digits.length >= 12) digits = `0${digits.slice(3)}`;
+  }
 
   if (digits.length < 7) return { valid: false, canonical: digits, reason: "TOO_SHORT" };
   if (digits.length > 15) return { valid: false, canonical: digits, reason: "TOO_LONG" };
+
+  // حسب السوق (Channel.market): SY = 09 + 8 خانات · JO = 07[789] + 7 خانات.
+  if (market === "SY") {
+    return /^09\d{8}$/.test(digits)
+      ? { valid: true, canonical: digits }
+      : { valid: false, canonical: digits, reason: "FORMAT_SY" };
+  }
+  if (market === "JO") {
+    return /^07[789]\d{7}$/.test(digits)
+      ? { valid: true, canonical: digits }
+      : { valid: false, canonical: digits, reason: "FORMAT_JO" };
+  }
 
   // Syrian mobile: 09XXXXXXXX (9 or 10 digits incl. leading 0)
   if (/^09\d{7,8}$/.test(digits)) return { valid: true, canonical: digits };
@@ -62,7 +79,9 @@ function normalizeCounting(input: string): string {
 const RAW_UNITS: Record<string, number> = {
   "واحد": 1, "وحدة": 1, "واحده": 1, "واحدة": 1,
   "اثنين": 2, "إثنين": 2, "اثنان": 2, "زوج": 2, "قطعتين": 2, "حبتين": 2,
-  "ثلاثة": 3, "ثلاث": 3,
+  // لهجة: تنتين · ثنتين · اتنين · تلاتة · تلات
+  "تنتين": 2, "ثنتين": 2, "اتنين": 2, "تنين": 2,
+  "ثلاثة": 3, "ثلاث": 3, "تلاتة": 3, "تلات": 3, "ثلاثه": 3,
   "أربعة": 4, "اربعة": 4, "أربع": 4,
   "خمسة": 5, "خمس": 5,
   "ستة": 6, "ست": 6,
@@ -241,10 +260,20 @@ export const KNOWN_PROVINCES = [
   "دير الزور", "الحسكة", "الرقة", "درعا", "السويداء", "قنيطرة",
 ];
 
-/** Infers the province from a raw address via known-list containment. */
-export function inferProvince(rawAddress: string): string | null {
+/** محافظات كل سوق (قارئ الطلب) — SY هي القائمة الحالية بالحرف. */
+export const PROVINCES_BY_MARKET: Record<string, string[]> = {
+  SY: KNOWN_PROVINCES,
+  JO: ["عمان", "إربد", "الزرقاء", "العقبة", "السلط", "مادبا", "الكرك", "معان", "جرش", "عجلون", "الطفيلة", "المفرق"],
+};
+
+/**
+ * Infers the province from a raw address via known-list containment.
+ * بلا سوق = القائمة السورية (السلوك القديم)؛ مع سوق = قائمته.
+ */
+export function inferProvince(rawAddress: string, market?: string | null): string | null {
   const normalized = normalizeName(rawAddress);
-  for (const province of KNOWN_PROVINCES) {
+  const list = (market && PROVINCES_BY_MARKET[market]) || KNOWN_PROVINCES;
+  for (const province of list) {
     if (normalized.includes(normalizeName(province))) return province;
   }
   return null;
