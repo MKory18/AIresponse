@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { ReadingCard } from "./reading-card";
 
 type Session = {
   id: string;
@@ -401,6 +402,8 @@ export default function AIPlaygroundPage() {
               )}
             </div>
           )}
+
+          <ReadingCard sessionId={sessionId} hasMessages={messages.length > 1} />
 
           <div className="border-t border-line bg-surface-2 p-3">            <div className="glass-subtle flex items-end gap-1.5 rounded-2xl p-1.5">
               <textarea
