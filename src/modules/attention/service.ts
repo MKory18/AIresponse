@@ -238,6 +238,21 @@ export async function computeAttention(dbIn: unknown, workspaceId: string, now: 
       push("knowledge.write", { id: "SETUP_GAP:faq", type: "SETUP_GAP", severity: "low", title: "ما في أسئلة شائعة", subtitle: "أضف أول سؤال ليجاوب الوكيل بدقة", href: "/knowledge", createdAt: now.toISOString() });
   });
 
+  // 12) صفحة مربوطة بلا مجموعة منتجات: الوكيل ما بيعرف ولا منتج لها (03 §5.4) — بند لكل صفحة (سقف 10)
+  await safe(async () => {
+    const channels = await db.channel!.findMany({ where: { workspaceId, status: "CONNECTED" }, take: 50 });
+    if (channels.length === 0) return;
+    const assigned = await db.catalogPageAssignment!.findMany({ where: { workspaceId, channelId: { in: channels.map((c) => s(c.id)) } } });
+    const withGroup = new Set(assigned.map((a) => s(a.channelId)));
+    for (const c of channels.filter((x) => !withGroup.has(s(x.id))).slice(0, 10)) {
+      const name = s(c.displayName) || s(c.externalId) || "صفحة";
+      push("catalogs.assign", {
+        id: `SETUP_GAP:catalog:${s(c.id)}`, type: "SETUP_GAP", severity: "low",
+        title: `«${name}» بلا مجموعة منتجات`, subtitle: "الوكيل ما بيعرف ولا منتج لهالصفحة", href: "/channels", createdAt: now.toISOString(),
+      });
+    }
+  });
+
   return out;
 }
 

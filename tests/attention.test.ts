@@ -132,6 +132,17 @@ describe("أنواع البنود من بياناتها", () => {
     expect(r.items.every((i) => i.severity === "low")).toBe(true);
   });
 
+  it("SETUP_GAP: صفحة مربوطة بلا مجموعة منتجات = بند لحاله، والصفحة اللي إلها مجموعة لا", async () => {
+    await db.channel.create({ data: { id: "chA", workspaceId: WS, type: "FACEBOOK", status: "CONNECTED", displayName: "أ", externalId: "1" } } as never);
+    await db.channel.create({ data: { id: "chB", workspaceId: WS, type: "FACEBOOK", status: "CONNECTED", displayName: "ب", externalId: "2" } } as never);
+    await db.catalogPageAssignment.create({ data: { workspaceId: WS, channelId: "chB", catalogId: "cat" } } as never);
+    const r = attentionFor(await computeAttention(db, WS, NOW), canFor("OWNER"));
+    expect(r.items.map((i) => i.id)).toEqual(["SETUP_GAP:catalog:chA"]);
+    expect(r.items[0]!.href).toBe("/channels");
+    // موظف بلا صلاحية الإسناد ما بيشوفه
+    expect(attentionFor(await computeAttention(db, WS, NOW), canFor("VIEWER")).items).toEqual([]);
+  });
+
   it("عزل المساحات: بنود مساحة تانية ما بتظهر", async () => {
     await db.order.create({ data: { id: "x", workspaceId: "other", orderNumber: "Z", status: "CONFIRMATION_PENDING", customerId: "c" } } as never);
     expect(await types()).toEqual([]);
