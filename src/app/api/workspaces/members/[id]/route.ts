@@ -14,9 +14,9 @@ const updateSchema = z.object({
 
 /** Change role / permissions / suspension — or reset a member's password (users.manage). */
 export const PATCH = createHandler(
-  { body: updateSchema, permission: "users.manage" },
+  { body: updateSchema, permission: "users.manage", rateLimit: { limit: 30, windowMs: 60_000 } },
   async ({ auth, body, params, req }) => {
-    const ctx = { userId: auth!.userId, workspaceId: auth!.workspaceId, ip: req.headers.get("x-forwarded-for") ?? undefined };
+    const ctx = { userId: auth!.userId, workspaceId: auth!.workspaceId, can: (p: string) => auth!.can(p as never), ip: req.headers.get("x-forwarded-for") ?? undefined };
     if (body.newPassword !== undefined) {
       const reset = await resetMemberPassword(prisma, ctx, String(params.id), { newPassword: body.newPassword });
       return ok(reset);
@@ -28,7 +28,7 @@ export const PATCH = createHandler(
 
 /** Remove a membership (users.manage). */
 export const DELETE = createHandler(
-  { permission: "users.manage" },
+  { permission: "users.manage", rateLimit: { limit: 20, windowMs: 60_000 } },
   async ({ auth, params }) => {
     const result = await removeMember(
       prisma,

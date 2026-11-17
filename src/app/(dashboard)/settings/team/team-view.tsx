@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, KeyRound, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { ChevronDown, KeyRound, Plus, ShieldCheck, SlidersHorizontal, Trash2, UserRound } from "lucide-react";
+import { MemberPermissionsDialog } from "./member-permissions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -42,6 +43,11 @@ async function api(path: string, method: string, body?: unknown) {
 
 export default function TeamView() {
   const [members, setMembers] = useState<Member[]>([]);
+  // 4.2: المنتقي بيعرض بس الأدوار اللي الفاعل بيقدر يعطيها، و«دعوة حساب مسجل» مخفية إذا مطفية.
+  const [assignable, setAssignable] = useState<string[] | null>(null);
+  const [invitesEnabled, setInvitesEnabled] = useState(false);
+  const [permTarget, setPermTarget] = useState<Member | null>(null);
+  const [roleTarget, setRoleTarget] = useState<{ member: Member; role: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
@@ -53,19 +59,25 @@ export default function TeamView() {
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
   const [suspendTarget, setSuspendTarget] = useState<Member | null>(null);
   // وضع فتح الحساب: دعوة حساب مسجل، أو إنشاء حساب جديد مباشرة (اسم + بريد + كلمة مرور)
-  const [inviteMode, setInviteMode] = useState<"invite" | "create">("invite");
+  const [inviteMode, setInviteMode] = useState<"invite" | "create">("create");
   const [inviteRole, setInviteRole] = useState("SALES_AGENT");
+  const roleChoices = (current?: string) => ROLES.filter((r) => !assignable || assignable.includes(r.value) || r.value === current);
   // كل ما بتتفتح الدعوة بيرجع الدور الافتراضي — المنتقي والسطر الشارح لازم يتطابقوا.
   useEffect(() => {
-    if (showInvite) setInviteRole("SALES_AGENT");
-  }, [showInvite]);
+    if (showInvite) {
+      setInviteRole("SALES_AGENT");
+      if (!invitesEnabled) setInviteMode("create");
+    }
+  }, [showInvite, invitesEnabled]);
   // إعادة تعيين كلمة مرور عضو من الإدارة
   const [pwTarget, setPwTarget] = useState<Member | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = (await api("/api/workspaces/members", "GET")) as { members: Member[] };
+      const data = (await api("/api/workspaces/members", "GET")) as { members: Member[]; assignableRoles?: string[]; invitesEnabled?: boolean };
       setMembers(data.members);
+      setAssignable(data.assignableRoles ?? null);
+      setInvitesEnabled(Boolean(data.invitesEnabled));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "فشل التحميل");
@@ -157,7 +169,7 @@ export default function TeamView() {
         description="الأعضاء، الدعوات، الأدوار، والإيقاف — كل عملية إدارية مسجلة بسجل التدقيق."
         actions={
           <Button size="sm" onClick={() => setShowInvite(true)}>
-            <Plus size={14} /> دعوة عضو
+            <Plus size={14} /> إضافة عضو
           </Button>
         }
       />
@@ -177,8 +189,8 @@ export default function TeamView() {
           <EmptyState
             icon={<UserRound size={26} strokeWidth={1.75} />}
             title="لا أعضاء"
-            description="ادعُ أول عضو في فريقك."
-            action={<Button size="sm" onClick={() => setShowInvite(true)}>ادعُ عضو</Button>}
+            description="أضف أول عضو في فريقك."
+            action={<Button size="sm" onClick={() => setShowInvite(true)}>أضف عضو</Button>}
           />
         ) : (
           <div className="overflow-x-auto">
@@ -207,10 +219,15 @@ export default function TeamView() {
                       <Select
                         value={m.role}
                         disabled={busy}
-                        onChange={(e) => change(m.id, { role: e.target.value })}
+                        onChange={(e) => {
+                          const role = e.target.value;
+                          // تغيير الدور بيمسح الإضافات (§5.4) — تأكيد أول إذا في إضافات.
+                          if (m.permissions.length > 0) setRoleTarget({ member: m, role });
+                          else void change(m.id, { role });
+                        }}
                         aria-label="الدور"
                       >
-                        {ROLES.map((r) => (
+                        {roleChoices(m.role).map((r) => (
                           <option key={r.value} value={r.value}>
                             {r.label}
                           </option>
@@ -236,6 +253,9 @@ export default function TeamView() {
                     </td>
                     <td>
                       <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPermTarget(m)} title="استثناءات صلاحيات لهالعضو">
+                          <SlidersHorizontal size={13} /> صلاحيات{m.permissions.length > 0 ? ` (+${m.permissions.length})` : ""}
+                        </Button>
                         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPwTarget(m)} title="تعيين كلمة مرور جديدة لهذا العضو">
                           <KeyRound size={13} /> كلمة المرور
                         </Button>
@@ -283,6 +303,7 @@ export default function TeamView() {
 
       <Dialog open={showInvite} onClose={() => setShowInvite(false)} title={inviteMode === "create" ? "إنشاء حساب جديد" : "دعوة عضو"}>
         <form onSubmit={invite} className="space-y-3">
+          {invitesEnabled && (
           <div className="flex rounded-2xl border border-line bg-surface-2 p-1 text-xs">
             <button
               type="button"
@@ -299,6 +320,7 @@ export default function TeamView() {
               إنشاء حساب جديد
             </button>
           </div>
+          )}
           {inviteMode === "create" && (
             <Field label="الاسم">
               <Input name="name" required minLength={2} maxLength={100} placeholder="مثال: محمد المبيعات" />
@@ -308,13 +330,13 @@ export default function TeamView() {
             <Input name="email" type="email" required dir="ltr" placeholder="name@example.com" />
           </Field>
           {inviteMode === "create" ? (
-            <Field label="كلمة المرور" hint="8 أحرف على الأقل. كوّنها من الاسم والبريد (لا ترسلها بأي قناة غير آمنة).">
+            <Field label="كلمة المرور المؤقتة" hint="8 أحرف على الأقل. العضو بينطلب منه يغيّرها بأول دخول (لا ترسلها بأي قناة غير آمنة).">
               <Input name="password" type="text" required minLength={8} maxLength={128} dir="ltr" autoComplete="off" className="num" />
             </Field>
           ) : null}
           <Field label="الدور" hint={ROLE_BLURB[inviteRole]}>
             <Select name="role" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
-              {ROLES.map((r) => (
+              {roleChoices().map((r) => (
                 <option key={r.value} value={r.value}>
                   {r.label}
                 </option>
@@ -349,6 +371,34 @@ export default function TeamView() {
         </form>
       </Dialog>
 
+      <MemberPermissionsDialog
+        open={permTarget !== null}
+        onClose={() => setPermTarget(null)}
+        member={permTarget}
+        busy={busy}
+        onSave={(permissions) => {
+          const target = permTarget;
+          if (!target) return;
+          void (async () => {
+            await change(target.id, { permissions });
+            setPermTarget(null);
+          })();
+        }}
+      />
+      <ConfirmDialog
+        open={roleTarget !== null}
+        onClose={() => setRoleTarget(null)}
+        onConfirm={() => {
+          const t = roleTarget;
+          setRoleTarget(null);
+          t && void change(t.member.id, { role: t.role });
+        }}
+        title="تغيير الدور بيمسح الصلاحيات الإضافية"
+        body={`${roleTarget?.member.user.name ?? "العضو"} عنده ${roleTarget?.member.permissions.length ?? 0} صلاحية إضافية فوق دوره. بعد تغيير الدور بترجع لصلاحيات الدور الجديد بس، وبتقدر تضيف استثناءات من جديد.`}
+        confirmLabel="غيّر الدور"
+        busy={busy}
+        danger
+      />
       <ConfirmDialog
         open={removeTarget !== null}
         onClose={() => setRemoveTarget(null)}

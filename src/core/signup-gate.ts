@@ -19,6 +19,15 @@ export function isSignupAllowed(): boolean {
   return flag("ALLOW_SIGNUP");
 }
 
+/**
+ * هل «دعوة حساب مسجل» شغّالة؟ (4.2) — مطفية افتراضيًا بكل البيئات: الدعوة بلا شاشة قبول
+ * ومبدّل مساحات، فالطريق الوحيد هو «إنشاء حساب جديد». صريح فقط: `1|true|yes`.
+ */
+export function isMemberInviteAllowed(): boolean {
+  const raw = process.env.ALLOW_MEMBER_INVITES?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 /** هل `POST /api/workspaces` (مساحة إضافية لمستخدم موجود) شغّال؟ */
 export function isWorkspaceCreateAllowed(): boolean {
   return flag("ALLOW_WORKSPACE_CREATE");

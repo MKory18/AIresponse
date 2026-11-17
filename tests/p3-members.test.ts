@@ -10,6 +10,9 @@ import {
 } from "@/modules/members/service";
 import { updateWorkspaceDetails } from "@/modules/workspaces/service";
 
+// 4.2: «دعوة حساب مسجل» مطفية افتراضيًا — هالاختبارات بتستعملها كأداة تجهيز.
+process.env.ALLOW_MEMBER_INVITES = "1";
+
 /**
  * P3 team management — service level on the in-memory double.
  * No new tables: invitations reuse WorkspaceMember(INVITED + expiresAt).

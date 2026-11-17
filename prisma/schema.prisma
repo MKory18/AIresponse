@@ -34,6 +34,8 @@ model User {
   passwordHash String
   name         String
   isSuperAdmin Boolean   @default(false)
+  /// 4.2: كلمة مرور مؤقتة من الإدارة (إنشاء عضو أو إعادة تعيين) — بتنطلب تغييرها بأول دخول.
+  mustChangePassword Boolean @default(false)
   availability String    @default("AVAILABLE")
   lastSeenAt   DateTime?
   createdAt    DateTime  @default(now())
