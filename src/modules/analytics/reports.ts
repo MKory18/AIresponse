@@ -90,8 +90,18 @@ export async function workspaceTimezone(db: unknown, workspaceId: string): Promi
   return typeof ws?.timezone === "string" && ws.timezone ? ws.timezone : "UTC";
 }
 
-/** الفترة بمنطقة المساحة: الفترات الجاهزة من `resolveRange`، والمخصصة من تاريخين (بحد أقصى 92 يومًا). */
-export function resolveReportRange(q: Pick<ReportQuery, "range" | "from" | "to">, timezone: string): { start: Date; end: Date } {
+const DAY = 86_400_000;
+/** بداية اليوم (بمنطقة المساحة) بعد `offset` يوم من يوم `now` — بنقيس من منتصف اليوم عشان تغيير التوقيت الصيفي ما يزحزح اليوم. */
+function dayStart(now: Date, timezone: string, offset: number): Date {
+  const today = startOfDayInZone(now, timezone);
+  return startOfDayInZone(new Date(today.getTime() + offset * DAY + DAY / 2), timezone);
+}
+
+/**
+ * الفترة بمنطقة المساحة. الجاهزة بتنحسب من `now` الممرَّر (مش من ساعة الجهاز: الاختبارات حتمية، واليوم بتاع المساحة هو المعتبر)،
+ * والمخصصة من تاريخين (بحد أقصى 92 يومًا).
+ */
+export function resolveReportRange(q: Pick<ReportQuery, "range" | "from" | "to">, timezone: string, now: Date = new Date()): { start: Date; end: Date } {
   if (q.range === "custom" && q.from && q.to) {
     // التاريخان `YYYY-MM-DD` بمنطقة المساحة: من بداية يوم «من» لبداية اليوم اللي بعد «إلى».
     const day = (s: string) => startOfDayInZone(new Date(`${s.slice(0, 10)}T12:00:00Z`), timezone);
@@ -100,13 +110,21 @@ export function resolveReportRange(q: Pick<ReportQuery, "range" | "from" | "to">
     // resolveRange بيتحقق (تاريخ صالح · ترتيب · حد 92 يومًا) وبيرمي INVALID_RANGE.
     return resolveRange({ range: "custom", from: start.toISOString(), to: end.toISOString(), timezone });
   }
-  const r = resolveRange({ range: q.range === "custom" ? "last_7_days" : q.range, timezone });
-  return { start: r.start, end: r.end };
+  switch (q.range) {
+    case "today":
+      return { start: dayStart(now, timezone, 0), end: dayStart(now, timezone, 1) };
+    case "yesterday":
+      return { start: dayStart(now, timezone, -1), end: dayStart(now, timezone, 0) };
+    case "last_30_days":
+      return { start: dayStart(now, timezone, -29), end: dayStart(now, timezone, 1) };
+    default:
+      return { start: dayStart(now, timezone, -6), end: dayStart(now, timezone, 1) };
+  }
 }
 
 export async function getReport(db: unknown, workspaceId: string, q: ReportQuery, can: Can, now: Date = new Date()): Promise<ReportResponse> {
   const timezone = await workspaceTimezone(db, workspaceId);
-  const { start, end } = resolveReportRange(q, timezone);
+  const { start, end } = resolveReportRange(q, timezone, now);
   const withTeam = q.tab === "team" && can("analytics.agents");
   const cur = await loadReportData(db, workspaceId, { start, end, timezone, now, withTeam });
 

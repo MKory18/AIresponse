@@ -218,20 +218,35 @@ export async function listChannels(db: Db, workspaceId: string) {
   const channels = (await db.channel.findMany({
     where: { workspaceId },
     orderBy: { createdAt: "asc" },
-    select: { id: true, type: true, status: true, displayName: true, externalId: true, aiPersonaId: true, sendMode: true, updatedAt: true },
-  })) as Array<{
-    id: string; type: string; status: string; displayName: string | null; externalId: string | null; aiPersonaId: string | null; sendMode: string; updatedAt: Date | string;
+    select: {
+      id: true, type: true, status: true, displayName: true, externalId: true, aiPersonaId: true, sendMode: true, market: true, updatedAt: true,
+      // مجموعة المنتجات (الكتالوج) اللي بتجاوب منها هالصفحة — null = بلا مجموعة (الوكيل ما بيعرف ولا منتج).
+      catalogAssignment: { select: { catalog: { select: { id: true, name: true, isActive: true } } } },
+    },
+  })) as unknown as Array<{
+    id: string; type: string; status: string; displayName: string | null; externalId: string | null; aiPersonaId: string | null; sendMode: string; market?: string | null; updatedAt: Date | string;
+    catalogAssignment?: { catalog: { id: string; name: string; isActive: boolean } | null } | null;
   }>;
   const accounts = (await (db as any).channelAccount?.findMany?.({
     where: { channelId: { in: channels.map((c) => c.id) } },
-    select: { channelId: true, tokenExpiresAt: true, lastWebhookAt: true, lastSendAt: true },
-  }).catch(() => [])) as Array<{ channelId: string; tokenExpiresAt: unknown; lastWebhookAt: unknown; lastSendAt: unknown }>;
+    select: { channelId: true, tokenExpiresAt: true, lastWebhookAt: true, lastSendAt: true, connectedAt: true },
+  }).catch(() => [])) as Array<{ channelId: string; tokenExpiresAt: unknown; lastWebhookAt: unknown; lastSendAt: unknown; connectedAt?: unknown }>;
   const byChannel = new Map(accounts.map((a) => [a.channelId, a]));
-  return channels.map((c) => ({
-    ...c,
-    hasAccount: byChannel.has(c.id),
-    tokenExpiring: Boolean(byChannel.get(c.id)?.tokenExpiresAt),
-    lastWebhookAt: byChannel.get(c.id)?.lastWebhookAt ?? null,
-    lastSendAt: byChannel.get(c.id)?.lastSendAt ?? null,
-  }));
+  const now = Date.now();
+  return channels.map(({ catalogAssignment, ...c }) => {
+    const acc = byChannel.get(c.id);
+    const exp = acc?.tokenExpiresAt ? new Date(acc.tokenExpiresAt as string | Date).getTime() : null;
+    return {
+      ...c,
+      market: c.market ?? null,
+      catalog: catalogAssignment?.catalog ?? null,
+      hasAccount: byChannel.has(c.id),
+      tokenExpiring: Boolean(acc?.tokenExpiresAt),
+      // VALID · EXPIRED (لازم إعادة ربط) · LONG_LIVED (توكن بلا تاريخ انتهاء).
+      tokenStatus: exp === null ? "LONG_LIVED" : exp > now ? "VALID" : "EXPIRED",
+      connectedAt: acc?.connectedAt ?? null,
+      lastWebhookAt: acc?.lastWebhookAt ?? null,
+      lastSendAt: acc?.lastSendAt ?? null,
+    };
+  });
 }

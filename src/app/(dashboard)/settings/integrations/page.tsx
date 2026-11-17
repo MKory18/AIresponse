@@ -1,8 +1,8 @@
 "use client";
 
 import { PageHeader } from "@/components/ui/card";
-import { OmsSection } from "../../channels/oms-section";
-import { TelegramOrderSection } from "../../channels/telegram-order-section";
+import { OmsSection } from "@/components/integrations/oms-section";
+import { TelegramOrderSection } from "@/components/integrations/telegram-order-section";
 
 /**
  * «الإعدادات › الربط» (3.6): ربط الـ OMS وتيليجرام الطلبات بصفحة وحدة — كانوا بصفحة القنوات.
