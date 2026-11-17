@@ -36,6 +36,8 @@ let customerId: string;
 let omsCalls: Array<{ method: string; path: string; body: any }>;
 let lookupAnswer: () => Response;
 let noteAnswer: () => Response;
+let amendAnswer: () => Response;
+let cancelAnswer: () => Response;
 
 type Over = { phone?: string; relation?: "NEW" | "AMEND_LAST"; cancel?: boolean; needsHuman?: boolean; evidence?: string[]; agreement?: "EXPLICIT" | "NONE" };
 function provider(over: () => Over = () => ({})): AIProvider {
@@ -109,6 +111,8 @@ function fakeOms() {
     if (u.pathname === "/api/v1/orders" && init?.method === "POST")
       return Response.json({ order_id: "oms-ord-1", order_number: "SY-2026-0148", status: "NEW", totals: { total: 30, currency: "USD" } });
     if (/^\/api\/v1\/orders\/[^/]+\/notes$/.test(u.pathname)) return noteAnswer();
+    if (u.pathname.endsWith("/amend")) return amendAnswer();
+    if (u.pathname.endsWith("/cancel")) return cancelAnswer();
     return Response.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   }) as typeof fetch;
   setOmsClientFactory((deps) => new OmsClient({ ...deps, fetchImpl, maxGetAttempts: 1, timeoutMs: 2000 }));
@@ -133,6 +137,8 @@ beforeEach(async () => {
   omsCalls = [];
   lookupAnswer = () => Response.json({ found: false, blacklisted: false });
   noteAnswer = () => Response.json({ ok: true });
+  amendAnswer = () => Response.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
+  cancelAnswer = () => Response.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   setFacebookClientFactory(
     () =>
       new FacebookClient({
@@ -151,6 +157,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  delete process.env.OMS_AUTO_AMEND;
   setOmsClientFactory(null);
   setFacebookClientFactory(undefined as never);
   vi.restoreAllMocks();
@@ -393,5 +400,85 @@ describe("القارئ ← بند «يحتاجك» وملف العميل", () =>
     expect(cust.phone).toBe("0964123348");
     expect(cust.province).toBe("درعا");
     expect((db._stores.auditLog as any[]).some((a) => a.action === "customer.updated_from_reading")).toBe(true);
+  });
+});
+
+describe("المرحلة 5 — التعديل والإلغاء الآلي بالـ OMS (مطفي افتراضيًا)", () => {
+  async function sent() {
+    await connectOms();
+    const o = await readyOrder();
+    await sealDueOrders(db as Db, FUTURE());
+    await handleAutoHandoffJob(db as Db, { orderId: o.id }, WS);
+    return o;
+  }
+  const change = async (text: string, over: () => Over) => {
+    const m = await say(text);
+    const last = (db._stores.message as any[]).find((x) => x.id === m.messageId);
+    return read(last.id, provider(over), new Date(Date.now() + 240_000));
+  };
+  const handoffs = () => (db._stores.humanHandoff as any[]).filter((h) => h.reason === "ORDER_CHANGE_REQUEST");
+
+  it("مطفي (الافتراضي): ما بيستدعي /amend أبدًا والمسار المعتمد ملاحظة + موظف", async () => {
+    amendAnswer = () => Response.json({ order_id: "oms-ord-1", status: "NEW" });
+    await sent();
+    const r = await change("غيّر رقمي لـ 0954321098", () => ({ relation: "AMEND_LAST", phone: "0954321098", evidence: ["m3"] }));
+    expect(r.applied).toMatchObject({ detail: { action: "AMEND_REQUESTED", omsState: "NOTE_SENT" } });
+    expect(omsCalls.some((c) => c.path.endsWith("/amend"))).toBe(false);
+  });
+
+  it("مفعّل: تعديل الهاتف ← POST /amend بالمفتاح، بلا ملاحظة ولا بند، والرقم المحلي اتحدّث", async () => {
+    process.env.OMS_AUTO_AMEND = "1";
+    amendAnswer = () => Response.json({ order_id: "oms-ord-1", status: "NEW", totals: { total: 30 }, price_adjusted: false });
+    const o = await sent();
+    const r = await change("غيّر رقمي لـ 0954321098", () => ({ relation: "AMEND_LAST", phone: "0954321098", evidence: ["m3"] }));
+    expect(r.applied).toMatchObject({ detail: { action: "AMEND_APPLIED" } });
+    const call = omsCalls.find((c) => c.path === "/api/v1/orders/oms-ord-1/amend")!;
+    expect(call.method).toBe("POST");
+    expect(call.body.customer).toEqual({ phone: "0954321098" });
+    expect(call.body.reason).toBeTruthy();
+    expect(omsCalls.some((c) => c.path.endsWith("/notes"))).toBe(false);
+    expect(orders()[0].recipientPhone).toBe("0954321098");
+    expect(revs(o.id).map((x) => x.kind)).toContain("AMEND_APPLIED");
+    expect(handoffs()).toHaveLength(0);
+  });
+
+  it("مفعّل: إلغاء ← POST /cancel والطلب CANCELLED محليًا", async () => {
+    process.env.OMS_AUTO_AMEND = "1";
+    cancelAnswer = () => Response.json({ order_id: "oms-ord-1", already: false });
+    const o = await sent();
+    const r = await change("خلص بدي ألغي الطلب", () => ({ cancel: true, evidence: ["m3"] }));
+    expect(r.applied).toMatchObject({ detail: { action: "CANCEL_APPLIED" } });
+    expect(omsCalls.some((c) => c.path === "/api/v1/orders/oms-ord-1/cancel" && c.method === "POST")).toBe(true);
+    expect(orders()[0].status).toBe("CANCELLED");
+    expect(revs(o.id).map((x) => x.kind)).toContain("CANCEL_APPLIED");
+  });
+
+  it("مفعّل بس التوكن قديم (403) أو الطلب مش قابل (409): بيرجع للمسار المعتمد، ما في أسوأ من اليوم", async () => {
+    process.env.OMS_AUTO_AMEND = "1";
+    amendAnswer = () => Response.json({ error: { code: "SCOPE_MISSING" } }, { status: 403 });
+    const o = await sent();
+    const r = await change("غيّر رقمي لـ 0954321098", () => ({ relation: "AMEND_LAST", phone: "0954321098", evidence: ["m3"] }));
+    expect(r.applied).toMatchObject({ detail: { action: "AMEND_REQUESTED", omsState: "NOTE_SENT" } });
+    expect(orders()[0].recipientPhone).toBe("0964123348"); // ما تغيّر محليًا
+    expect(omsCalls.some((c) => c.path.endsWith("/notes"))).toBe(true);
+    expect(handoffs()).toHaveLength(1);
+    expect(revs(o.id).map((x) => x.kind)).toContain("AMEND_REQUEST");
+  });
+
+  it("مفعّل وتعديل بنود (مش حقول): ما بيروح آلي، ملاحظة + موظف", async () => {
+    process.env.OMS_AUTO_AMEND = "1";
+    amendAnswer = () => Response.json({ order_id: "oms-ord-1", status: "NEW" });
+    await sent();
+    const { autoAmendBody } = await import("@/modules/orders/reader/amend");
+    expect(autoAmendBody([{ field: "items", from: [], to: [] }])).toBeNull();
+    expect(autoAmendBody([{ field: "recipientPhone", from: "1", to: "2" }, { field: "province", from: "a", to: "b" }])).toEqual({ customer: { phone: "2", city: "b" } });
+    expect(autoAmendBody([{ field: "recipientPhone", from: "1", to: null }])).toBeNull();
+  });
+
+  it("العميل: getOrder بيقرأ editable (والقديم بلا الحقل = null)", async () => {
+    const mk = (body: unknown) => new OmsClient({ baseUrl: OMS_URL, token: "zk1_x", fetchImpl: (async () => Response.json(body)) as typeof fetch, maxGetAttempts: 1 });
+    expect((await mk({ order_id: "o1", status: "NEW", editable: true }).getOrder("o1")).editable).toBe(true);
+    expect((await mk({ order_id: "o1", status: "CONFIRMED", editable: false }).getOrder("o1")).editable).toBe(false);
+    expect((await mk({ order_id: "o1", status: "NEW" }).getOrder("o1")).editable).toBeNull();
   });
 });
