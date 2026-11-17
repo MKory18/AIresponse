@@ -16,6 +16,8 @@ import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
 import { ConversationItem, ConversationListEmpty, ConversationListSkeleton } from "./conversation-item";
 import { CustomerPanel } from "./customer-panel";
+import type { OrderCardData } from "@/modules/orders/reader/card";
+import type { OrderCardCan } from "../orders/order-card";
 import { MediaPicker } from "./MediaPicker";
 import { DateSeparator, MessageBubble } from "./message-bubble";
 import {
@@ -87,6 +89,8 @@ export default function Inbox() {
   const [draft, setDraft] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [orderDrafts, setOrderDrafts] = useState<DraftInfo[]>([]);
+  // قارئ الطلب (1.8): بطاقة الطلب بدل المسودة لما orderMode ≠ LEGACY_DRAFT.
+  const [orderCard, setOrderCard] = useState<{ card: OrderCardData; can: OrderCardCan } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
@@ -127,7 +131,21 @@ export default function Inbox() {
     };
   }, []);
 
+  async function loadOrderCard(conversationId: string) {
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/order-card`);
+      if (!res.ok) return setOrderCard(null);
+      const data = (await res.json()) as OrderCardData & { can: OrderCardCan };
+      if (selectedIdRef.current && selectedIdRef.current !== conversationId) return;
+      const { can, ...card } = data;
+      setOrderCard(card.mode === "LEGACY_DRAFT" ? null : { card, can });
+    } catch {
+      setOrderCard(null);
+    }
+  }
+
   async function loadDraft(conversationId: string) {
+    void loadOrderCard(conversationId);
     const res = await fetch(`/api/order-drafts?conversationId=${conversationId}`);
     if (res.ok) {
       const data = await res.json();
@@ -201,6 +219,7 @@ export default function Inbox() {
       if (current && (!change.conversationId || change.conversationId === current)) {
         void refreshMessages(current);
         if (change.type === "message.inbound") void loadDraft(current);
+        if (change.type === "reading.updated" || change.type === "order.updated" || change.type === "order.created") void loadOrderCard(current);
       }
     },
     { onStatus: (status) => setRealtimeOpen(status === "open") }
@@ -282,6 +301,7 @@ export default function Inbox() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
   async function send(pickedMediaId?: string) {
@@ -854,6 +874,8 @@ export default function Inbox() {
         <CustomerPanel
           customer={customer}
           orderDrafts={orderDrafts}
+          orderCard={orderCard}
+          onOrderChanged={() => selectedId && void loadOrderCard(selectedId)}
           pageName={selected ? pageNameOf(selected) : null}
           onRefreshProfile={refreshCustomerProfile}
           onResetMemory={resetConversationMemory}
@@ -864,6 +886,8 @@ export default function Inbox() {
           <CustomerPanel
             customer={customer}
             orderDrafts={orderDrafts}
+            orderCard={orderCard}
+            onOrderChanged={() => selectedId && void loadOrderCard(selectedId)}
             pageName={selected ? pageNameOf(selected) : null}
             onResetMemory={resetConversationMemory}
           />

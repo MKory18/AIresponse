@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ClipboardList, Printer, Search, Trash2 } from "lucide-react";
-import { formatNumber, label, t } from "@/lib/i18n";
+import { formatNumber, t } from "@/lib/i18n";
+import { ORDER_TABS, orderMatchesTab, orderStatusLabel, type OrderTab, type StatusTone } from "@/lib/order-status";
+import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
-import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyNext, EmptyState } from "@/components/ui/empty-state";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { SkeletonTable } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/ui/stat-card";
 import { GlassCard, PageHeader } from "@/components/ui/card";
@@ -23,16 +25,32 @@ type Order = {
   currency: string;
   createdAt: string;
   telegramNotified?: boolean;
+  /** قارئ الطلب (1.4+): التثبيت والإيقاف وحالة الـ OMS — بتنعرض بعمود حالة واحد. */
+  sealedAt?: string | null;
+  heldBy?: string | null;
+  omsStatus?: string | null;
+  omsShippingStatus?: string | null;
   customer: { id: string; name: string | null; phone: string | null };
   items: { productNameSnapshot: string; quantity: number }[];
 };
 
-const STATUSES = ["NEW", "CONFIRMATION_PENDING", "CONFIRMED", "PROCESSING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "FAILED", "RETURNED"];
+const TONE_CLASS: Record<StatusTone, string> = {
+  info: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  warn: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+  ok: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  bad: "bg-red-500/10 text-red-700 dark:text-red-300",
+  muted: "bg-surface-3 text-ink-muted",
+};
+
+/** عمود حالة واحد (بدل حالة + حالة التأكيد + تلجرام). */
+function OrderStatusPill({ o }: { o: Order }) {
+  const s = orderStatusLabel(o);
+  return <span className={cn("inline-flex max-w-56 items-center rounded-lg px-2 py-0.5 text-[11px] font-bold", TONE_CLASS[s.tone])}>{s.text}</span>;
+}
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [status, setStatus] = useState("");
-  const [confirmationStatus, setConfirmationStatus] = useState("");
+  const [tab, setTab] = useState<OrderTab>("all");
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +61,7 @@ export default function OrdersPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    if (confirmationStatus) params.set("confirmationStatus", confirmationStatus);
-    const res = await fetch(`/api/orders?${params}`);
+    const res = await fetch("/api/orders");
     if (!res.ok) {
       setError("تعذّر تحميل الطلبات، حاول مجددًا.");
       return;
@@ -55,7 +70,7 @@ export default function OrdersPage() {
     setOrders(data.items);
     setCanDelete(Boolean(data.canDelete));
     setError(null);
-  }, [status, confirmationStatus]);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -98,16 +113,18 @@ export default function OrdersPage() {
     new: orders.filter((o) => o.status === "NEW").length,
     confirming: orders.filter((o) => o.status === "CONFIRMATION_PENDING" || o.confirmationStatus === "PENDING").length,
     completed: orders.filter((o) => o.status === "DELIVERED").length,
-    needsReview: orders.filter((o) => ["CANCELLED", "FAILED", "RETURNED"].includes(o.status)).length,
+    needsReview: orders.filter((o) => orderMatchesTab(o, "review")).length,
   };
+  const tabCounts = Object.fromEntries(ORDER_TABS.map((x) => [x.key, orders.filter((o) => orderMatchesTab(o, x.key)).length])) as Record<OrderTab, number>;
+  const byTab = orders.filter((o) => orderMatchesTab(o, tab));
 
   const visible = q.trim()
-    ? orders.filter((o) =>
+    ? byTab.filter((o) =>
         [o.orderNumber, o.customer.name ?? "", o.customer.phone ?? "", o.items[0]?.productNameSnapshot ?? ""]
           .join(" ")
           .includes(q.trim())
       )
-    : orders;
+    : byTab;
 
   return (
     <div className="page-wrap">
@@ -136,19 +153,27 @@ export default function OrdersPage() {
           <Search size={15} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`${t.common.search} برقم الطلب أو العميل…`} aria-label={t.common.search} className="ps-9" />
         </div>
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t.orders.status} className="w-44">
-          <option value="">{t.common.all} — الحالات</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{label(s)}</option>
-          ))}
-        </Select>
-        <Select value={confirmationStatus} onChange={(e) => setConfirmationStatus(e.target.value)} aria-label="حالة التأكيد" className="w-48">
-          <option value="">{t.common.all} — حالات التأكيد</option>
-          {["PENDING", "CONFIRMED_BY_CUSTOMER", "CONFIRMED_BY_AGENT", "DECLINED"].map((s) => (
-            <option key={s} value={s}>{label(s)}</option>
-          ))}
-        </Select>
       </GlassCard>
+
+      {/* تبويبات: «تحتاج مراجعة» أول ما بيدوّر عليه الموظف */}
+      <div role="tablist" aria-label="تصفية الطلبات" className="flex flex-wrap gap-1.5">
+        {ORDER_TABS.map((x) => (
+          <button
+            key={x.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === x.key}
+            onClick={() => setTab(x.key)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition",
+              tab === x.key ? "bg-primary text-white" : "bg-surface-2 text-ink-muted hover:bg-surface-hover"
+            )}
+          >
+            {x.label}
+            <span className={cn("num rounded-md px-1.5 text-[10px]", tab === x.key ? "bg-white/20" : x.key === "review" && tabCounts.review > 0 ? "bg-amber-500/20 text-amber-800 dark:text-amber-300" : "bg-surface-3")}>{formatNumber(tabCounts[x.key])}</span>
+          </button>
+        ))}
+      </div>
 
       {error && (
         <GlassCard className="p-2">
@@ -180,7 +205,6 @@ export default function OrdersPage() {
                   <th>{t.orders.quantity}</th>
                   <th>{t.orders.total}</th>
                   <th>{t.orders.status}</th>
-                  <th>تلجرام</th>
                   <th>{t.orders.date}</th>
                   {canDelete && <th aria-label="إجراءات" />}
                 </tr>
@@ -200,14 +224,7 @@ export default function OrdersPage() {
                     <td className="num font-bold" dir="ltr">
                       {Number(o.total).toLocaleString()} {o.currency}
                     </td>
-                    <td><StatusBadge value={o.status} dot /></td>
-                    <td>
-                      {o.telegramNotified ? (
-                        <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
-                      ) : (
-                        <Badge tone="PENDING" dot>لم يُرحّل</Badge>
-                      )}
-                    </td>
+                    <td><OrderStatusPill o={o} /></td>
                     <td className="whitespace-nowrap text-xs text-ink-muted">{new Date(o.createdAt).toLocaleDateString("ar")}</td>
                     {canDelete && (
                       <td>
@@ -230,19 +247,12 @@ export default function OrdersPage() {
                   <Link href={`/orders/${o.id}`} className="num text-sm font-bold text-brand-600 dark:text-brand-400">
                     {o.orderNumber}
                   </Link>
-                  <StatusBadge value={o.status} dot />
+                  <OrderStatusPill o={o} />
                 </div>
                 <div className="mt-2.5 grid grid-cols-2 gap-1.5 text-xs text-ink-muted">
                   <span className="truncate font-medium text-ink">{o.customer.name ?? o.customer.phone ?? "—"}</span>
                   <span className="num text-end font-bold text-ink">{Number(o.total).toLocaleString()} {o.currency}</span>
                   <span className="col-span-2 truncate">{o.items[0]?.productNameSnapshot ?? "—"}</span>
-                </div>
-                <div className="mt-2">
-                  {o.telegramNotified ? (
-                    <Badge tone="DELIVERED" dot>تم ترحيله للتلجرام</Badge>
-                  ) : (
-                    <Badge tone="PENDING" dot>لم يُرحّل للتلجرام</Badge>
-                  )}
                 </div>
                 {canDelete && (
                   <div className="mt-2.5 flex justify-end">
