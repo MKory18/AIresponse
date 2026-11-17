@@ -1,0 +1,15 @@
+{
+  "note": "محادثة 16/11 بصيغتها الحقيقية — الأسماء والأرقام وهمية بنفس الشكل. التفاصيل بـ docs/restructure/02-ORDER-FLOW.md على فرع الخطة.",
+  "page": "كهربا",
+  "market": "SY",
+  "messages": [
+    { "id": "msg-1", "senderType": "CUSTOMER", "type": "TEXT", "text": "بدي اطلب كريم فارا", "createdAt": "2026-11-16T22:20:10Z" },
+    { "id": "msg-2", "senderType": "AI", "type": "TEXT", "text": "كريم فارا ما عندنا منه حاليًا. بس متوفر عندنا كريم حرير بـ 20 USD — بتحب أجهزلك عبوة؟", "createdAt": "2026-11-16T22:20:20Z" },
+    { "id": "msg-3", "senderType": "CUSTOMER", "type": "TEXT", "text": "اي بدي عبوة وحدة", "createdAt": "2026-11-16T22:21:00Z" },
+    { "id": "msg-4", "senderType": "AI", "type": "TEXT", "text": "تمام! ابعتلي عنوانك ورقم موبايلك", "createdAt": "2026-11-16T22:21:10Z" },
+    { "id": "msg-5", "senderType": "CUSTOMER", "type": "TEXT", "text": "شارع (أ) درعا", "createdAt": "2026-11-16T22:23:00Z" },
+    { "id": "msg-6", "senderType": "CUSTOMER", "type": "TEXT", "text": "0964123348", "createdAt": "2026-11-16T22:23:05Z" },
+    { "id": "msg-7", "senderType": "AI", "type": "TEXT", "text": "طلبك مؤكد وجاهز للتوصيل", "createdAt": "2026-11-16T22:23:20Z" },
+    { "id": "msg-8", "senderType": "CUSTOMER", "type": "TEXT", "text": "اي", "createdAt": "2026-11-16T22:25:00Z" }
+  ]
+}
