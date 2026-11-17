@@ -4,6 +4,9 @@ import type { Prisma } from "@prisma/client";
 import { createFakeDb } from "./helpers/inmemory-db";
 import { inviteMember, resetMemberPassword, updateMember } from "@/modules/members/service";
 
+// 4.2: «دعوة حساب مسجل» مطفية افتراضيًا — هالاختبارات بتستعملها كأداة تجهيز.
+process.env.ALLOW_MEMBER_INVITES = "1";
+
 /**
  * S-01 — عزل المساحات بإدارة الأعضاء (التفاصيل: docs/HANDOVER-2026-10-27.md §4.1).
  */

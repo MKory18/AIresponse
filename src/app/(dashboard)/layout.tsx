@@ -6,6 +6,7 @@ import { NAV_GROUPS, visibleGroups } from "@/lib/nav-model";
 import { hasPermission } from "@/modules/rbac/permissions";
 import { AppShell } from "@/components/app-shell";
 import { ToastProvider } from "@/components/ui/toast";
+import { ForcePasswordChange } from "@/components/auth/force-password-change";
 
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -14,9 +15,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
-    select: { name: true, email: true },
+    select: { name: true, email: true, mustChangePassword: true },
   });
   if (!user) redirect("/login");
+
+  // 4.2: كلمة مرور مؤقتة من الإدارة ← شاشة تغيير إلزامية قبل أي صفحة (بلا قشرة ولا قائمة).
+  if (user.mustChangePassword) {
+    return (
+      <ToastProvider>
+        <ForcePasswordChange userName={user.name} />
+      </ToastProvider>
+    );
+  }
 
   // عضو بلا مساحة فعّالة بيشوف القشرة كاملة (نفس السلوك السابق) — الصفحات
   // نفسها بتفرض الصلاحية من الخادم، مش القائمة.

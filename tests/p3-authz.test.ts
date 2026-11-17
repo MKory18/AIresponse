@@ -3,6 +3,9 @@ import { NextRequest } from "next/server";
 import { createSessionToken } from "@/modules/auth/session";
 import { getAuthContext } from "@/modules/auth/context";
 
+// 4.2: «دعوة حساب مسجل» مطفية افتراضيًا — هالاختبارات بتستعملها كأداة تجهيز.
+process.env.ALLOW_MEMBER_INVITES = "1";
+
 /**
  * P3 authorization gates — REAL routes + REAL getAuthContext + REAL signed
  * cookies against the in-memory DB boundary (mocked @/core/db/prisma backed

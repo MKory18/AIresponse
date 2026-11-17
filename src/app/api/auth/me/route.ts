@@ -12,7 +12,7 @@ export const GET = createHandler({ public: true }, async () => {
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
-    select: { id: true, email: true, name: true, isSuperAdmin: true },
+    select: { id: true, email: true, name: true, isSuperAdmin: true, mustChangePassword: true },
   });
   if (!user) throw new AuthenticationError("Session user no longer exists");
 

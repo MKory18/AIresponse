@@ -38,7 +38,7 @@ export async function updateOwnProfile(
   } | null;
   if (!user) throw new NotFoundError("User");
 
-  const data: { name?: string; email?: string; passwordHash?: string } = {};
+  const data: { name?: string; email?: string; passwordHash?: string; mustChangePassword?: boolean } = {};
   if (input.name !== undefined) {
     const name = input.name.trim();
     if (name.length < 2 || name.length > 100) {
@@ -76,6 +76,7 @@ export async function updateOwnProfile(
       throw new AppError("Password must be 8-128 characters", 422, "INVALID_PASSWORD");
     }
     data.passwordHash = await hashPassword(input.newPassword);
+    data.mustChangePassword = false; // 4.2: غيّر كلمة المرور المؤقتة
   }
 
   const changed = Object.keys(data) as string[];
