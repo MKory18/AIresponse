@@ -9,8 +9,7 @@ import type { Db } from "@/modules/customers/service";
  * firstResponseTime = first OUTBOUND message after the conversation's first
  *   INBOUND customer message (webhook duplicates and system events excluded —
  *   they never create messages).
- * resolutionTime = conversation.updatedAt - createdAt for conversations with
- *   status RESOLVED/CLOSED; null otherwise (never invented).
+ * (L-21) «زمن الحل» انشال: كان من updatedAt، وهو بيتحدّث مع أي تعديل — مش لحظة الحل الفعلية.
  * revenueConfirmed = SUM(Order.total) with status CONFIRMED/PROCESSING/
  *   OUT_FOR_DELIVERY/DELIVERED (snapshot prices from OrderItem, never
  *   Product.currentPrice).
@@ -154,9 +153,6 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
     void convId;
   }
 
-  const resolved = conversations.filter((c) => c.status === "RESOLVED" || c.status === "CLOSED");
-  const resolutionMinutes = resolved.map((c) => (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) / 60_000);
-
   return {
     newConversations: conversations.length,
     inboundMessages: messages.filter((m) => m.direction === "INBOUND").length,
@@ -171,11 +167,6 @@ export async function getConversationAnalytics(db: DbClient, workspaceId: string
         human: { avgMinutes: avg(frtBySource.human), medianMinutes: median(frtBySource.human), count: frtBySource.human.length },
         automation: { avgMinutes: avg(frtBySource.automation), medianMinutes: median(frtBySource.automation), count: frtBySource.automation.length },
       },
-    },
-    resolution: {
-      avgMinutes: avg(resolutionMinutes),
-      medianMinutes: median(resolutionMinutes),
-      count: resolutionMinutes.length,
     },
   };
 }
@@ -449,7 +440,13 @@ export async function getFunnel(db: DbClient, workspaceId: string, q: RangeQuery
 
 // ── SLA ─────────────────────────────────────────────────────────────────────
 
-export async function getSLA(db: DbClient, workspaceId: string, q: RangeQuery, settings: { slaFirstResponseMinutes: number | null; slaHandoffResolutionMinutes: number | null }) {
+export async function getSLA(
+  db: DbClient,
+  workspaceId: string,
+  q: RangeQuery,
+  settings: { slaFirstResponseMinutes: number | null; slaHandoffResolutionMinutes: number | null },
+  now: Date = new Date()
+) {
   const { start, end } = resolveRange(q);
   const conversations = await db.conversation.findMany({
     where: { workspaceId, createdAt: { gte: start, lt: end } },
@@ -476,6 +473,11 @@ export async function getSLA(db: DbClient, workspaceId: string, q: RangeQuery, s
     if (!firstInbound) continue;
     const firstOut = list.find((m) => m.direction === "OUTBOUND" && new Date(m.createdAt) >= firstInbound.createdAt);
     if (firstOut) frts.push((new Date(firstOut.createdAt).getTime() - firstInbound.createdAt.getTime()) / 60_000);
+    // L-20: اللي ما انردّ عليه بيدخل بزمن انتظاره لهلأ — لو بتجاهلناه، الخرق بيطلع أقل من الحقيقة كل ما زاد التأخير.
+    else if (settings.slaFirstResponseMinutes !== null) {
+      const waited = (now.getTime() - firstInbound.createdAt.getTime()) / 60_000;
+      if (waited > settings.slaFirstResponseMinutes) frts.push(waited);
+    }
   }
 
   const slaFrt = settings.slaFirstResponseMinutes;

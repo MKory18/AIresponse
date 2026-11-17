@@ -52,9 +52,6 @@ async function buildRows(db: typeof prisma, workspaceId: string, query: ExportQu
         { metric: "firstResponse.avgMinutes", value: r.firstResponse.avgMinutes },
         { metric: "firstResponse.medianMinutes", value: r.firstResponse.medianMinutes },
         { metric: "firstResponse.count", value: r.firstResponse.count },
-        { metric: "resolution.avgMinutes", value: r.resolution.avgMinutes },
-        { metric: "resolution.medianMinutes", value: r.resolution.medianMinutes },
-        { metric: "resolution.count", value: r.resolution.count },
       ];
     }
     case "orders": {

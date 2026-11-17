@@ -24,7 +24,7 @@ export function newUiFiles(): string[] {
   );
   const attention = ["attention-panel.tsx", "health-banner.tsx", "use-attention.ts"].map((n) => join(ROOT, "src", "components", "attention", n));
   const shell = ["app-shell-v2", "sidebar-v2", "header-v2", "bottom-bar"].map((n) => join(ROOT, "src", "components", "shell-v2", `${n}.tsx`));
-  const extra = [join(ROOT, "src", "components", "settings", "ui-version-card.tsx"), join(ROOT, "src", "lib", "attention-counts.ts"), join(ROOT, "src", "lib", "ui-version.ts")];
+  const extra = [join(ROOT, "src", "components", "settings", "ui-version-card.tsx"), join(ROOT, "src", "components", "settings", "workspace-timezone-card.tsx"), join(ROOT, "src", "lib", "attention-counts.ts"), join(ROOT, "src", "lib", "ui-version.ts")];
   const deliveryDir = join(ROOT, "src", "app", "(dashboard)", "delivery");
   const todayDir = join(ROOT, "src", "app", "(dashboard)", "dashboard", "today");
   const today = walk(todayDir);

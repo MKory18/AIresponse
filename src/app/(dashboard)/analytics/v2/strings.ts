@@ -1,0 +1,28 @@
+/** نصوص «التقارير» (3.7). التسميات = فصحى مبسّطة، الشرح = محكية خفيفة. */
+export const REPORT_STRINGS = {
+  title: "التقارير",
+  period: "الفترة",
+  compare: "قارن بالفترة السابقة",
+  export: "تصدير CSV",
+  refresh: "حدّث",
+  howWeCount: "كيف بنحسبه",
+  unavailable: "غير متاح",
+  noData: "ما في بيانات بالفترة",
+  noBasis: "ما في أساس للمقارنة",
+  vsPrev: "عن الفترة السابقة",
+  sameAsPrev: "مثل الفترة السابقة",
+  loadError: "تعذّر تحميل التقارير",
+  retry: "أعد المحاولة",
+  empty: "ما في صفوف بالفترة المختارة.",
+  technical: "تفاصيل تقنية",
+  technicalHint: "استهلاك النماذج وزمن كل مرحلة — للمالك والشريك.",
+  from: "من",
+  to: "إلى",
+  ranges: [
+    { value: "today", label: "اليوم" },
+    { value: "yesterday", label: "أمس" },
+    { value: "last_7_days", label: "آخر 7 أيام" },
+    { value: "last_30_days", label: "آخر 30 يوم" },
+    { value: "custom", label: "مخصص" },
+  ],
+} as const;
