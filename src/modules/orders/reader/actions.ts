@@ -5,6 +5,8 @@ import { publishRealtime } from "@/modules/realtime/events";
 import { enqueueJob, type Db } from "@/modules/jobs/service";
 import { assertOrderTransition } from "@/modules/orders/state-machine";
 import { getIntegrationSettings } from "@/modules/integrations/settings";
+import { isBlacklistedAtOms, runAfterSeal } from "./after-seal";
+import { requestChangeOnSealedOrder, type AmendOutcome } from "./amend";
 
 /**
  * إجراءات الطلب المقروء (الحزمة 1.4): تثبيت · أوقف · أطلق · إلغاء · تعديل حقول · إعادة قراءة.
@@ -33,6 +35,7 @@ type OrderRow = {
   settleAt: Date | null;
   sealedAt: Date | null;
   customerId: string;
+  recipientPhone?: string | null;
 };
 
 async function loadOrder(db: Db, workspaceId: string, orderId: string): Promise<OrderRow> {
@@ -72,7 +75,7 @@ function notify(db: Db, o: OrderRow) {
   void publishRealtime(db as never, { workspaceId: o.workspaceId, type: "order.updated", conversationId: o.conversationId ?? undefined, entityId: o.id });
 }
 
-export type SealResult = { sealed: true; orderId: string } | { sealed: false; reason: "STALE_READING" | "NOT_SEALABLE" | "RACE_LOST" | "ON_HOLD" };
+export type SealResult = { sealed: true; orderId: string } | { sealed: false; reason: "STALE_READING" | "NOT_SEALABLE" | "RACE_LOST" | "ON_HOLD" | "BLACKLISTED" };
 
 /**
  * تثبيت طلب. `auto = true` من كنس المهلة: بيشترط قراءة طازة وما بيثبّت `CONFIRMATION_PENDING`.
@@ -113,6 +116,20 @@ export async function sealOrder(
     }
   }
 
+  // العميل محظور بالـ OMS؟ ما منثبّت ولا منبعت: الطلب بيروح للمراجعة (§10.1).
+  if (await isBlacklistedAtOms(db, order.workspaceId, order.recipientPhone ?? null)) {
+    const reasons = [...new Set([...order.reviewReasons, "CUSTOMER_BLACKLISTED"])];
+    const data: Row = { reviewReasons: reasons, settleAt: null };
+    if (order.status === "NEW") {
+      assertOrderTransition("NEW", "CONFIRMATION_PENDING");
+      data.status = "CONFIRMATION_PENDING";
+    }
+    await (db as unknown as M).order.update({ where: { id: order.id }, data });
+    await addRevision(db, order, "STAFF_EDIT", input.actor, [{ field: "reviewReasons", from: order.reviewReasons, to: reasons }]);
+    notify(db, order);
+    return { sealed: false, reason: "BLACKLISTED" };
+  }
+
   assertOrderTransition(order.status as never, "CONFIRMED");
   const claimed = (await (db as unknown as M).order.updateMany({
     where: { id: order.id, status: order.status, readVersion: order.readVersion, sealedAt: null },
@@ -136,6 +153,8 @@ export async function sealOrder(
     metadata: { auto },
   }).catch(() => undefined);
   await eventBus.publish(makeEvent("OrderConfirmed", order.workspaceId, { orderId: order.id, customerId: order.customerId, conversationId: order.conversationId })).catch(() => undefined);
+  // التثبيت = لحظة الخروج الوحيدة (1.6): تيليجرام · الـ OMS · رسالة التثبيت — كل واحد بمعزل.
+  await runAfterSeal(db, order, input.actor);
   notify(db, order);
   return { sealed: true, orderId: order.id };
 }
@@ -182,9 +201,17 @@ export async function releaseOrder(db: Db, input: { workspaceId: string; orderId
 }
 
 /** إلغاء يدوي لطلب غير مثبّت. المثبّت بيروح لمسار الإلغاء بعد التثبيت (الحزمة 1.6). */
-export async function cancelOrderByStaff(db: Db, input: { workspaceId: string; orderId: string; actor: Actor; reason?: string }) {
+export async function cancelOrderByStaff(
+  db: Db,
+  input: { workspaceId: string; orderId: string; actor: Actor; reason?: string }
+): Promise<{ orderId: string; status: string; cancel?: AmendOutcome }> {
   const order = await loadOrder(db, input.workspaceId, input.orderId);
-  if (order.sealedAt) throw new AppError("Sealed order needs the cancel-request path", 422, "ORDER_SEALED");
+  if (order.sealedAt) {
+    // المثبّت: مسار طلب الإلغاء (§10.3) — محلي إذا ما انبعت، وإلا ملاحظة للـ OMS + بند «يحتاجك».
+    if (!order.conversationId) throw new AppError("Sealed order has no conversation", 422, "ORDER_SEALED");
+    const cancel = await requestChangeOnSealedOrder(db, { workspaceId: input.workspaceId, conversationId: order.conversationId, kind: "CANCEL", actor: input.actor, reason: input.reason });
+    return { orderId: order.id, status: cancel.action === "CANCEL_APPLIED" ? "CANCELLED" : order.status, cancel };
+  }
   assertOrderTransition(order.status as never, "CANCELLED");
   await (db as unknown as M).order.update({ where: { id: order.id }, data: { status: "CANCELLED", settleAt: null } });
   await addRevision(db, order, "CANCEL_APPLIED", input.actor, [{ field: "status", from: order.status, to: "CANCELLED" }, ...(input.reason ? [{ field: "reason", from: null, to: input.reason }] : [])]);
@@ -199,8 +226,13 @@ export type EditableField = (typeof EDITABLE)[number];
 export async function editOrderFields(
   db: Db,
   input: { workspaceId: string; orderId: string; actor: Actor; fields: Partial<Record<EditableField, string | null>> }
-) {
+): Promise<{ orderId: string; changed: string[]; amend?: AmendOutcome }> {
   const order = (await loadOrder(db, input.workspaceId, input.orderId)) as OrderRow & Record<string, unknown>;
+  if (order.sealedAt && order.conversationId) {
+    // المثبّت: طلب تعديل (§10.3) مش تعديل مباشر.
+    const amend = await requestChangeOnSealedOrder(db, { workspaceId: input.workspaceId, conversationId: order.conversationId, kind: "AMEND", actor: input.actor, staffFields: input.fields });
+    return { orderId: order.id, changed: [], amend };
+  }
   if (order.sealedAt || !["NEW", "CONFIRMATION_PENDING"].includes(order.status)) {
     throw new AppError("Only an unsealed order can be edited", 422, "ORDER_NOT_EDITABLE");
   }

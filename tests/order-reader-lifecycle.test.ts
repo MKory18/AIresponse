@@ -153,8 +153,9 @@ describe("سيناريو 9 (بلا الإرسال) — التثبيت بعد ا�
     expect(sealed).toMatchObject({ status: "CONFIRMED", confirmationStatus: "CONFIRMED_BY_CUSTOMER", settleAt: null });
     expect(sealed.sealedAt).toBeTruthy();
     expect(revisions(o.id).map((r) => r.kind)).toEqual(["READ", "SEAL"]);
-    // ولا مهمة OMS/تيليجرام ولا رسالة للعميل
-    expect(db._stores.backgroundJob.length).toBe(jobsBefore);
+    // بلا ربط OMS ولا تيليجرام: ولا مهمة ترحيل. رسالة التثبيت مهمة مستقلة (ما بتنبعت من التثبيت نفسه).
+    const added = db._stores.backgroundJob.slice(jobsBefore).map((j) => j.type);
+    expect(added).toEqual(["send_order_confirmation"]);
     expect(db._stores.message.length).toBe(messagesBefore);
   });
 
@@ -263,13 +264,18 @@ describe("سيناريو 11 — تعديل العميل ثم تعديل المو
     expect(revisions(o.id).some((r) => r.kind === "STAFF_EDIT")).toBe(true);
   });
 
-  it("تعديل موظف على طلب مثبّت مرفوض (مسار طلب التعديل = 1.6)", async () => {
+  it("تعديل/إلغاء موظف على طلب مثبّت = مسار طلب التعديل (محلي إذا ما انبعت)", async () => {
     const last = await completeConversation();
     await read(last, provider());
     const [o] = orders();
     await sealOrder(db as Db, { workspaceId: WS, orderId: o.id, actor: ACTOR });
-    await expect(editOrderFields(db as Db, { workspaceId: WS, orderId: o.id, actor: ACTOR, fields: { notes: "x" } })).rejects.toMatchObject({ code: "ORDER_NOT_EDITABLE" });
-    await expect(cancelOrderByStaff(db as Db, { workspaceId: WS, orderId: o.id, actor: ACTOR })).rejects.toMatchObject({ code: "ORDER_SEALED" });
+    const edit = await editOrderFields(db as Db, { workspaceId: WS, orderId: o.id, actor: ACTOR, fields: { notes: "اتصلوا قبل الوصول" } });
+    expect(edit.amend).toMatchObject({ action: "AMEND_APPLIED", orderId: o.id });
+    expect(orders()[0].notes).toBe("اتصلوا قبل الوصول");
+    const cancel = await cancelOrderByStaff(db as Db, { workspaceId: WS, orderId: o.id, actor: ACTOR });
+    expect(cancel.cancel).toMatchObject({ action: "CANCEL_APPLIED" });
+    expect(orders()[0].status).toBe("CANCELLED");
+    expect(revisions(o.id).map((r) => r.kind)).toEqual(["READ", "SEAL", "AMEND_APPLIED", "CANCEL_APPLIED"]);
   });
 });
 
