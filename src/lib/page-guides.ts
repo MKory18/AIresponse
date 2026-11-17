@@ -1,4 +1,4 @@
-import { pageForPath, NAV_GROUPS } from "@/lib/nav-model";
+import { pageForPath, NAV_GROUPS, NAV_GROUPS_V2 } from "@/lib/nav-model";
 
 /**
  * الشرح جوّا كل صفحة — «شو هاي الصفحة» و«الخطوة الجاية».
@@ -102,6 +102,11 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
     next: { label: "حسّن منتجاتك الأضعف", href: "/products" },
   },
   // ── الحساب والفريق
+  "/settings/integrations": {
+    what: "ربط الـ OMS (إرسال الطلبات المثبّتة ومزامنة المنتجات) وتيليجرام الطلبات. إذا الربط وقع بتشوف السبب وطريقة الإصلاح هون.",
+    tip: "جرّب «فحص الاتصال» بعد أي تغيير بالرابط أو التوكن.",
+    next: { label: "ارجع للطلبات", href: "/orders" },
+  },
   "/settings/team": {
     what: "أعضاء الفريق وأدوارهم: دعوة عضو أو إنشاؤه مباشرة، تغيير دوره أو تعليقه، واسم مساحة العمل.",
     tip: "أعطي كل موظف أقل صلاحية بتكفي شغله — جدول «شو بيقدر كل دور؟» بيوضّح.",
@@ -115,7 +120,8 @@ export const PAGE_GUIDES: Record<string, PageGuide> = {
 
 /** شرح الصفحة الي بتخدم هالمسار (أطول رابط مطابق، مع الأسماء المستعارة). */
 export function guideForPath(pathname: string): { href: string; guide: PageGuide } | null {
-  const hit = pageForPath(pathname, NAV_GROUPS);
+  // الهيكلين (2.3ب): صفحة جديدة موجودة بالهيكل الجديد بس لسا إلها شرح.
+  const hit = pageForPath(pathname, NAV_GROUPS) ?? pageForPath(pathname, NAV_GROUPS_V2);
   if (!hit) return null;
   const guide = PAGE_GUIDES[hit.page.href];
   return guide ? { href: hit.page.href, guide } : null;

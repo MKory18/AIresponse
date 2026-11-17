@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NAV_GROUPS, pageForPath } from "@/lib/nav-model";
+import { NAV_GROUPS, NAV_GROUPS_V2, pageForPath } from "@/lib/nav-model";
 import { PAGE_GUIDES, guideForPath, visitGuide } from "@/lib/page-guides";
 
 // `next/link` بيحتاج سياق الراوتر — للاختبار بنرجّعه <a> عادي.
@@ -23,7 +23,7 @@ import { PageGuidePanel } from "@/components/page-guide";
  * جديدة بلا شرح = الاختبار بيفشل.
  */
 
-const NAV_HREFS = NAV_GROUPS.flatMap((g) => g.pages.map((p) => p.href));
+const NAV_HREFS = [...new Set([...NAV_GROUPS, ...NAV_GROUPS_V2].flatMap((g) => g.pages.map((p) => p.href)))];
 
 describe("تغطية الشرح", () => {
   it("كل صفحة بالقائمة إلها شرح — ولا شرح ليتيم", () => {

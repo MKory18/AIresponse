@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   NAV_GROUPS,
+  NAV_GROUPS_V2,
   NAV_REDIRECTS,
   groupLanding,
   pageForPath,
@@ -71,7 +72,8 @@ describe("هيكل القائمة", () => {
   });
 
   it("ولا صفحة ضايعة: كل صفحة بلوحة التحكم إلها مجموعة", () => {
-    const orphans = dashboardRoutes().filter((r) => !pageForPath(r, NAV_GROUPS));
+    // 2.3ب: صفحة جديدة بتنضاف للهيكل الجديد (NAV_GROUPS_V2) بحزمتها؛ المهم ما تكون بلا مجموعة بأي هيكل.
+    const orphans = dashboardRoutes().filter((r) => !pageForPath(r, NAV_GROUPS) && !pageForPath(r, NAV_GROUPS_V2));
     expect(orphans, `صفحات بلا مجموعة: ${orphans.join(" ")}`).toEqual([]);
   });
 
