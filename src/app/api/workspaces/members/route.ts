@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createHandler, ok } from "@/core/api/handler";
 import { prisma } from "@/core/db/prisma";
+import { NotFoundError } from "@/core/errors";
 import { listMembers, inviteMember, createMember } from "@/modules/members/service";
 
 /**
@@ -43,7 +44,12 @@ export const POST = createHandler(
       });
       return ok({ member }, 201);
     }
-    const member = await inviteMember(prisma, ctx, body);
-    return ok({ member }, 201);
+    // S-01: رد واحد عام بكل الحالات.
+    try {
+      await inviteMember(prisma, ctx, body);
+    } catch (err) {
+      if (!(err instanceof NotFoundError)) throw err;
+    }
+    return ok({ invited: true }, 201);
   }
 );
