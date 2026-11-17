@@ -304,7 +304,7 @@ async function publishReadingUpdated(db: Db, workspaceId: string, conversationId
 }
 
 /** منتجات الصفحة المسموحة؛ مساحة بلا كتالوجات = كل المنتجات الفعّالة. */
-async function loadCatalog(db: Db, workspaceId: string, channelId: string | null): Promise<CatalogProduct[]> {
+export async function loadCatalog(db: Db, workspaceId: string, channelId: string | null): Promise<CatalogProduct[]> {
   const toProduct = (p: Row): CatalogProduct => ({
     id: String(p.id),
     name: String(p.name),
