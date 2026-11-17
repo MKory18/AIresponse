@@ -170,7 +170,7 @@ describe("الواجهة", () => {
   });
 
   it("قائمة الطلبات: عمود حالة واحد + تبويب «تحتاج مراجعة» (بلا عمود تلجرام ولا فلتر حالة التأكيد)", () => {
-    const page = src("src/app/(dashboard)/orders/page.tsx");
+    const page = src("src/app/(dashboard)/orders/legacy-orders.tsx");
     expect(page).toContain("orderStatusLabel");
     expect(page).toContain("ORDER_TABS");
     expect(page).not.toContain("<th>تلجرام</th>");

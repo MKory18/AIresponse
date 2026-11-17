@@ -14,6 +14,8 @@ import { calculatePricing, calculateCartPricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
 import { telegramNotifiedOrderIds } from "./telegram-status";
+import { searchWhere, tabWhere } from "./list-filters";
+import type { OrderTab } from "@/lib/order-status";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 const log = childLogger("orders");
@@ -688,12 +690,21 @@ export async function listOrders(
     confirmationStatus?: string;
     customerId?: string;
     productId?: string;
+    /** 3.2: تبويب «تحتاج مراجعة»… من الخادم (نفس `orderMatchesTab`). */
+    tab?: OrderTab;
+    /** 3.2: بحث برقم الطلب أو المستلم أو العميل. */
+    q?: string;
     cursor?: string;
     limit?: number;
   }
 ) {
   const limit = Math.min(params.limit ?? 25, 100);
   const where: Prisma.OrderWhereInput = { workspaceId: params.workspaceId };
+  const extra: Prisma.OrderWhereInput[] = [];
+  if (params.tab && params.tab !== "all") extra.push(tabWhere(params.tab));
+  const search = searchWhere(params.q);
+  if (Object.keys(search).length > 0) extra.push(search);
+  if (extra.length > 0) where.AND = extra;
   if (params.status) where.status = params.status as Prisma.EnumOrderStatusFilter["equals"];
   if (params.confirmationStatus) {
     where.confirmationStatus = params.confirmationStatus as Prisma.EnumConfirmationStatusFilter["equals"];
@@ -713,11 +724,13 @@ export async function listOrders(
   });
   const hasMore = orders.length > limit;
   const page = hasMore ? orders.slice(0, limit) : orders;
+  // 3.2: العدد الكلي من الخادم («عرض 25 من 143») — ممنوع عدّاد من الصفوف المحمّلة.
+  const total = await db.order.count({ where });
   // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع بأي قائمة.
   // + شعار «تم ترحيله للتلجرام» من سجل الإرسال الفعلي لكل طلب.
   const notified = await telegramNotifiedOrderIds(db, params.workspaceId, page.map((o) => o.id));
   const items = page.map((o) => ({ ...withoutClickSecrets(o), telegramNotified: notified.has(o.id) }));
-  return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+  return { items, nextCursor: hasMore ? items[items.length - 1].id : null, total };
 }
 
 /**

@@ -17,7 +17,7 @@ function walk(dir: string, out: string[] = []): string[] {
 export function newUiFiles(): string[] {
   const kit = [
     "switch", "segmented-control", "status-chip", "count-badge", "data-table", "icon-button", "tooltip", "menu", "callout",
-    "countdown", "evidence-link", "formatted",
+    "countdown", "evidence-link", "formatted", "drawer",
   ].map((n) => join(ROOT, "src", "components", "ui", `${n}.tsx`));
   const v2 = [...walk(join(ROOT, "src", "app")), ...walk(join(ROOT, "src", "components"))].filter((f) =>
     relative(ROOT, f).split(sep).includes("v2")
