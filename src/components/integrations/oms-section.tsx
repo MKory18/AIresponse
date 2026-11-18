@@ -8,6 +8,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { GlassCard } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { FixNote, RiskNote } from "@/components/integrations/ui";
+import { currentOmsError } from "@/lib/oms-health";
 
 type View = {
   configured: boolean;
@@ -17,6 +18,7 @@ type View = {
   hasToken: boolean;
   lastProductSyncAt: string | null;
   lastOkAt: string | null;
+  lastErrorAt: string | null;
   lastError: string | null;
 };
 
@@ -207,7 +209,8 @@ export function OmsSection() {
       )}
       <p className="mt-2 text-[11px] text-ink-subtle">
         آخر مزامنة منتجات: {view?.lastProductSyncAt ? new Date(view.lastProductSyncAt).toLocaleString("ar") : "—"}
-        {view?.lastError ? ` · آخر خطأ: ${view.lastError}` : ""}
+        {view?.lastOkAt ? ` · آخر نجاح اتصال: ${new Date(view.lastOkAt).toLocaleString("ar")}` : ""}
+        {view && currentOmsError(view) ? ` · آخر خطأ: ${currentOmsError(view)}` : ""}
       </p>
 
       <ConfirmDialog

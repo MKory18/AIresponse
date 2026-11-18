@@ -232,13 +232,13 @@ async function createOrder(
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const products = (await d.product.findMany({
     where: { id: { in: productIds }, workspaceId: input.workspaceId, isActive: true, isArchived: false },
-    select: { id: true, name: true, sku: true, price: true, currency: true },
-  })) as Array<{ id: string; name: string; sku: string | null; price: unknown; currency: string }>;
+    select: { id: true, name: true, sku: true, price: true, currency: true, offers: true },
+  })) as Array<{ id: string; name: string; sku: string | null; price: unknown; currency: string; offers?: unknown }>;
   const byId = new Map(products.map((p) => [p.id, p]));
   if (lines.some((l) => !byId.has(l.productId))) return { action: "NONE", reason: "PRODUCT_NOT_ACTIVE" };
   const breakdown = await calculateCartPricing(db as never, {
     workspaceId: input.workspaceId,
-    items: lines.map((l) => ({ price: byId.get(l.productId)!.price as never, quantity: l.quantity as number, currency: byId.get(l.productId)!.currency })),
+    items: lines.map((l) => ({ price: byId.get(l.productId)!.price as never, quantity: l.quantity as number, currency: byId.get(l.productId)!.currency, offers: byId.get(l.productId)!.offers })),
     province: v.recipient.province,
   });
 
@@ -386,8 +386,8 @@ async function updateOrder(
   const products = itemsChanged
     ? ((await d.product.findMany({
         where: { id: { in: productIds }, workspaceId: input.workspaceId, isActive: true, isArchived: false },
-        select: { id: true, name: true, sku: true, price: true, currency: true },
-      })) as Array<{ id: string; name: string; sku: string | null; price: unknown; currency: string }>)
+        select: { id: true, name: true, sku: true, price: true, currency: true, offers: true },
+      })) as Array<{ id: string; name: string; sku: string | null; price: unknown; currency: string; offers?: unknown }>)
     : [];
   const byId = new Map(products.map((p) => [p.id, p]));
   if (itemsChanged && lines.some((l) => !byId.has(l.productId))) return { action: "NONE", reason: "PRODUCT_NOT_ACTIVE" };
@@ -402,12 +402,12 @@ async function updateOrder(
       ? products
       : ((await d.product.findMany({
           where: { id: { in: cartLines.map((l) => l.productId) }, workspaceId: input.workspaceId },
-          select: { id: true, price: true, currency: true },
-        })) as Array<{ id: string; price: unknown; currency: string }>);
-    const priceById = new Map(priceRows.map((p) => [p.id, p]));
+          select: { id: true, price: true, currency: true, offers: true },
+        })) as Array<{ id: string; price: unknown; currency: string; offers?: unknown }>);
+    const priceById = new Map(priceRows.map((p) => [p.id, p as { id: string; price: unknown; currency: string; offers?: unknown }]));
     breakdown = await calculateCartPricing(db as never, {
       workspaceId: input.workspaceId,
-      items: cartLines.map((l) => ({ price: priceById.get(l.productId)!.price as never, quantity: l.quantity as number, currency: priceById.get(l.productId)!.currency })),
+      items: cartLines.map((l) => ({ price: priceById.get(l.productId)!.price as never, quantity: l.quantity as number, currency: priceById.get(l.productId)!.currency, offers: priceById.get(l.productId)!.offers })),
       province,
     });
     if (!breakdown.deliveryAvailable && !reasons.includes("AREA_NOT_SERVED")) reasons.push("AREA_NOT_SERVED");
