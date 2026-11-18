@@ -34,6 +34,8 @@ export const integrationSettingsSchema = z
     orderAgreementPolicy: z.enum(["EXPLICIT_OR_IMPLICIT", "EXPLICIT_ONLY"]),
     /** رسالة «تم تثبيت طلبك» للعميل. */
     orderConfirmMessage: z.boolean(),
+    /** رقم إعداد تسجيل الدخول (config_id) لتطبيق ميتا نوع Business — بيغلب META_LOGIN_CONFIG_ID. null = من البيئة. */
+    metaLoginConfigId: z.string().regex(/^\d{5,32}$/).nullable(),
   })
   .strict();
 
@@ -52,6 +54,7 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   orderAutoSeal: true,
   orderAgreementPolicy: "EXPLICIT_OR_IMPLICIT",
   orderConfirmMessage: true,
+  metaLoginConfigId: null,
 };
 
 /** يدمج المحفوظ مع الافتراضي حقلًا حقلًا (القيمة التالفة تسقط وحدها). */
