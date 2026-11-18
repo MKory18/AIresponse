@@ -104,10 +104,13 @@ describe("شيل الصفحة الموقوفة", () => {
     await expect(archiveFacebookPage(fakeDb(null), { workspaceId: "ws", pageId: "p" })).rejects.toThrow(NotFoundError);
   });
 
-  it("الموقوفة بس هي اللي بتنشال", () => {
-    expect(canArchive({ status: "DISCONNECTED" })).toBe(true);
-    for (const status of ["CONNECTED", "CONNECTING", "ERROR"]) {
-      expect(canArchive({ status })).toBe(false);
+  it("المربوطة لحالها هي اللي ما بتنشال", () => {
+    // ⚠️ كانت «الموقوفة بس»، فصفحة علقت بـERROR أو CONNECTING يطلعلها الزر
+    // والخادم يردّها — زر بيظهر وما بيشتغل.
+    // 🔧 كل صفحة مش مربوطة بتنشال (التفصيل: tests/facebook-archive-stuck-pages.test.ts).
+    expect(canArchive({ status: "CONNECTED" })).toBe(false);
+    for (const status of ["DISCONNECTED", "CONNECTING", "ERROR"]) {
+      expect(canArchive({ status })).toBe(true);
     }
   });
 });

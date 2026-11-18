@@ -31,9 +31,17 @@ export function visibleChannelsWhere(workspaceId: string) {
   return { workspaceId, type: "FACEBOOK" as const, archivedAt: null };
 }
 
-/** صفحة بتنشال من القائمة؟ الموقوفة بس. */
+/**
+ * صفحة بتنشال من القائمة؟ كل وحدة **مش** مربوطة.
+ *
+ * ⚠️ كانت `DISCONNECTED` لحالها، والزر بالواجهة بيظهر لكل `status !== "CONNECTED"`.
+ * فصفحة علقت بـ`ERROR` أو `CONNECTING` — وهاي اللي بتخلّفها محاولة ربط فاشلة —
+ * بيطلعلها الخيار والخادم بيرده 422. زر بيظهر وما بيشتغل.
+ * 🔧 نفس القاعدة بالمكانين. والنية محفوظة: المربوطة لحالها بترفض، لأنها هي
+ * اللي بترد على الزبائن وما بتختفي من عين المالك.
+ */
 export function canArchive(channel: { status: string }): boolean {
-  return channel.status === "DISCONNECTED";
+  return channel.status !== "CONNECTED";
 }
 
 export async function archiveFacebookPage(
