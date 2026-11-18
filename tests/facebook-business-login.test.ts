@@ -85,7 +85,10 @@ describe("«ولا صفحة» بتذكر إعداد تطبيق Business", () => 
     const note = describeConnectError("no_pages");
     // ⚠️ أشهر سبب بعد تبديل التطبيق: نوع Business بلا إعداد محفوظ.
     expect(note.fix).toMatch(/Business/);
-    expect(note.fix).toMatch(/META_LOGIN_CONFIG_ID/);
+    // الرقم بينحط من الموقع نفسه (بطاقة «ربط ميتا») مش من الخادم.
+    expect(note.fix).toMatch(/ربط ميتا/);
+    expect(note.fix).toMatch(/config_id/);
+    expect(note.fix).not.toMatch(/META_LOGIN_CONFIG_ID|الخادم/);
     // واللي كان موجود بيضل: الأدمن ووضع التطوير.
     expect(note.fix).toContain("Admin");
     expect(note.fix).toMatch(/التطوير/);

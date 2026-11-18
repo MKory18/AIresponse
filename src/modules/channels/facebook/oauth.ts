@@ -71,7 +71,29 @@ export async function verifyPagesSelectionToken(
   }
 }
 
-export function buildAuthorizeUrl(state: string, redirectUri: string): string {
+/**
+ * رقم إعداد تسجيل الدخول: القيمة المحفوظة بإعدادات المساحة (بطاقة «ربط ميتا»)
+ * أولًا، وبعدها `META_LOGIN_CONFIG_ID` من البيئة كاحتياط. فراغات = ما في قيمة.
+ */
+export function resolveLoginConfigId(
+  workspaceValue: string | null | undefined,
+  envValue: string | null | undefined
+): { configId: string | null; source: "workspace" | "env" | "none" } {
+  const fromWorkspace = (workspaceValue ?? "").trim();
+  if (fromWorkspace) return { configId: fromWorkspace, source: "workspace" };
+  const fromEnv = (envValue ?? "").trim();
+  if (fromEnv) return { configId: fromEnv, source: "env" };
+  return { configId: null, source: "none" };
+}
+
+/**
+ * @param workspaceConfigId رقم الإعداد المحفوظ بالمساحة (إن وُجد) — بيغلب قيمة البيئة.
+ */
+export function buildAuthorizeUrl(
+  state: string,
+  redirectUri: string,
+  workspaceConfigId?: string | null
+): string {
   const env = getEnv();
   const params = new URLSearchParams({
     client_id: env.META_APP_ID ?? "",
@@ -88,7 +110,7 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
   // Standard Facebook Login does NOT support config_id (Meta's own
   // troubleshooting warns the dialog then fails), so without a configuration
   // the scope list below stays exactly as it was for the Consumer-type app.
-  const configId = (env.META_LOGIN_CONFIG_ID ?? "").trim();
+  const { configId } = resolveLoginConfigId(workspaceConfigId, env.META_LOGIN_CONFIG_ID);
   if (configId) {
     params.set("config_id", configId);
   } else {

@@ -3,6 +3,7 @@ import { createHandler } from "@/core/api/handler";
 import { createOAuthState, buildAuthorizeUrl, resolveRedirectUri } from "@/modules/channels/facebook/oauth";
 import { recordAudit } from "@/modules/audit/service";
 import { prisma } from "@/core/db/prisma";
+import { getIntegrationSettings } from "@/modules/integrations/settings";
 import { childLogger } from "@/core/logger";
 
 const log = childLogger("facebook.oauth");
@@ -24,6 +25,8 @@ export const GET = createHandler(
       action: "facebook.oauth.started",
     });
     log.info({ workspaceId: auth!.workspaceId }, "facebook.oauth.started");
-    return NextResponse.redirect(buildAuthorizeUrl(state, redirectUri));
+    // رقم الإعداد من «الإعدادات ← الربط ← ربط ميتا» أولًا، والبيئة احتياط.
+    const { metaLoginConfigId } = await getIntegrationSettings(prisma, auth!.workspaceId);
+    return NextResponse.redirect(buildAuthorizeUrl(state, redirectUri, metaLoginConfigId));
   }
 );

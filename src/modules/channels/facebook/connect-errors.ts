@@ -19,7 +19,7 @@ export interface ConnectErrorNote {
 const NOTES: Record<ConnectErrorCode, ConnectErrorNote> = {
   no_pages: {
     risk: "فيسبوك ما رجّع ولا صفحة لهالحساب — إما حسابك مش مدير على أي صفحة، أو ما وافقت على صلاحية عرض الصفحات، أو تطبيق ميتا نوعه Business وبدّو إعداد ربط محفوظ.",
-    fix: "تأكد إنك Admin على الصفحة من إعدادات الصفحة، وإذا تطبيق ميتا لسا بوضع التطوير ضيف حسابك بـ App Roles. وإذا نوع التطبيق Business: اعمل إعداد من App Dashboard ← Facebook Login for Business ← Configurations واختار الصفحة وصلاحياتها، وحطّ رقم الإعداد بـ META_LOGIN_CONFIG_ID على الخادم — بلاه ميتا بترجّع صفر صفحات.",
+    fix: "تأكد إنك Admin على الصفحة من إعدادات الصفحة، وإذا تطبيق ميتا لسا بوضع التطوير ضيف حسابك بـ App Roles. وإذا نوع التطبيق Business: اعمل إعداد من App Dashboard ← Facebook Login for Business ← Configurations واختار الصفحة وصلاحياتها، وحطّ رقمه بالموقع نفسه: «الإعدادات ← الربط ← بطاقة ربط ميتا ← رقم إعداد تسجيل الدخول (config_id)» — بلاه ميتا بترجّع صفر صفحات.",
   },
   exchange: {
     risk: "ميتا رفضت إكمال الربط — رقم التطبيق أو سره أو رابط الرجوع ما بيطابقوا اللي مسجّل عندها.",

@@ -1,5 +1,11 @@
 import { getEnv } from "@/core/env";
+import { childLogger } from "@/core/logger";
 import { FacebookApiError } from "./types";
+
+const fbLog = childLogger("facebook.client");
+/** Scopes whose granular target_ids are Page ids (Facebook Login for Business). */
+const PAGE_SCOPES = new Set(["pages_show_list", "pages_messaging", "pages_manage_metadata"]);
+const MAX_ACCOUNT_PAGES = 20;
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION ?? "v21.0";
 const GRAPH_URL = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -338,15 +344,111 @@ export class FacebookClient {
     return extJson.access_token;
   }
 
-  /** Pages the user manages, each with its own Page Access Token. */
+  /**
+   * Pages the user granted, each with its own Page Access Token.
+   *
+   * 1) GET /me/accounts (paginated). 2) A Business-type app using Facebook
+   * Login for Business returns [] there even though the user picked a Page on
+   * Meta's screen -- so, only when step 1 is empty, read the granted Page ids
+   * from /debug_token `granular_scopes` and fetch each Page with the user token.
+   * Counts per source are logged; tokens never are.
+   */
   async getUserPages(userAccessToken: string): Promise<{ id: string; name: string; access_token: string }[]> {
-    const res = await fetch(`${this.graphUrl}/me/accounts?access_token=${encodeURIComponent(userAccessToken)}`);
-    const json = (await res.json()) as {
-      data?: { id: string; name: string; access_token: string }[];
-      error?: { message: string; code?: number };
-    };
-    if (json.error) throw new FacebookApiError(json.error.message, "PERMANENT", json.error.code);
-    return json.data ?? [];
+    type PageRow = { id: string; name: string; access_token: string };
+    const fromAccounts = await this.listMeAccounts(userAccessToken);
+    if (fromAccounts.length > 0) {
+      fbLog.info({ source: "me_accounts", count: fromAccounts.length }, "facebook.pages.discovered");
+      return fromAccounts;
+    }
+
+    const fromGranted: PageRow[] = [];
+    const ids = await this.grantedPageIds(userAccessToken);
+    for (const id of ids) {
+      try {
+        const res = await this.fetchImpl(
+          `${this.graphUrl}/${encodeURIComponent(id)}?${new URLSearchParams({
+            fields: "id,name,access_token",
+            access_token: userAccessToken,
+          })}`
+        );
+        const json = (await res.json().catch(() => ({}))) as {
+          id?: string;
+          name?: string;
+          access_token?: string;
+          error?: { message: string; code?: number };
+        };
+        if (json.error || !json.id || !json.access_token) {
+          fbLog.warn({ pageId: id, code: json.error?.code }, "facebook.pages.granted_page_skipped");
+          continue;
+        }
+        fromGranted.push({ id: json.id, name: json.name ?? json.id, access_token: json.access_token });
+      } catch {
+        fbLog.warn({ pageId: id }, "facebook.pages.granted_page_skipped");
+      }
+    }
+    fbLog.info(
+      { source: "granular_scopes", grantedIds: ids.length, count: fromGranted.length, meAccounts: 0 },
+      "facebook.pages.discovered"
+    );
+    return fromGranted;
+  }
+
+  /** GET /me/accounts, following paging.next (Graph host only, capped). */
+  private async listMeAccounts(userAccessToken: string): Promise<{ id: string; name: string; access_token: string }[]> {
+    const out: { id: string; name: string; access_token: string }[] = [];
+    let url: string | null = `${this.graphUrl}/me/accounts?${new URLSearchParams({ access_token: userAccessToken })}`;
+    for (let page = 0; url && page < MAX_ACCOUNT_PAGES; page++) {
+      const res: Response = await this.fetchImpl(url);
+      const json = (await res.json()) as {
+        data?: { id: string; name: string; access_token: string }[];
+        paging?: { next?: string };
+        error?: { message: string; code?: number };
+      };
+      if (json.error) throw new FacebookApiError(json.error.message, "PERMANENT", json.error.code);
+      out.push(...(json.data ?? []));
+      const next: string | undefined = json.paging?.next;
+      // Never follow a cursor off the Graph host (the user token rides in it).
+      url = next && next.startsWith(`${new URL(this.graphUrl).origin}/`) ? next : null;
+    }
+    return out;
+  }
+
+  /**
+   * Page ids the user granted on Meta's screen: /debug_token granular_scopes
+   * target_ids for the three Page scopes, de-duplicated. Best-effort -- any
+   * failure yields [] so the caller reports `no_pages` instead of crashing.
+   */
+  private async grantedPageIds(userAccessToken: string): Promise<string[]> {
+    const env = getEnv();
+    if (!env.META_APP_ID || !env.META_APP_SECRET) {
+      fbLog.warn({}, "facebook.pages.debug_token_skipped_no_app_keys");
+      return [];
+    }
+    try {
+      const res = await this.fetchImpl(
+        `${this.graphUrl}/debug_token?${new URLSearchParams({
+          input_token: userAccessToken,
+          access_token: `${env.META_APP_ID}|${env.META_APP_SECRET}`,
+        })}`
+      );
+      const json = (await res.json().catch(() => ({}))) as {
+        data?: { granular_scopes?: { scope?: string; target_ids?: string[] }[] };
+        error?: { message: string; code?: number };
+      };
+      if (json.error) {
+        fbLog.warn({ code: json.error.code }, "facebook.pages.debug_token_failed");
+        return [];
+      }
+      const ids = new Set<string>();
+      for (const g of json.data?.granular_scopes ?? []) {
+        if (!g.scope || !PAGE_SCOPES.has(g.scope)) continue;
+        for (const id of g.target_ids ?? []) if (id) ids.add(String(id));
+      }
+      return [...ids];
+    } catch {
+      fbLog.warn({}, "facebook.pages.debug_token_failed");
+      return [];
+    }
   }
 }
 
