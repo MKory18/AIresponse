@@ -78,14 +78,28 @@ export function buildAuthorizeUrl(state: string, redirectUri: string): string {
     redirect_uri: redirectUri,
     state,
     response_type: "code",
+  });
+  // Facebook Login for Business (a Business-type Meta app): Meta's docs state
+  // "config_id has replaced scope (although scope can still be included, we
+  // recommend that you do not use it)". Such an app completes the dialog when
+  // sent `scope`, but grants no Page assets -- /me/accounts comes back empty
+  // and the owner is returned with no page at all, which is exactly what
+  // happened after switching to the new Meta app.
+  // Standard Facebook Login does NOT support config_id (Meta's own
+  // troubleshooting warns the dialog then fails), so without a configuration
+  // the scope list below stays exactly as it was for the Consumer-type app.
+  const configId = (env.META_LOGIN_CONFIG_ID ?? "").trim();
+  if (configId) {
+    params.set("config_id", configId);
+  } else {
     // pages_read_engagement: required by GET /{page-id} (connection smoke test);
     // without it Graph returns error #100 "Page Public Content Access".
-    // NOTE (P21): there is NO `pages_user_profile` OAuth scope — Meta rejects the
+    // NOTE (P21): there is NO `pages_user_profile` OAuth scope -- Meta rejects the
     // whole authorize call with "Invalid Scope". Sender names/pictures require
     // Advanced Access to the "Business Asset User Profile Access" feature in
     // App Review (not a scope), plus pages_messaging/pages_read_engagement.
-    scope: "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement",
-  });
+    params.set("scope", "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement");
+  }
   return `https://www.facebook.com/${process.env.META_GRAPH_VERSION ?? "v21.0"}/dialog/oauth?${params}`;
 }
 
