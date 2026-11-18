@@ -75,6 +75,7 @@ Set on the Coolify application (Values marked SECRET must be generated, never co
 | `META_APP_ID`, `META_APP_SECRET` | SECRET — required for the real Meta flow; health reports `FACEBOOK_CONFIGURATION_MISSING` without them. |
 | `META_WEBHOOK_VERIFY_TOKEN` | SECRET — the token entered in the Meta App webhook UI. |
 | `META_REDIRECT_URI`, `META_GRAPH_VERSION` | Optional; defaults derive from `APP_URL` / `v21.0`. |
+| `META_LOGIN_CONFIG_ID` | Required for a **Business**-type Meta app: it grants Page assets from a saved Login for Business configuration, not from `scope`, so without it the OAuth dialog completes and returns zero pages. Id from App Dashboard -> Facebook Login for Business -> Configurations. Leave empty for a Consumer-type app, which still needs `scope`. Read at runtime by the web app only (the worker never runs OAuth) - no rebuild needed. |
 
 `REDIS_URL` is optional and unused by the current queue architecture.
 
