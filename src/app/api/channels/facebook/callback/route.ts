@@ -26,8 +26,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${uiBase}/channels?fb_error=callback`);
   }
 
+  // State is checked on its own, with its own reason code. Inside the try
+  // below an expired state (the window is 10 minutes, and Meta's own screens
+  // take longer than that) surfaced as `exchange`, which tells the owner the
+  // app id/secret or redirect URI do not match -- sending them hunting through
+  // settings that were never wrong.
+  let session: { workspaceId: string; userId: string };
   try {
-    const { workspaceId, userId } = await verifyOAuthState(state);
+    session = await verifyOAuthState(state);
+  } catch {
+    log.warn("facebook.oauth.state_invalid");
+    return NextResponse.redirect(`${uiBase}/channels?fb_error=expired`);
+  }
+
+  try {
+    const { workspaceId, userId } = session;
     const client = getFacebookClient();
     const redirectUri = resolveRedirectUri(req.nextUrl.origin);
     const longLivedToken = await client.exchangeCodeForLongLivedToken(code, redirectUri);

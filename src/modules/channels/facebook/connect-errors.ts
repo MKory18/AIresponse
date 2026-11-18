@@ -7,7 +7,7 @@
  * 🔧 كل رمز رجوع إله سبب واضح وخطوة تصحيح — الرمز بيجي من مسار الرجوع
  * (`/api/channels/facebook/callback`) بـ`?fb_error=`.
  */
-export type ConnectErrorCode = "no_pages" | "exchange" | "callback" | "selection";
+export type ConnectErrorCode = "no_pages" | "exchange" | "callback" | "selection" | "expired";
 
 export interface ConnectErrorNote {
   /** شو صار (أحمر). */
@@ -32,6 +32,10 @@ const NOTES: Record<ConnectErrorCode, ConnectErrorNote> = {
   selection: {
     risk: "انتهت مهلة اختيار الصفحة (١٠ دقائق) أو الرابط ناقص.",
     fix: "أعد الربط من البداية — الاختيار لازم يصير مباشرة بعد الرجوع من فيسبوك.",
+  },
+  expired: {
+    risk: "انتهت مهلة الربط قبل ما ترجع من فيسبوك — المهلة ١٠ دقائق من لحظة ما تضغط «اربط صفحة Facebook»، وشاشات ميتا بتاخد أكتر منها أحيانًا.",
+    fix: "أعد الضغط على «اربط صفحة Facebook» وكمّل الشاشات بلا توقف. وإذا كانت الصفحة مفتوحة عندك من قبل، سكّرها وابدأ من جديد — الرابط القديم ما بيزبط مرتين.",
   },
 };
 
