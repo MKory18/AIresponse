@@ -66,23 +66,6 @@ export interface PendingPage {
   name: string;
 }
 
-/**
- * بعد OAuth فيسبوك: الرابط بيرجع بـ`?fb_pages=<token>` (JWT). بنفكّ حمولته **للعرض بس** — الخادم هو اللي بيتحقق من التوكن عند الاختيار.
- */
-export function parsePendingPages(token: string): PendingPage[] | null {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return null;
-    // atob بيفك بايتات (Latin-1) — الأسماء العربية لازم تنفك UTF-8 وإلا بتطلع رموز مكسورة.
-    const bin = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    const json = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (ch) => ch.charCodeAt(0)))) as { pages?: Array<{ id?: unknown; name?: unknown }> };
-    const pages = (json.pages ?? []).flatMap((p) => (typeof p.id === "string" && typeof p.name === "string" ? [{ id: p.id, name: p.name }] : []));
-    return pages;
-  } catch {
-    return null;
-  }
-}
-
 export type ConnectType = "INSTAGRAM" | "TELEGRAM" | "WHATSAPP";
 export const CONNECT_TYPES: readonly ConnectType[] = ["INSTAGRAM", "TELEGRAM", "WHATSAPP"];
 

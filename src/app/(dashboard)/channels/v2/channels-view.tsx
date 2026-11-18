@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { ChannelCard } from "./channel-card";
 import { ConnectDialog } from "./connect-dialog";
-import { parsePendingPages, type ChannelRow, type PendingPage } from "./model";
+import { type ChannelRow, type PendingPage } from "./model";
 import { CHANNELS_STRINGS as S } from "./strings";
 import { useChannels } from "./use-channels";
 
@@ -42,14 +42,23 @@ export function ChannelsView() {
     const fbError = p.get("fb_error");
     if (fbError) setConnectError(describeConnectError(fbError));
     if (token) {
-      const pages = parsePendingPages(token);
-      // ⚠️ رمز صالح بصفر صفحات كان بيخلّي الشاشة فاضية بلا ولا كلمة.
-      if (pages && pages.length === 0) setConnectError(describeConnectError("no_pages"));
-      else if (pages) {
-        setConnectError(null);
-        setPending(pages);
-        setSelectionToken(token);
-      } else setConnectError(describeConnectError("selection"));
+      // ⚠️ حمولة الرمز مشفّرة، فالأسماء بتجي من الخادم (مش من فك الرمز بالمتصفح) —
+      // وإلا القائمة بتطلع فاضية و«ولا صفحة» وهي موجودة.
+      void (async () => {
+        try {
+          const res = await api<{ pages: PendingPage[] }>("/api/channels/facebook/pending-pages", { method: "POST", json: { selectionToken: token } });
+          const pages = res.pages ?? [];
+          // ⚠️ رمز صالح بصفر صفحات كان بيخلّي الشاشة فاضية بلا ولا كلمة.
+          if (pages.length === 0) setConnectError(describeConnectError("no_pages"));
+          else {
+            setConnectError(null);
+            setPending(pages);
+            setSelectionToken(token);
+          }
+        } catch {
+          setConnectError(describeConnectError("selection"));
+        }
+      })();
     }
     if (token || p.get("fb_error")) window.history.replaceState({}, "", "/channels");
     // eslint-disable-next-line react-hooks/exhaustive-deps

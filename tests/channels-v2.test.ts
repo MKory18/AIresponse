@@ -12,7 +12,7 @@ import { findForbiddenTerms } from "@/lib/glossary";
 import { listChannels } from "@/modules/channels/connect";
 import { PermissionsProvider } from "@/components/auth/permissions";
 import { ToastProvider } from "@/components/ui/toast";
-import { CONNECT_TYPES, MARKETS, SEND_MODES, connectBody, connectionChip, needsReconnect, parsePendingPages, type ChannelRow } from "@/app/(dashboard)/channels/v2/model";
+import { CONNECT_TYPES, MARKETS, SEND_MODES, connectBody, connectionChip, needsReconnect, type ChannelRow } from "@/app/(dashboard)/channels/v2/model";
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: unknown } & Record<string, unknown>) => createElement("a", { href, ...rest }, children as never),
@@ -42,13 +42,6 @@ describe("model: الاتصال وإعادة الربط", () => {
     expect(needsReconnect({ status: "DISCONNECTED", tokenStatus: "VALID", hasAccount: true })).toBe(true);
     expect(needsReconnect({ status: "DISCONNECTED", tokenStatus: "VALID", hasAccount: false })).toBe(false);
     expect(needsReconnect({ status: "CONNECTED", tokenStatus: "LONG_LIVED", hasAccount: true })).toBe(false);
-  });
-  it("الصفحات المعلّقة بعد OAuth: بتنفكّ للعرض، والتالف = null", () => {
-    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const token = `${b64({ alg: "HS256" })}.${b64({ pages: [{ id: "1", name: "أ" }, { id: 2, name: "x" }, { id: "3", name: "ب" }] })}.sig`;
-    expect(parsePendingPages(token)).toEqual([{ id: "1", name: "أ" }, { id: "3", name: "ب" }]);
-    expect(parsePendingPages("garbage")).toBeNull();
-    expect(parsePendingPages("a.b.c")).toBeNull();
   });
   it("جسم الربط حسب القناة، وخيارات الوضع والسوق الصحيحة", () => {
     const f = (o: Record<string, string>) => ({ get: (k: string) => o[k] ?? null });
