@@ -29,6 +29,11 @@ const envSchema = z.object({
   META_WEBHOOK_VERIFY_TOKEN: z.string().optional(),
   META_REDIRECT_URI: z.string().optional(),
   META_GRAPH_VERSION: z.string().optional(),
+  // Facebook Login for Business: a Business-type Meta app takes its permissions
+  // from a saved configuration in the App Dashboard, not from `scope`
+  // (App Dashboard -> Facebook Login for Business -> Configurations).
+  // Empty = the old Consumer-type app, which still needs `scope`.
+  META_LOGIN_CONFIG_ID: z.string().optional(),
   WHATSAPP_TOKEN: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   STORAGE_PROVIDER: z.string().default("local"),
