@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Facebook, PlugZap, Unplug } from "lucide-react";
+import { Facebook, PlugZap, Trash2, Unplug } from "lucide-react";
 import { MultiChannelSection } from "./multi-channel-section";
 import { CatalogPageSection } from "./catalog-page-section";
 import { TelegramOrderSection } from "./telegram-order-section";
@@ -14,6 +14,8 @@ import { ConfirmDialog, ErrorState } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlassCard, PageHeader } from "@/components/ui/card";
+import { RiskWithFix } from "@/components/integrations/ui";
+import { describeConnectError, type ConnectErrorNote } from "@/modules/channels/facebook/connect-errors";
 
 type Connection = {
   channelId: string;
@@ -43,6 +45,9 @@ export default function ChannelsPage() {
   const [confirmPageId, setConfirmPageId] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<ConnectErrorNote | null>(null);
+  const [archiving, setArchiving] = useState<string | null>(null);
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null);
   // أخطاء تظهر بخطورة حمراء، نجاحات بلون العلامة — لا خلط بينهما (P11).
   const [messageIsError, setMessageIsError] = useState(false);
 
@@ -77,18 +82,31 @@ export default function ChannelsPage() {
     const params = new URLSearchParams(window.location.search);
     const fbPages = params.get("fb_pages");
     const fbError = params.get("fb_error");
+    // ⚠️ كل الأسباب كانت تطلع برسالة وحدة، فالمالك ما بيعرف إنه الخلل عند
+    // ميتا مش عنا. 🔧 سبب لكل رمز مع خطوة التصحيح تحته.
     if (fbError) {
-      setMessage("فشل ربط الصفحة — حاول مجددًا.");
+      setMessageIsError(true);
+      setConnectError(describeConnectError(fbError));
+      setMessage(null);
       window.history.replaceState({}, "", "/channels");
     }
     if (fbPages) {
       // Decode pages client-side only for display; selection POST verifies the token.
       try {
         const payload = JSON.parse(atob(fbPages.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-        setPendingPages((payload.pages ?? []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })));
-        setSelectionToken(fbPages);
+        const pages = (payload.pages ?? []) as { id: string; name: string }[];
+        // رمز صالح بصفر صفحات كان بيخلّي الشاشة فاضية بلا ولا كلمة.
+        if (pages.length === 0) {
+          setMessageIsError(true);
+          setConnectError(describeConnectError("no_pages"));
+        } else {
+          setConnectError(null);
+          setPendingPages(pages.map((p) => ({ id: p.id, name: p.name })));
+          setSelectionToken(fbPages);
+        }
       } catch {
-        setMessage("رمز اختيار الصفحة غير صالح.");
+        setMessageIsError(true);
+        setConnectError(describeConnectError("selection"));
       }
       window.history.replaceState({}, "", "/channels");
     }
@@ -134,6 +152,28 @@ export default function ChannelsPage() {
     }
   }
 
+  /** شيل صفحة موقوفة من القائمة — المحادثات والطلبات بتضل كلها. */
+  async function archivePage(pageId: string) {
+    setArchiving(pageId);
+    try {
+      const res = await fetch("/api/channels/facebook", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMessageIsError(!res.ok);
+      setMessage(res.ok ? "تمت إزالة الصفحة من القائمة — المحادثات والطلبات محفوظة." : (data.message ?? "تعذّر إزالة الصفحة من القائمة."));
+    } catch {
+      setMessageIsError(true);
+      setMessage("تعذّر إزالة الصفحة من القائمة.");
+    } finally {
+      setArchiving(null);
+      setConfirmArchiveId(null);
+      load();
+    }
+  }
+
   async function savePersona(pageId: string) {
     const aiPersonaId = personaDrafts[pageId] ?? "";
     setSavingPersona(pageId);
@@ -174,6 +214,11 @@ export default function ChannelsPage() {
           role="status"
         >
           {message}
+        </GlassCard>
+      )}
+      {connectError && (
+        <GlassCard className="p-4">
+          <RiskWithFix risk={connectError.risk} fix={connectError.fix} />
         </GlassCard>
       )}
       {error && !loading && (
@@ -279,6 +324,20 @@ export default function ChannelsPage() {
                 إزالة الربط
               </Button>
             )}
+            {/* الموقوفة بس: بتنشال من القائمة والسجل بيضل كامل. */}
+            {c.status !== "CONNECTED" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirmArchiveId(c.pageId!)}
+                loading={archiving === c.pageId}
+                disabled={archiving === c.pageId}
+                className="text-red-600 hover:bg-red-500/10 dark:text-red-400"
+              >
+                <Trash2 size={13} />
+                شيلها من القائمة
+              </Button>
+            )}
           </div>
           <CatalogPageSection channelId={c.channelId} pageName={c.pageName} />
           <OrderFieldsSection channelId={c.channelId} />
@@ -309,6 +368,16 @@ export default function ChannelsPage() {
         body="سيتم إيقاف اتصال هذه الصفحة بالنظام ولن يتم استقبال رسائل جديدة منها. لن يتم حذف المحادثات أو العملاء أو الطلبات السابقة."
         confirmLabel="إزالة الربط"
         busy={disconnecting}
+        danger
+      />
+      <ConfirmDialog
+        open={confirmArchiveId !== null}
+        onClose={() => setConfirmArchiveId(null)}
+        onConfirm={() => confirmArchiveId && void archivePage(confirmArchiveId)}
+        title="شيل الصفحة من القائمة؟"
+        body="الصفحة بتختفي من هون بس — المحادثات والعملاء والطلبات القديمة بتضل كلها محفوظة ومقروءة. وإذا ربطتها من جديد بترجع تظهر."
+        confirmLabel="شيلها"
+        busy={archiving !== null}
         danger
       />
     </div>

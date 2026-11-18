@@ -5,6 +5,7 @@ import { recordAudit } from "@/modules/audit/service";
 import { NotFoundError } from "@/core/errors";
 import { z } from "zod";
 import { normalizeOrderFields } from "@/modules/orders/required-fields";
+import { archiveFacebookPage, visibleChannelsWhere } from "@/modules/channels/facebook/archive";
 
 /**
  * GET /api/channels/facebook — connection health. SAFE fields only:
@@ -14,8 +15,9 @@ export const GET = createHandler(
   { permission: "channels.read" },
   async ({ auth }) => {
     const env = getEnv();
+    // الصفحة اللي شالها المالك ما بتظهر — بس محادثاتها بتضل.
     const channels = await prisma.channel.findMany({
-      where: { workspaceId: auth!.workspaceId, type: "FACEBOOK" },
+      where: visibleChannelsWhere(auth!.workspaceId),
       include: { account: true },
     });
     return ok({
@@ -71,5 +73,29 @@ export const PATCH = createHandler(
       metadata: { pageId: body.pageId, aiPersonaId: body.aiPersonaId },
     });
     return ok({ ok: true, channelId: updated.id, aiPersonaId: updated.aiPersonaId });
+  }
+);
+
+/**
+ * DELETE /api/channels/facebook — شيل صفحة موقوفة من القائمة.
+ *
+ * ⚠️ مش حذف: صف القناة بيضل. `Conversation.channel` عليها `onDelete: Cascade`،
+ * فحذف الصف بيمسح كل محادثات الصفحة وطلباتها بضربة وحدة.
+ * 🔧 أرشفة — بتختفي من القائمة والسجل بيضل كامل، والربط من جديد بيرجّعها.
+ * والمربوطة ما بتنشال أبدًا: لازم إزالة الربط أول.
+ */
+export const DELETE = createHandler(
+  { body: z.object({ pageId: z.string().min(1) }), permission: "channels.connect" },
+  async ({ auth, body }) => {
+    const res = await archiveFacebookPage(prisma, { workspaceId: auth!.workspaceId, pageId: body.pageId });
+    await recordAudit(prisma, {
+      workspaceId: auth!.workspaceId,
+      userId: auth!.userId,
+      action: "facebook.page.archived",
+      entityType: "Channel",
+      entityId: res.channelId,
+      metadata: { pageId: body.pageId, historyKept: true },
+    });
+    return ok({ ok: true, pageId: body.pageId, archived: true });
   }
 );

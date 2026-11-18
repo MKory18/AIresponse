@@ -62,7 +62,8 @@ export const POST = createHandler(
         displayName: page.name,
         externalId: page.id,
       },
-      update: { status: "CONNECTED", displayName: page.name },
+      // archivedAt: null — صفحة شالها المالك من القائمة بترجع لما يربطها.
+      update: { status: "CONNECTED", displayName: page.name, archivedAt: null },
     });
 
     const encrypted = encryptSecret(page.accessToken);
