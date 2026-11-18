@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { PlugZap, Unplug, Wifi } from "lucide-react";
+import { PlugZap, Trash2, Unplug, Wifi } from "lucide-react";
 import { Can } from "@/components/auth/permissions";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -38,6 +38,7 @@ export function ChannelCard({
   onSave,
   onReconnect,
   onDisconnect,
+  onArchive,
   onTest,
 }: {
   row: ChannelRow;
@@ -46,6 +47,8 @@ export function ChannelCard({
   onSave: (id: string, setting: Setting, value: string) => Promise<string | null>;
   onReconnect: (row: ChannelRow) => void;
   onDisconnect: (row: ChannelRow) => void;
+  /** شيل صفحة موقوفة من القائمة — السجل بيضل. */
+  onArchive: (row: ChannelRow) => void;
   onTest: (row: ChannelRow) => void;
 }) {
   const toast = useToast();
@@ -66,6 +69,10 @@ export function ChannelCard({
   const items = [
     ...(row.type === "FACEBOOK" ? [{ key: "test", label: S.test, icon: <Wifi size={14} aria-hidden />, onSelect: () => onTest(row) }] : []),
     ...(row.status === "CONNECTED" ? [{ key: "disconnect", label: S.disconnect, icon: <Unplug size={14} aria-hidden />, danger: true, onSelect: () => onDisconnect(row) }] : []),
+    // الموقوفة بس: صفحة شغّالة ما بتختفي من عين المالك وهي بترد على الزبائن.
+    ...(row.type === "FACEBOOK" && row.status !== "CONNECTED"
+      ? [{ key: "archive", label: S.archive, icon: <Trash2 size={14} aria-hidden />, danger: true, onSelect: () => onArchive(row) }]
+      : []),
   ];
 
   return (

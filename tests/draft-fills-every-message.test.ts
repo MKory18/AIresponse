@@ -146,6 +146,35 @@ describe("المسودة بتكمل مهما كان تصنيف الرسالة", 
     expect(draft.productId).toBe(productId);
   });
 
+  // المحادثة الحقيقية (٢٠٢٦-١١-١٤ · ٠٧:٣٣): «٣ عبوات بكم؟» — سؤال سعر
+  // بنص فيه الكمية. الموديل ما طلّعها، فالطلب ضل ناقص كمية وهو حاكي عنها
+  // بالرد («٣ عبوات كريم حرير ✅»).
+  it("كمية مكتوبة بسؤال سعر بتنقرا من النص حتى لو الموديل ما طلّعها", async () => {
+    await startDraft();
+    await handleOrderIntent(db as Db, {
+      workspaceId: WS,
+      conversationId,
+      customerId,
+      extraction: { intent: "PRICE_QUESTION", entities: {}, requestedAction: "NONE", ...EMPTY },
+      customerText: "3 عبوات بكم؟",
+    });
+    expect((await openDraft()).quantity).toBe(3);
+  });
+
+  it("رقم عنوان أو رقم موبايل ما بينقرا كمية", async () => {
+    await startDraft();
+    for (const text of ["شارع 1235", "46002535"]) {
+      await handleOrderIntent(db as Db, {
+        workspaceId: WS,
+        conversationId,
+        customerId,
+        extraction: { intent: "PRICE_QUESTION", entities: {}, requestedAction: "NONE", ...EMPTY },
+        customerText: text,
+      });
+    }
+    expect((await openDraft()).quantity).toBeNull();
+  });
+
   it("رسالة بلا أي بيانات طلب ما بتفتح مسودة", async () => {
     const res = await handleOrderIntent(db as Db, {
       workspaceId: WS,
@@ -189,6 +218,11 @@ describe("«اي» لحالها تأكيد", () => {
     expect(parseConfirmation("اي").signal).toBe("YES");
     expect(parseConfirmation("أي").signal).toBe("YES");
     expect(parseConfirmation("اي ").signal).toBe("YES");
+  });
+
+  it("«اي اي» المكرّرة للتوكيد كمان موافقة", () => {
+    expect(parseConfirmation("اي اي").signal).toBe("YES");
+    expect(parseConfirmation("أي اي").signal).toBe("YES");
   });
 
   it("«أي» جوّا سؤال بتضل «which» مش موافقة", () => {
@@ -244,7 +278,7 @@ describe("رقم الزبون وعنوانه ما بيوصلوا الموديل"
 describe("مسار الذكاء بينادي منطق الطلب", () => {
   it("بوابة النداء بتعتمد على بيانات الطلب مش بس على التصنيف", () => {
     const src = readFileSync(join(process.cwd(), "src/modules/ai/stages/extraction.ts"), "utf8");
-    expect(src).toMatch(/hasOrderData\(extraction\)/);
+    expect(src).toMatch(/hasOrderData\(extraction, customerText\)/);
   });
 
   it("الحارس بياخد حالة الطلب من منطق الطلب", () => {

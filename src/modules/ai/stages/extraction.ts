@@ -311,7 +311,7 @@ export async function runExtraction(
     !readerMode &&
     (["ORDER_CREATE", "ORDER_UPDATE", "ORDER_CANCEL", "UNKNOWN"].includes(extraction.intent) ||
       extraction.requestedAction === "CREATE_ORDER" ||
-      hasOrderData(extraction))
+      hasOrderData(extraction, customerText))
   ) {
     try {
       orderResult = await handleOrderIntent(db, {

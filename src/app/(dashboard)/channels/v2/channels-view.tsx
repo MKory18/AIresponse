@@ -5,7 +5,9 @@ import { Plus, Radio } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Can } from "@/components/auth/permissions";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import { ConfirmDialog } from "@/components/ui/confirm";
+import { describeConnectError, type ConnectErrorNote } from "@/modules/channels/facebook/connect-errors";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
@@ -28,18 +30,26 @@ export function ChannelsView() {
   const [pending, setPending] = useState<PendingPage[]>([]);
   const [selectionToken, setSelectionToken] = useState<string | null>(null);
   const [toDisconnect, setToDisconnect] = useState<ChannelRow | null>(null);
+  const [toArchive, setToArchive] = useState<ChannelRow | null>(null);
+  const [connectError, setConnectError] = useState<ConnectErrorNote | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const token = p.get("fb_pages");
-    if (p.get("fb_error")) toast.show(S.fbError, "error");
+    // ⚠️ كل أسباب الفشل كانت رسالة وحدة، فالمالك ما بيعرف إنه الخلل عند ميتا
+    // (وضع التطوير · مش أدمن) مش عنا. 🔧 سبب وتصحيح لكل رمز.
+    const fbError = p.get("fb_error");
+    if (fbError) setConnectError(describeConnectError(fbError));
     if (token) {
       const pages = parsePendingPages(token);
-      if (pages) {
+      // ⚠️ رمز صالح بصفر صفحات كان بيخلّي الشاشة فاضية بلا ولا كلمة.
+      if (pages && pages.length === 0) setConnectError(describeConnectError("no_pages"));
+      else if (pages) {
+        setConnectError(null);
         setPending(pages);
         setSelectionToken(token);
-      } else toast.show(S.badToken, "error");
+      } else setConnectError(describeConnectError("selection"));
     }
     if (token || p.get("fb_error")) window.history.replaceState({}, "", "/channels");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,6 +83,24 @@ export function ChannelsView() {
     }
   }
 
+  /**
+   * شيل صفحة موقوفة من القائمة. ⚠️ مش حذف: صف القناة بيضل، لأنه حذفه بيجرّ
+   * معه كل محادثاتها وطلباتها (`onDelete: Cascade`).
+   */
+  async function archive(row: ChannelRow) {
+    setBusy(true);
+    try {
+      await api("/api/channels/facebook", { method: "DELETE", json: { pageId: row.externalId } });
+      toast.show(S.archived, "success");
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : S.pageFailed, "error");
+    } finally {
+      setBusy(false);
+      setToArchive(null);
+      void reload();
+    }
+  }
+
   async function test(row: ChannelRow) {
     try {
       await api("/api/channels/facebook/disconnect", { method: "PUT", json: { pageId: row.externalId } });
@@ -102,6 +130,8 @@ export function ChannelsView() {
           </Button>
         </div>
       </Can>
+
+      {connectError && <Callout risk={connectError.risk} fix={connectError.fix} />}
 
       {pending.length > 0 && (
         <section className="space-y-2 rounded-card border border-primary/40 bg-primary-soft p-4">
@@ -154,13 +184,14 @@ export function ChannelsView() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {rows.map((r) => (
-            <ChannelCard key={r.id} row={r} personas={personas} catalogs={catalogs} onSave={save} onReconnect={reconnect} onDisconnect={setToDisconnect} onTest={(x) => void test(x)} />
+            <ChannelCard key={r.id} row={r} personas={personas} catalogs={catalogs} onSave={save} onReconnect={reconnect} onDisconnect={setToDisconnect} onArchive={setToArchive} onTest={(x) => void test(x)} />
           ))}
         </div>
       )}
 
       <ConnectDialog open={connectOpen} initial={initial} oauthConfigured={oauthConfigured} onClose={() => setConnectOpen(false)} onLinked={(m) => (toast.show(m, "success"), void reload())} />
       <ConfirmDialog open={toDisconnect !== null} onClose={() => setToDisconnect(null)} onConfirm={() => toDisconnect && void disconnect(toDisconnect)} title={S.disconnectTitle} body={S.disconnectBody} confirmLabel={S.disconnectConfirm} busy={busy} danger />
+      <ConfirmDialog open={toArchive !== null} onClose={() => setToArchive(null)} onConfirm={() => toArchive && void archive(toArchive)} title={S.archiveTitle} body={S.archiveBody} confirmLabel={S.archiveConfirm} busy={busy} danger />
     </div>
   );
 }

@@ -195,11 +195,17 @@ const NO_WORDS = new Set(
 const NO_PHRASES = ["لا شكرا", "غيرت رايي", "ما بدي", "مش بدي"].map(normalizeCounting);
 const TAMAM = normalizeCounting("تمام");
 /**
- * «اي» لحالها موافقة بالشامي والأردني («اي، أكد»). وسط جملة بتضل «which»
- * («أي لون عندكم؟») — فمنقبلها بس لما تكون الرسالة كلها كلمة وحدة.
- * ⚠️ الزبون أكّد بـ«اي» بمحادثة حقيقية والنظام حسبها كلام عادي، فما تأكد الطلب.
+ * «اي» موافقة بالشامي والأردني («اي، أكد»)، وبتتكرر للتوكيد («اي اي»).
+ * وسط جملة بتضل «which» («أي لون عندكم؟») — فمنقبلها بس لما تكون الرسالة
+ * كلها منها، مرة أو أكتر.
+ * ⚠️ الزبون أكّد بـ«اي» وبـ«اي اي» بمحادثتين حقيقيتين والنظام حسبهم كلام عادي.
  */
 const BARE_YES_ONLY = [normalizeCounting("اي")];
+
+/** الرسالة كلها تكرار لكلمة موافقة مفردة («اي» · «اي اي»). */
+function isRepeatedBareYes(tokens: string[]): boolean {
+  return tokens.length > 0 && tokens.every((t) => BARE_YES_ONLY.includes(t));
+}
 /** Bare negation words that only refuse when they stand alone at the message end. */
 const BARE_NO = [normalizeCounting("لا"), normalizeCounting("مو")];
 
@@ -239,13 +245,13 @@ export function parseConfirmation(text: string): ConfirmationSignal {
       // "تمام" is filler inside a longer sentence → only counts in a short reply.
       if (token !== TAMAM || tokens.length <= 3) yes = true;
     }
-    // "اي" counts only as the whole message — mid-sentence it means "which".
-    if (tokens.length === 1 && BARE_YES_ONLY.includes(token)) yes = true;
     if (NO_WORDS.has(token)) {
       // Bare "لا"/"مو" mid-sentence negate another verb, not the order.
       if (!BARE_NO.includes(token) || i === tokens.length - 1) no = true;
     }
   }
+  // "اي" counts only when the whole message is it — mid-sentence: "which".
+  if (isRepeatedBareYes(tokens)) yes = true;
   for (const phrase of YES_PHRASES) if (containsPhrase(tokens, phrase)) yes = true;
   for (const phrase of NO_PHRASES) if (containsPhrase(tokens, phrase)) no = true;
 
