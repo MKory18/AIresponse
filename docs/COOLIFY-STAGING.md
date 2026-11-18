@@ -77,6 +77,8 @@ Set on the Coolify application (Values marked SECRET must be generated, never co
 | `META_REDIRECT_URI`, `META_GRAPH_VERSION` | Optional; defaults derive from `APP_URL` / `v21.0`. |
 | `META_LOGIN_CONFIG_ID` | Required for a **Business**-type Meta app: it grants Page assets from a saved Login for Business configuration, not from `scope`, so without it the OAuth dialog completes and returns zero pages. Id from App Dashboard -> Facebook Login for Business -> Configurations. Leave empty for a Consumer-type app, which still needs `scope`. Read at runtime by the web app only (the worker never runs OAuth) - no rebuild needed. |
 
+| `LEGAL_CONTACT_EMAIL` | Public contact address printed on `/privacy`, `/terms` and `/data-deletion` (Meta App Review requires a working contact). Read at runtime by the web app - no rebuild needed. Without it the pages say the address is not configured. |
+
 `REDIS_URL` is optional and unused by the current queue architecture.
 
 ### Reply latency vs link latency
