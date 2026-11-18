@@ -9,6 +9,13 @@ export const PERMISSIONS = [
   "orders.write",
   "orders.discount",
   "orders.discount.approve",
+  // قارئ الطلب (04-PERMISSIONS §4.1): تثبيت/إيقاف · إلغاء · اعتماد طلب تعديل بعد التثبيت.
+  "orders.seal",
+  "orders.cancel",
+  "orders.amend",
+  // 4.1 (04-PERMISSIONS §4.1): قواعد «مالك بس» صارت رموز مكتوبة مش `role ===` مدفونة.
+  /** الحذف النهائي للطلبات (كان فحص دور OWNER بـ order-service). */
+  "orders.delete",
   "products.read",
   "products.write",
   "products.wholesale",
@@ -24,14 +31,24 @@ export const PERMISSIONS = [
   "knowledge.write",
   "personas.read",
   "personas.write",
+  /** نشر شخصية للإنتاج (كان = personas.write). */
+  "personas.publish",
   "ai.configure",
   "channels.read",
   "channels.connect",
   "channels.send_human",
+  /** استلام المحادثة من الوكيل وإرجاعها له (كان تحت conversations.reply). */
+  "conversations.takeover",
+  /** ربط الـ OMS وتيليجرام الطلبات (كان settings.manage: المشرف كان يغيّر رابط الـ OMS وتوكنه). */
+  "integrations.manage",
+  /** إدارة صفوف المالكين (كان assertOwnerRank). */
+  "team.owners",
   "automation.read",
   "automation.write",
+  /** @deprecated ميتة: ما في مسار بيعتمد عليها. بتضل للتوافق (04-PERMISSIONS §4.2). */
   "automation.execute",
   "followups.read",
+  /** @deprecated ميتة: ما في مسار بيعتمد عليها. بتضل للتوافق (04-PERMISSIONS §4.2). */
   "followups.write",
   "followups.cancel",
   "handoffs.read",
@@ -70,10 +87,13 @@ const SALES_SUPPORT: Permission[] = [
   "analytics.read",
 ];
 
+/** شريك إداري: كل شي ما عدا إدارة المالكين والحذف النهائي للطلبات. */
+const PARTNER_EXCLUDED: ReadonlySet<Permission> = new Set<Permission>(["orders.delete", "team.owners"]);
+
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   SUPER_ADMIN: ALL,
   OWNER: ALL,
-  ADMIN: ALL,
+  ADMIN: ALL.filter((p) => !PARTNER_EXCLUDED.has(p)),
   MANAGER: [
     ...SALES_SUPPORT,
     "conversations.assign",
@@ -107,6 +127,11 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "orders.discount",
     "products.wholesale",
     "orders.discount.approve",
+    "orders.seal",
+    "orders.cancel",
+    "orders.amend",
+    "personas.publish",
+    "conversations.takeover",
     // P9 — الحملات: إنشاء/تحرير/جدولة + الاعتماد والنشر (المدير).
     "campaigns.read",
     "campaigns.write",
@@ -115,6 +140,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   SALES_AGENT: [
     ...SALES_SUPPORT,
     "channels.send_human",
+    // 4.1: الوارد بيحتاج قراءة القنوات لفلتر الصفحات (كان 403 بصمت)، والاستلام لكل من يرد.
+    "channels.read",
+    "conversations.takeover",
     "followups.read",
     "handoffs.read",
     "handoffs.claim",
@@ -122,6 +150,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     // P8 — خصم ضمن السقف فقط. رؤية سعر الجملة والاعتماد فوق السقف ليست
     // لهما (صلاحيتا MANAGER) — إنفاذ من الخادم، لا من الواجهة.
     "orders.discount",
+    "orders.seal",
+    "orders.cancel",
     // P9 — قراءة الحملات فقط؛ الإنشاء/الاعتماد لصلاحيات أعلى.
     "campaigns.read",
   ],
@@ -130,6 +160,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   SUPPORT_AGENT: [
     ...SALES_SUPPORT.filter((p) => p !== "orders.write"),
     "channels.send_human",
+    "channels.read",
+    "conversations.takeover",
     "handoffs.read",
     "handoffs.claim",
     "handoffs.resolve",

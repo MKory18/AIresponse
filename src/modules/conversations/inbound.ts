@@ -366,12 +366,16 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
       // Enqueue AI processing (Phase 4) — the webhook never waits for the AI.
       // Gating: conversation must be AI_ACTIVE; a failed enqueue never loses the
       // message (persisted above and retryable via /api/jobs/run scanning).
+      // قارئ الطلب (1.5): بوضع READER الرد بيتأجّل 6 ثواني لتجميع الرشقة (رد واحد لكل الرسائل).
+      const { getOrderMode, REPLY_BATCH_DELAY_MS } = await import("@/modules/orders/reader/schedule");
+      const batchReplies = (await getOrderMode(db, input.workspaceId)) === "READER";
       const queueAiJob = async () => {
         const { enqueueJob } = await import("@/modules/jobs/service");
         await enqueueJob(db, {
           workspaceId: input.workspaceId,
           type: "process_ai_message",
           payload: { conversationId: conversation.id, messageId: message.id },
+          ...(batchReplies ? { runAfter: new Date(Date.now() + REPLY_BATCH_DELAY_MS) } : {}),
           // Deterministic active-job idempotency (partial unique index):
           // webhook redelivery or a sweeper race can never create two ACTIVE
           // AI jobs for the same inbound message.
@@ -393,6 +397,22 @@ export async function processIncomingMessage(db: Db, input: IncomingMessageInput
     }
     // ٢) استخراج بيانات العميل بالخلفية (مهمة منفصلة، بلا إرسال).
     await enqueueCustomerIntel();
+  }
+
+  // قارئ الطلب (الحزمة 1.3): بالوضعين وبغض النظر عن مين ماسك المحادثة. وضع
+  // LEGACY_DRAFT (الافتراضي) = ولا مهمة. فشلها ما بيوقف الرسالة ولا الرد.
+  if (sendMode !== "UNKNOWN") {
+    try {
+      const { scheduleConversationRead } = await import("@/modules/orders/reader/schedule");
+      await scheduleConversationRead(db, {
+        workspaceId: input.workspaceId,
+        conversationId: conversation.id,
+        messageId: message.id,
+        trigger: "CUSTOMER",
+      });
+    } catch (err) {
+      childLogger("pipeline").warn({ err, messageId: message.id }, "read_schedule_failed");
+    }
   }
 
   return {

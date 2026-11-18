@@ -311,6 +311,29 @@ export function validateTaskModel(
 // customBaseUrl builds an INTERNAL OpenAI-compatible provider (delivery
 // "internal", tested independently — never claimed internal by name alone).
 // ── P6: configured fallback (failover only, never policy bypass) ──────────
+/** Same scheme + host + port (never a suffix/prefix match). Unparseable = false. */
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * S-02: عنوان Hermes الفعلي. عنوان المساحة بيتقبل بس إذا نفس أصل
+ * `HERMES_BASE_URL`؛ غير هيك بيتجاهل.
+ */
+export function resolveHermesBase(
+  workspaceBase: string | null | undefined,
+  envBase: string | null | undefined
+): string | undefined {
+  const env = envBase?.trim();
+  const ws = workspaceBase?.trim();
+  if (ws && env && sameOrigin(ws, env)) return ws;
+  return env || undefined;
+}
+
 export function getWorkspaceProvider(
   settings: {
     provider?: string | null;
@@ -382,15 +405,15 @@ export function getWorkspaceProvider(
   // Hermes Agent (OpenAI-compatible gateway). Endpoint comes from server ENV
   // (HERMES_BASE_URL — localhost/LAN allowed, it is deployer-trusted, not a
   // workspace-user URL, so the SSRF guard for customBaseUrl does not apply).
-  // A workspace customBaseUrl may still override it for public Hermes
-  // endpoints (then the save/probe SSRF guard applies as usual).
+  // S-02 (docs/HANDOVER-2026-10-27.md §4.1): a workspace customBaseUrl is
+  // honoured only on the SAME origin as HERMES_BASE_URL; anything else is
+  // ignored and the call goes to the ENV gateway.
   if (choice === "hermes") {
-    const override = settings?.customBaseUrl?.trim();
-    const base = override || e.hermesBaseUrl?.trim();
+    const base = resolveHermesBase(settings?.customBaseUrl, e.hermesBaseUrl);
     const key = e.hermesKey?.trim();
     if (!base || !key) {
       throw new AIProviderError(
-        `AI_NOT_CONFIGURED: provider "hermes" needs HERMES_BASE_URL + HERMES_API_KEY in server env${override ? "" : " (or a public customBaseUrl on the workspace)"}. Refusing mock fallback — no fake replies will be sent.`
+        `AI_NOT_CONFIGURED: provider "hermes" needs HERMES_BASE_URL + HERMES_API_KEY in server env. Refusing mock fallback — no fake replies will be sent.`
       );
     }
     return new OpenAICompatibleProvider({

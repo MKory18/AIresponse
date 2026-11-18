@@ -62,7 +62,7 @@ describe("searchPages", () => {
 
   it("النتيجة فيها اسم المجموعة (للتمييز بين صفحتين متشابهتين)", () => {
     const hit = searchPages("المنتجات", all).find((h) => h.href === "/products");
-    expect(hit?.groupLabel).toBe("المبيعات");
+    expect(hit?.groupLabel).toBe("المتجر");
   });
 
   it("كلمات الصفحات المدموجة بتلاقي مكانها الجديد", () => {
@@ -80,7 +80,7 @@ describe("كلمات الصفحات البديلة", () => {
 });
 
 describe("صندوق البحث بالشريط العلوي", () => {
-  const shell = readFileSync(join(process.cwd(), "src", "components", "app-shell.tsx"), "utf8");
+  const shell = readFileSync(join(process.cwd(), "src", "components", "shell-v2", "header-v2.tsx"), "utf8");
 
   it("combobox بأسهم وEnter وEscape واختصار «/» وCtrl+K، وبحث المحادثات بيضل", () => {
     expect(shell).toContain("searchPages(");

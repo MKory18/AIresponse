@@ -29,6 +29,7 @@ export type ConversationListItem = {
   assignedAgent: { id: string; name: string } | null;
   lastMessage?: { text: string | null; createdAt: string } | null;
   hasOpenHandoff?: boolean;
+  lastOrder?: { status: string; sealedAt: string | null; heldBy: string | null; omsStatus: string | null; omsShippingStatus: string | null } | null;
   aiPersona?: { id: string; name: string; source: "channel" | "workspace" } | null;
 };
 

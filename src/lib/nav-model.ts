@@ -35,68 +35,61 @@ export interface NavGroup {
   pages: NavPage[];
 }
 
+/**
+ * خريطة التنقل (03-UI-STRUCTURE §1): ٧ مجموعات. صارت الوحيدة بعد حذف الواجهة القديمة (3.8).
+ * ⚠️ صفحات «التحويلات» و«الوسائط» و«الآراء» و«مختبر التجميع» لسا بمكانها لحد ما يبنى بديلها — ما منلغي ميزة قبل بديلها.
+ */
 export const NAV_GROUPS: NavGroup[] = [
-  {
-    key: "home",
-    label: "الرئيسية",
-    icon: "LayoutDashboard",
-    placement: "main",
-    pages: [{ href: "/dashboard", label: "لوحة التحكم", permission: "analytics.read" }],
-  },
+  { key: "today", label: "اليوم", icon: "LayoutDashboard", placement: "main", pages: [{ href: "/dashboard", label: "اليوم", permission: "analytics.read" }] },
   {
     key: "chats",
     label: "المحادثات",
     icon: "MessageSquare",
     placement: "main",
     pages: [
-      { href: "/conversations", label: "الوارد", permission: "conversations.read" },
-      { href: "/handoffs", label: "التحويلات", permission: "handoffs.read" },
+      { href: "/conversations", label: "المحادثات", permission: "conversations.read" },
+      { href: "/handoffs", label: "يحتاجك", permission: "handoffs.read" },
       { href: "/customers", label: "العملاء", permission: "customers.read" },
       { href: "/intelligence", label: "مختبر التجميع", permission: "conversations.read" },
     ],
   },
+  { key: "orders", label: "الطلبات", icon: "ShoppingBag", placement: "main", pages: [{ href: "/orders", label: "الطلبات", permission: "orders.read" }] },
   {
-    key: "sales",
-    label: "المبيعات",
-    icon: "ShoppingBag",
+    key: "store",
+    label: "المتجر",
+    icon: "Store",
     placement: "main",
     pages: [
-      { href: "/orders", label: "الطلبات", permission: "orders.read" },
       { href: "/products", label: "المنتجات", permission: "products.read" },
-      { href: "/catalogs", label: "الكتالوجات", permission: "catalogs.read" },
+      { href: "/delivery", label: "التوصيل", permission: "products.read" },
+      { href: "/catalogs", label: "مجموعات الصفحات", permission: "catalogs.read" },
     ],
   },
   {
-    key: "ai",
-    label: "الذكاء",
+    key: "agent",
+    label: "الوكيل الذكي",
     icon: "Sparkles",
     placement: "main",
     pages: [
       { href: "/personas", label: "الشخصية", permission: "personas.read" },
-      { href: "/knowledge", label: "المعرفة", permission: "knowledge.read" },
+      { href: "/knowledge", label: "المعلومات", permission: "knowledge.read" },
       { href: "/media", label: "الوسائط", permission: "media.read" },
       { href: "/feedback", label: "آراء العملاء", permission: "feedback.read" },
-      // الترتيب = طريق الإعداد: علّمه ← جرّبه ← شغّله.
+      { href: "/assistant/order-rules", label: "قواعد الطلب", permission: "ai.configure" },
       { href: "/ai/playground", label: "التجربة", permission: "ai.configure" },
       { href: "/settings/ai", label: "التشغيل", permission: "ai.configure" },
     ],
   },
-  {
-    key: "reports",
-    label: "التقارير",
-    icon: "ChartNoAxesCombined",
-    placement: "main",
-    pages: [
-      { href: "/analytics", label: "التقارير", permission: "analytics.read" },
-    ],
-  },
+  { key: "reports", label: "التقارير", icon: "ChartNoAxesCombined", placement: "main", pages: [{ href: "/analytics", label: "التقارير", permission: "analytics.read" }] },
   {
     key: "settings",
     label: "الإعدادات",
     icon: "Settings",
     placement: "bottom",
     pages: [
-      { href: "/channels", label: "القنوات", permission: "channels.read" },
+      { href: "/channels", label: "الصفحات والقنوات", permission: "channels.read" },
+      { href: "/settings/integrations", label: "الربط", permission: "integrations.manage" },
+      { href: "/settings/system-tokens", label: "توكنات الأنظمة", permission: "integrations.manage" },
       { href: "/settings/team", label: "الفريق", permission: "users.manage" },
       { href: "/settings/account", label: "حسابي", permission: null },
     ],

@@ -6,6 +6,8 @@ import { t, timeAgo } from "@/lib/i18n";
 import { Avatar } from "../ui/avatar";
 import { Badge, StatusBadge } from "../ui/badge";
 import { EmptyState } from "../ui/empty-state";
+import { StatusChip, type Tone } from "../ui/status-chip";
+import { orderStatusLabel } from "@/lib/order-status";
 import { Skeleton } from "../ui/skeleton";
 import { CHANNEL_ICONS, avatarOf, displayNameOf, pageNameOf, type ConversationListItem } from "./types";
 
@@ -13,10 +15,13 @@ export function ConversationItem({
   conversation,
   selected,
   onSelect,
+  showOrder = false,
 }: {
   conversation: ConversationListItem;
   selected: boolean;
   onSelect: (id: string) => void;
+  /** الواجهة الجديدة (3.1ب): شارة حالة آخر طلب. القديمة ما بتتغيّر. */
+  showOrder?: boolean;
 }) {
   const c = conversation;
   const ChIcon = CHANNEL_ICONS[c.channel.type];
@@ -81,6 +86,7 @@ export function ConversationItem({
                 </Badge>
               )}
               {c.hasOpenHandoff && <Badge tone="URGENT" dot>{t.inbox.needsReview}</Badge>}
+              {showOrder && c.lastOrder && <OrderChip order={c.lastOrder} />}
               {(c.priority === "HIGH" || c.priority === "URGENT") && <Badge tone={c.priority} dot>{c.priority === "URGENT" ? "عاجلة" : "عالية"}</Badge>}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
@@ -99,6 +105,18 @@ export function ConversationItem({
         </div>
       </div>
     </button>
+  );
+}
+
+const ORDER_TONE: Record<string, Tone> = { info: "info", warn: "warning", ok: "success", bad: "danger", muted: "neutral" };
+
+/** شارة حالة الطلب بالقائمة: نفس نص ولون عمود الحالة بصفحة الطلبات (مصدر واحد: `orderStatusLabel`). */
+function OrderChip({ order }: { order: NonNullable<ConversationListItem["lastOrder"]> }) {
+  const s = orderStatusLabel(order);
+  return (
+    <StatusChip tone={ORDER_TONE[s.tone] ?? "neutral"} icon={false} className="max-w-40 truncate" >
+      <ShoppingBag size={10} aria-hidden /> {s.text.split(" · ")[0]}
+    </StatusChip>
   );
 }
 

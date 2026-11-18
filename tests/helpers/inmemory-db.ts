@@ -127,6 +127,8 @@ let allStores: Record<string, Row[]> | null = null;
 const RELATIONS: Record<string, Record<string, string>> = {
   customer: { orders: "order", conversations: "conversation", attributionTouches: "attributionTouch" },
   conversation: { channel: "channel" },
+  // طلب ← أصنافه (فلتر `items: { some }` بكشف التكرار).
+  order: { items: "orderItem" },
 };
 // العلاقات الي ربطناها نحنا (مش الي جاية من بيانات الاختبار) بتنقرأ من جديد
 // بكل استعلام — وإلا طلب انضاف بعد أول استعلام ما بيبين بفلاتر العلاقات.
@@ -142,7 +144,8 @@ function attachRelations(name: string, row: Row) {
     if (key === "channel") {
       row[key] = (allStores.channel ?? []).find((c: Row) => c.id === row.channelId) ?? null;
     } else {
-      row[key] = (allStores[rel[key]] ?? []).filter((r: Row) => r.customerId === row.id);
+      const fk = name === "order" ? "orderId" : "customerId";
+      row[key] = (allStores[rel[key]] ?? []).filter((r: Row) => r[fk] === row.id);
     }
   }
 }
@@ -229,6 +232,9 @@ function makeModel(name: string, store: Row[], defaults: Row = {}) {
         campaign: (r, w) => w.externalIdempotencyKey != null && r.workspaceId === w.workspaceId && r.externalIdempotencyKey === w.externalIdempotencyKey,
         // Page catalogs — mirrors the real @@unique constraints.
         catalog: (r, w) => r.workspaceId === w.workspaceId && r.name === w.name,
+        // قارئ الطلب: صف قراءة واحد لكل محادثة · نسخة طلب واحدة لكل (طلب، رقم).
+        conversationReading: (r, w) => r.conversationId === w.conversationId,
+        orderRevision: (r, w) => r.orderId === w.orderId && r.version === w.version,
         // Orders mirror the real unique keys: idempotencyKey (@unique,
         // nullable) and orderNumber (@unique).
         order: (r, w) =>
@@ -381,6 +387,9 @@ export function createFakeDb() {
   const orderItemRows: Row[] = [];
   const orderDraftRows: Row[] = [];
   const deliveryRuleRows: Row[] = [];
+  // قارئ الطلب (1.1): مخزنين جداد — القاعدة الوهمية ما بتفرض الفريد لحالها (uniqMap تحت).
+  const conversationReadingRows: Row[] = [];
+  const orderRevisionRows: Row[] = [];
   const humanHandoffRows: Row[] = [];
   const automationRows: Row[] = [];
   const automationVersionRows: Row[] = [];
@@ -408,6 +417,7 @@ export function createFakeDb() {
   const agentCallLogRows: Row[] = [];
   const productComplianceRows: Row[] = [];
   const omsConnectionRows: Row[] = [];
+  const workerHeartbeatRows: Row[] = [];
   // Page catalogs.
   const catalogRows: Row[] = [];
   const catalogProductRows: Row[] = [];
@@ -425,6 +435,7 @@ export function createFakeDb() {
       customer, conversation, message, channelIdentity, channel, workspaceMember,
       auditLog, product, productVariant, productPrice: productPriceRows, productMedia, mediaAsset, feedback,
       order: orderRows, orderItem: orderItemRows, orderDraft: orderDraftRows, deliveryRule: deliveryRuleRows,
+      conversationReading: conversationReadingRows, orderRevision: orderRevisionRows,
       channelAccount: channelAccountRows, webhookEvent: webhookEventRows, humanHandoff: humanHandoffRows, automation: automationRows, automationVersion: automationVersionRows, automationExecution: automationExecutionRows, user: userRows, followUp: followUpRows, workspaceUsage: workspaceUsageRows, dailyWorkspaceAnalytics: dailyAnalyticsRows,
       knowledgeDocument, knowledgeChunk, faq, backgroundJob,
       aISettings, persona, personaVersion, customerMemory, knowledgeCitation, aIUsageLog,
@@ -442,6 +453,7 @@ export function createFakeDb() {
       agentCallLog: agentCallLogRows,
       productCompliance: productComplianceRows,
       omsConnection: omsConnectionRows,
+      workerHeartbeat: workerHeartbeatRows,
       catalog: catalogRows,
       catalogProduct: catalogProductRows,
       catalogPageAssignment: catalogPageAssignmentRows,
@@ -485,7 +497,9 @@ export function createFakeDb() {
     playgroundSession: makeModel("playgroundSession", playgroundSessionRows, { useKnowledge: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     playgroundMessage: makeModel("playgroundMessage", playgroundMessageRows, { metadata: {}, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     aIUsageLog: makeModel("aIUsageLog", aIUsageLog, { promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, success: true, status: "SUCCESS", personaId: null, personaVersion: null, fallbackUsed: false, handoffReason: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
-    order: makeModel("order", orderRows, { status: "NEW", confirmationStatus: "PENDING", paymentStatus: "UNPAID", fulfillmentStatus: "UNFULFILLED", subtotal: 0, discount: 0, deliveryFee: 0, total: 0, currency: "USD", source: "AI", tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    conversationReading: makeModel("conversationReading", conversationReadingRows, { version: 0, stage: "NONE", data: {}, missing: [], flags: [], status: "IDLE", attempts: 0, readThroughMessageId: null, readThroughAt: null, orderId: null, lastError: null, readAt: null, firstInterestedAt: null, firstOrderingAt: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    orderRevision: makeModel("orderRevision", orderRevisionRows, { diff: [], evidence: [], omsState: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
+    order: makeModel("order", orderRows, { status: "NEW", confirmationStatus: "PENDING", paymentStatus: "UNPAID", fulfillmentStatus: "UNFULFILLED", subtotal: 0, discount: 0, deliveryFee: 0, total: 0, currency: "USD", source: "AI", settleAt: null, sealedAt: null, readVersion: 0, reviewReasons: [], agreement: null, heldBy: null, recipientAltPhone: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     orderItem: makeModel("orderItem", orderItemRows, { tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     orderDraft: makeModel("orderDraft", orderDraftRows, { state: "COLLECTING", sequence: 1, missingFields: [], items: [], phone: null, productId: null, quantity: null, rawAddress: null, province: null, customerName: null, orderId: null, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     deliveryRule: makeModel("deliveryRule", deliveryRuleRows, { fee: 0, isAvailable: true, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
@@ -505,6 +519,7 @@ export function createFakeDb() {
     agentDraft: makeModel("agentDraft", agentDraftRows, { tokenId: null, payload: {}, status: "PENDING", idempotencyKey: null, resultRef: null, decidedBy: null, decidedAt: null, decisionNote: null, expiresAt: null }),
     agentCallLog: makeModel("agentCallLog", agentCallLogRows, { tokenId: null, errorCode: null, requestId: null, agentRef: null, dryRun: false, latencyMs: 0 }),
     productCompliance: makeModel("productCompliance", productComplianceRows, { classification: null, verdict: null, allowedClaims: [], bannedClaims: [], adRules: [], sourceUpdatedAt: null, fetchedAt: null, lastError: null }),
+    workerHeartbeat: makeModel("workerHeartbeat", workerHeartbeatRows, { cycles: 0, processed: 0, failed: 0, tags: [], isActive: true, isArchived: false, isApproved: false, deletedAt: null }),
     omsConnection: makeModel("omsConnection", omsConnectionRows, { isActive: true, lastProductSyncAt: null, lastCustomerSyncAt: null, mode: "api", apiVersion: "legacy", webhookSecretEncrypted: null, webhookKey: null, autoHandoff: false, lastWebhookAt: null, lastOkAt: null, lastErrorAt: null, lastError: null }),
     catalog: makeModel("catalog", catalogRows, { description: null, isActive: true }),
     catalogProduct: makeModel("catalogProduct", catalogProductRows, { sortOrder: 0 }),

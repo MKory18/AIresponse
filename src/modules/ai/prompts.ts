@@ -137,6 +137,10 @@ export function trustedDataPrompt(data: {
   memory?: { type: string; content: string }[];
   summary?: string | null;
   orderSummary?: string | null;
+  /** قارئ الطلب (1.5): نصوص جاهزة من القاعدة — «بطاقة الطلب» · «جدول الأسعار» · «طلبات العميل الأخيرة». */
+  orderCard?: string | null;
+  priceTable?: string | null;
+  recentOrders?: string | null;
   sales?: {
     primary: { name: string; quantity: number; unitPrice: string; subtotal: string } | null;
     offer: { title: string; quantity: number; price: string; saving: string } | null;
@@ -231,6 +235,9 @@ export function trustedDataPrompt(data: {
   if (data.orderSummary) {
     blocks.push(`ملخص الطلب (بيانات رسمية — استخدم هذه الأرقام حرفيًا ولا تحسب شيئًا بنفسك):\n${data.orderSummary}`);
   }
+  if (data.orderCard) blocks.push(data.orderCard);
+  if (data.priceTable) blocks.push(data.priceTable);
+  if (data.recentOrders) blocks.push(data.recentOrders);
   // P8 — خطة البيع: أرقام محسوبة من قاعدة البيانات. النموذج يصيغ لغتها فقط
   // ولا يُسمح له باختراع أي رقم أو عرض غير مذكور هنا. سعر الجملة لا يدخل
   // هذه الكتلة أبدًا (يُرفض في طبقة الخدمات قبلها).
@@ -319,9 +326,22 @@ function mediaInstruction(outcome: ReplyMediaOutcome): string {
   }
 }
 
+/** تعليمات البائع بوضع قارئ الطلب (§9.4) — الطلب بيتسجّل من المحادثة، الوكيل بيبيع بس. */
+export function sellerInstruction(): string {
+  return [
+    "أنت بائع: هدفك تساعد العميل يكمل طلبه بأقل عدد رسائل.",
+    "- اطلب الناقص فقط (حسب «بطاقة الطلب»)، وإذا نقص أكثر من حقل اطلبهم برسالة واحدة.",
+    "- لا تطلب شيئًا مكتوبًا أنه «محفوظ ✅».",
+    "- لما تكتمل البيانات اكتب ملخصًا واحدًا (المنتج × الكمية · الإجمالي من جدول الأسعار · المدينة) واسأل «أثبّت الطلب؟».",
+    "- لا تقل «تم تثبيت/تأكيد/تسجيل الطلب» ولا تعطِ رقم طلب إلا إذا «بطاقة الطلب» حالتها «مثبّت». قبلها قل: «سجّلت بياناتك، ورح توصلك رسالة تثبيت برقم الطلب خلال دقائق».",
+    "- إذا العميل غيّر شيئًا (رقم، عنوان، كمية) قبل التثبيت: أكّد التغيير بجملة واحدة.",
+    "- إذا الطلب «مثبّت» والتعديل «غير ممكن»: قل أنك سجّلت طلب التعديل ورح يتواصل معه الفريق — لا تعد بتعديل.",
+  ].join("\n");
+}
+
 export function responseInstruction(
   persona: PersonaConfig,
-  opts: { media?: ReplyMediaOutcome } = {}
+  opts: { media?: ReplyMediaOutcome; seller?: boolean } = {}
 ): string {
   return [
     "اكتب الرد النهائي للعميل الآن، بعد أن عرفت النية والخطة والبيانات الموثوقة.",
@@ -332,6 +352,7 @@ export function responseInstruction(
     // what is really going out: it must neither deny a capability it has
     // nor promise a picture that is not coming.
     ...(opts.media ? [mediaInstruction(opts.media)] : []),
+    ...(opts.seller ? [sellerInstruction()] : []),
     "أعد النص فقط بدون أي شرح.",
   ].join("\n");
 }

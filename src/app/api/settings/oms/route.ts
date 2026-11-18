@@ -17,10 +17,10 @@ const bodySchema = z.object({
   autoHandoff: z.boolean().optional(),
 });
 
-export const GET = createHandler({ permission: "settings.manage" }, async ({ auth }) => {
+export const GET = createHandler({ permission: "integrations.manage" }, async ({ auth }) => {
   return ok(await getOmsConnectionView(prisma, auth!.workspaceId));
 });
 
-export const PUT = createHandler({ body: bodySchema, permission: "settings.manage" }, async ({ auth, body }) => {
+export const PUT = createHandler({ body: bodySchema, permission: "integrations.manage" }, async ({ auth, body }) => {
   return ok(await saveOmsConnection(prisma, { workspaceId: auth!.workspaceId, userId: auth!.userId }, body));
 });

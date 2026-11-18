@@ -10,7 +10,9 @@ export const GET = createHandler(
   async ({ auth, params }) => {
     const { id } = params as Params;
     const product = await getOwnedProduct(prisma, auth!.workspaceId, id);
-    return ok(redactProductForActor(product, auth!));
+    // لما الـ OMS مربوط: الاسم والسعر والمخزون للقراءة بالواجهة (بتيجي منه).
+    const conn = (await prisma.omsConnection.findUnique({ where: { workspaceId: auth!.workspaceId }, select: { isActive: true } })) as { isActive: boolean } | null;
+    return ok({ ...redactProductForActor(product, auth!), oms: { connected: Boolean(conn?.isActive) } });
   }
 );
 

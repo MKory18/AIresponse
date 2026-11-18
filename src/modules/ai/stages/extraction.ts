@@ -32,6 +32,7 @@ import { recordAudit } from "@/modules/audit/service";
 import { matchProductByAnyName } from "@/modules/products/name-match";
 import { handleOrderIntent, hasOrderData } from "@/modules/orders/intelligence";
 import { isBuyingContext } from "@/modules/sales/plan-builder";
+import { isReaderReplyMode, buildReaderReplyContext, type ReaderReplyContext } from "@/modules/orders/reader/reply-context";
 import type { Db } from "@/modules/customers/service";
 import type {
   AIExecutionResult,
@@ -86,6 +87,9 @@ export async function runExtraction(
   gate: GatingState
 ): Promise<{ terminal: AIExecutionResult } | { ready: ExtractionReady }> {
   const { timed, pipelineStarted } = fx;
+  // قارئ الطلب (1.5): بوضع READER الرد بنداء ذكاء واحد — الاستخراج و handleOrderIntent بيتشالوا
+  // (القارئ بيسجّل الطلب بالخلفية). LEGACY_DRAFT و READER_SHADOW = المسار القديم بالحرف.
+  const readerMode = await isReaderReplyMode(db, params.workspaceId);
   const {
     message,
     conversation,
@@ -206,16 +210,17 @@ export async function runExtraction(
     !/\d/.test(customerText) &&
     !looksLikeInjection(customerText);
   try {
-    if (fastPathGreeting || mediaFastPath || generalFastPath) {
+    if (fastPathGreeting || mediaFastPath || generalFastPath || readerMode) {
       extraction = {
         intent: mediaFastPath ? "PRODUCT_QUESTION" : heuristicPre.intent,
         confidence: heuristicPre.confidence,
         entities: {},
         missingFields: [],
         memories: [],
-        requestedAction: "ANSWER",
+        requestedAction: readerMode && heuristicPre.intent === "HUMAN_REQUEST" ? "HANDOFF_HUMAN" : "ANSWER",
       };
       fx.stageMs.extractionSkipped = 1;
+      if (readerMode) fx.stageMs.extractionSkippedReader = 1;
     } else {
       // P14 — توضيح: هذه المرحلة (`extraction` في توقيتات خط الأنابيب) هي
       // استخراج **نية/كيانات الرسالة** (منتج/كمية/عنوان…) اللازمة لصياغة الرد،
@@ -303,9 +308,10 @@ export async function runExtraction(
   // 🔧 `hasOrderData` فحص حتمي بلا قاعدة بيانات ولا نداء ذكاء — بيمرّر الرسالة
   // اللي فيها بيانات طلب مهما كان تصنيفها.
   if (
-    ["ORDER_CREATE", "ORDER_UPDATE", "ORDER_CANCEL", "UNKNOWN"].includes(extraction.intent) ||
-    extraction.requestedAction === "CREATE_ORDER" ||
-    hasOrderData(extraction, customerText)
+    !readerMode &&
+    (["ORDER_CREATE", "ORDER_UPDATE", "ORDER_CANCEL", "UNKNOWN"].includes(extraction.intent) ||
+      extraction.requestedAction === "CREATE_ORDER" ||
+      hasOrderData(extraction, customerText))
   ) {
     try {
       orderResult = await handleOrderIntent(db, {
@@ -334,7 +340,7 @@ export async function runExtraction(
     ...historyNewestFirst.filter((m) => m.senderType === "CUSTOMER"),
     ...historyNewestFirst.filter((m) => m.senderType !== "CUSTOMER"),
   ];
-  const [memories, productId] = await timed("memoryProduct", () =>
+  const [memories, productIdResolved] = await timed("memoryProduct", () =>
     Promise.all([
       memoriesPending,
       resolveProductId(
@@ -343,10 +349,26 @@ export async function runExtraction(
         extraction,
         customerText,
         allowedProductIds,
-        historyForProduct
+        // READER: المنتج المحوري حتمي — رسائل العميل الحالية ← آخر 6 رسائل ← بنود القراءة.
+        readerMode ? historyForProduct.slice(0, 6) : historyForProduct,
+        { forceHistory: readerMode }
       ),
     ])
   );
+  let readerContext: ReaderReplyContext | undefined;
+  let productId = productIdResolved;
+  if (readerMode) {
+    readerContext = await timed("readerContext", () =>
+      buildReaderReplyContext(db as never, {
+        workspaceId: params.workspaceId,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        productId: productIdResolved,
+      })
+    );
+    const fromReading = readerContext.readingProductId;
+    if (!productId && fromReading && (!allowedProductIds || allowedProductIds.includes(fromReading))) productId = fromReading;
+  }
   const context = await timed("context", () =>
     buildAIContext(db, vectorStore, {
       workspaceId: params.workspaceId,
@@ -371,11 +393,16 @@ export async function runExtraction(
     plan.missingFields = orderResult.missingFields ?? plan.missingFields;
   }
   void extractionOk;
+  if (readerContext && ["COLLECTING", "AWAITING_SEAL", "UNDER_REVIEW"].includes(readerContext.state)) {
+    plan.goal = "complete_order";
+    plan.needsClarification = readerContext.missing.length > 0;
+    plan.missingFields = readerContext.missing;
+  }
 
   // P8 — Sales Intelligence: خطة بيع حتمية من DB (أسعار/عروض/مكملات) عند
   // سياق شراء. فشلها لا يكسر المسار أبدًا، وغيابها لا يغيّر السلوك القديم.
   let salesPlan: import("@/modules/sales/plan-schemas").SalesPlan | undefined;
-  if (productId && isBuyingContext(extraction.intent, extraction.requestedAction)) {
+  if (productId && (isBuyingContext(extraction.intent, extraction.requestedAction) || (readerContext && readerContext.state !== "NONE"))) {
     try {
       // PERF — reuse the product row buildAIContext already read (same row,
       // same workspace check inside buildProductContext). Fallback fetch only
@@ -440,6 +467,7 @@ export async function runExtraction(
       salesPlan,
       catalogBoundary,
       recallGuard,
+      readerContext,
     },
   };
 }
@@ -456,7 +484,8 @@ async function resolveProductId(
   // Newest-first history. Only consulted when the current message names no
   // product and either asks for a picture («ورجيني الصورة») or follows up
   // on the product just discussed («قديش سعره» · «تمام بدي اطلب»).
-  history: { senderType: string; text: string | null }[] = []
+  history: { senderType: string; text: string | null }[] = [],
+  opts: { forceHistory?: boolean } = {}
 ): Promise<string | null> {
   const candidates: string[] = [];
   if (extraction.entities.product) candidates.push(extraction.entities.product);
@@ -465,7 +494,7 @@ async function resolveProductId(
   candidates.push(...productSearchWords(customerText));
   const direct = await findProductId(db, workspaceId, candidates, allowedIds);
   if (direct) return direct;
-  if (wantsMedia(customerText) === null && !refersToDiscussedProduct(extraction)) return null;
+  if (wantsMedia(customerText) === null && !refersToDiscussedProduct(extraction) && !opts.forceHistory) return null;
   for (const past of history) {
     if (!past.text || past.text === customerText) continue;
     const found = await findProductId(

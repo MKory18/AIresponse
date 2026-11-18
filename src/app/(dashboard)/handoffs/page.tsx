@@ -33,6 +33,7 @@ const REASONS_AR: Record<string, string> = {
   INJECTION_DETECTED: "محاولة اختراق",
   REPEATED_FAILURE: "فشل متكرر",
   MANUAL: "يدوي",
+  ORDER_CHANGE_REQUEST: "طلب تعديل على طلب مثبّت",
 };
 
 export default function HandoffsPage() {

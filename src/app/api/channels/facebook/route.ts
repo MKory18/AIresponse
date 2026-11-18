@@ -43,11 +43,11 @@ export const GET = createHandler(
 
 /**
  * PATCH /api/channels/facebook — assign an AI persona to a page.
- * Changing the page persona requires AI configuration rights. Reconnect is
+ * Changing the page persona requires channel-connect rights (same as by-id/[id]/persona). Reconnect is
  * NOT needed: the assignment takes effect for the next inbound message.
  */
 export const PATCH = createHandler(
-  { body: z.object({ pageId: z.string().min(1), aiPersonaId: z.string().min(1).nullable() }), permission: "ai.configure" },
+  { body: z.object({ pageId: z.string().min(1), aiPersonaId: z.string().min(1).nullable() }), permission: "channels.connect" },
   async ({ auth, body }) => {
     const channel = await prisma.channel.findFirst({
       where: { workspaceId: auth!.workspaceId, type: "FACEBOOK", externalId: body.pageId },

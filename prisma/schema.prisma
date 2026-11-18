@@ -34,6 +34,8 @@ model User {
   passwordHash String
   name         String
   isSuperAdmin Boolean   @default(false)
+  /// 4.2: كلمة مرور مؤقتة من الإدارة (إنشاء عضو أو إعادة تعيين) — بتنطلب تغييرها بأول دخول.
+  mustChangePassword Boolean @default(false)
   availability String    @default("AVAILABLE")
   lastSeenAt   DateTime?
   createdAt    DateTime  @default(now())
@@ -1149,6 +1151,18 @@ model Order {
   pageRef            String?
   psidEnc            String?
   wabaId             String?
+  // قارئ الطلب (02-ORDER-FLOW §6) — كلها إضافية/اختيارية:
+  // settleAt = موعد التثبيت التلقائي (null بعد التثبيت أو مع «أوقف») · sealedAt = لحظة التثبيت.
+  settleAt           DateTime?
+  sealedAt           DateTime?
+  readVersion        Int                @default(0)
+  reviewReasons      String[]           @default([])
+  // EXPLICIT · IMPLICIT · STAFF
+  agreement          String?
+  heldBy             String?
+  recipientAltPhone  String?
+  omsShippingStatus  String?
+  omsCheckedAt       DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -1159,6 +1173,7 @@ model Order {
 
   @@unique([workspaceId, orderNumber])
   @@index([workspaceId, status])
+  @@index([workspaceId, status, settleAt])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, customerId, createdAt])
   @@index([workspaceId, omsOrderNumber])
@@ -1234,6 +1249,7 @@ enum OrderDraftState {
   CANCELLED
 }
 
+/// DEPRECATED 2026-11 — بطّل يُكتب عليه بوضع القارئ (orderMode=READER). الجدول بيضل (ممنوع الحذف).
 model OrderDraft {
   id               String          @id @default(cuid())
   workspaceId      String
@@ -1275,6 +1291,8 @@ model DeliveryRule {
   fee         Decimal  @default(0) @db.Decimal(12, 2)
   isAvailable Boolean  @default(true)
   freeOver    Decimal? @db.Decimal(12, 2)
+  // عملة الرسم (اختيارية — الفاضي = عملة المنتج). مضافة لحزمة قارئ الطلب.
+  currency    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1486,6 +1504,56 @@ enum HandoffReason {
   INJECTION_DETECTED
   REPEATED_FAILURE
   MANUAL
+  ORDER_CHANGE_REQUEST
+}
+
+/// قراءة المحادثة — آخر لقطة قرأها «قارئ الطلب». مشتقة من النص الكامل، مش تراكمية.
+/// stage: NONE|INTERESTED|COLLECTING|COMPLETE|CANCELLED · status: IDLE|READING|FAILED.
+/// بلا علاقات عن قصد (جدول إضافي مستقل — لا يلمس الجداول الموجودة).
+model ConversationReading {
+  id                   String    @id @default(cuid())
+  workspaceId          String
+  conversationId       String    @unique
+  version              Int       @default(0)
+  stage                String    @default("NONE")
+  readThroughMessageId String?
+  readThroughAt        DateTime?
+  data                 Json      @default("{}")
+  missing              String[]  @default([])
+  flags                String[]  @default([])
+  orderId              String?
+  status               String    @default("IDLE")
+  attempts             Int       @default(0)
+  lastError            String?
+  readAt               DateTime?
+  firstInterestedAt    DateTime?
+  firstOrderingAt      DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([workspaceId, stage])
+  @@index([workspaceId, status])
+}
+
+/// سجل نسخ الطلب — كل تغيير بسطر: قراءة · تعديل موظف · تثبيت · طلب تعديل بعد التثبيت.
+/// kind: READ|STAFF_EDIT|SEAL|AMEND_REQUEST|AMEND_APPLIED|AMEND_REJECTED|CANCEL_REQUEST|CANCEL_APPLIED
+/// omsState (للتعديلات بعد الإرسال): PENDING|APPLIED|NOTE_SENT|NEEDS_STAFF|FAILED
+model OrderRevision {
+  id          String   @id @default(cuid())
+  workspaceId String
+  orderId     String
+  version     Int
+  kind        String
+  snapshot    Json
+  diff        Json     @default("[]")
+  evidence    Json     @default("[]")
+  actor       String
+  omsState    String?
+  createdAt   DateTime @default(now())
+
+  @@unique([orderId, version])
+  @@index([workspaceId, orderId])
+  @@index([workspaceId, omsState])
 }
 
 enum HandoffStatus {

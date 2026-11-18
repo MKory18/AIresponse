@@ -9,7 +9,7 @@ type Params = { id: string; version: string };
  * (append-only history — the past is never rewritten). Audited.
  * Permission: personas.write.
  */
-export const POST = createHandler({ permission: "personas.write" }, async ({ auth, params }) => {
+export const POST = createHandler({ permission: "personas.publish" }, async ({ auth, params }) => {
   const { id, version } = params as Params;
   const v = Number(version);
   if (!Number.isInteger(v) || v <= 0) {

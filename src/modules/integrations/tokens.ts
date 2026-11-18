@@ -111,7 +111,7 @@ export async function createIntegrationToken(
 ): Promise<{ token: string; view: TokenView }> {
   const preset = TOKEN_PRESETS[input.system];
   if (!preset) throw new AppError("نظام غير معروف للتوكن", 422, "UNKNOWN_TOKEN_SYSTEM");
-  const allowed = new Set<string>(preset.scopes);
+  const allowed = new Set<string>([...preset.scopes, ...(("optionalScopes" in preset ? preset.optionalScopes : []) as readonly string[])]);
   const scopes = (input.scopes ?? [...preset.scopes]).filter((s) => (TOKEN_SCOPES as readonly string[]).includes(s));
   // لا صلاحية خارج حدود النظام: توكن الميديا باير لا يقدر يطلب حملات.
   for (const s of scopes) {

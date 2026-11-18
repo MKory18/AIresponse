@@ -14,6 +14,8 @@ import { calculatePricing, calculateCartPricing } from "./pricing";
 import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
 import { telegramNotifiedOrderIds } from "./telegram-status";
+import { searchWhere, tabWhere } from "./list-filters";
+import type { OrderTab } from "@/lib/order-status";
 import type { Order, OrderDraft, OrderItem, OrderStatus, Prisma } from "@prisma/client";
 
 const log = childLogger("orders");
@@ -416,31 +418,7 @@ export async function createOrderFromDraft(
     );
   }
 
-  // ترحيل الطلب لتلجرام — مرة واحدة عند إنشاء الطلب الرسمي (المسودة ما بتترحّل).
-  // المصدر الأول: إعدادات المساحة (نفس اللي تنحفظ من الواجهة)، وبعدها متغيرات البيئة.
-  try {
-    await deliverOrderTelegram(db, { workspaceId: ctx.workspaceId, userId: ctx.userId, orderId: order.id });
-  } catch (err) {
-    // الإشعار ما بيوقف إنشاء الطلب؛ الفشل بينحفظ كمهمة إعادة محاولة.
-    await enqueueJob(db, {
-      workspaceId: ctx.workspaceId,
-      type: "notify_order_telegram",
-      payload: { orderId: order.id, userId: ctx.userId },
-      runAfter: new Date(Date.now() + 30_000),
-      idempotencyKey: `tg-order:${ctx.workspaceId}:${order.id}`,
-      maxAttempts: 8,
-    }).catch(() => undefined);
-    log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_telegram_failed");
-  }
-
-  // ربط الـ OMS: الطلب المؤكد بينزل بالـ OMS كمهمة مستقلة (إذا الإرسال
-  // التلقائي مفعّل) — فشلها أو انقطاع الـ OMS ما بيوقف إنشاء الطلب أبدًا.
-  try {
-    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
-    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, order.id);
-  } catch (err) {
-    log.warn({ orderId: order.id, error: err instanceof Error ? err.message : String(err) }, "order_oms_enqueue_failed");
-  }
+  await runOrderCreatedHooks(db, ctx, order.id);
 
   return {
     orderId: order.id,
@@ -451,6 +429,38 @@ export async function createOrderFromDraft(
     created: true,
     rules,
   };
+}
+
+/**
+ * ما بعد إنشاء الطلب الرسمي (مشترك بين طلب المسودة والطلب اليدوي): إشعار تلجرام وترحيل الـ OMS التلقائي.
+ * الفشل بالاتنين ما بيوقف الطلب أبدًا.
+ */
+export async function runOrderCreatedHooks(db: Db, ctx: ActorContext, orderId: string): Promise<void> {
+  // ترحيل الطلب لتلجرام — مرة واحدة عند إنشاء الطلب الرسمي (المسودة ما بتترحّل).
+  // المصدر الأول: إعدادات المساحة (نفس اللي تنحفظ من الواجهة)، وبعدها متغيرات البيئة.
+  try {
+    await deliverOrderTelegram(db, { workspaceId: ctx.workspaceId, userId: ctx.userId, orderId: orderId });
+  } catch (err) {
+    // الإشعار ما بيوقف إنشاء الطلب؛ الفشل بينحفظ كمهمة إعادة محاولة.
+    await enqueueJob(db, {
+      workspaceId: ctx.workspaceId,
+      type: "notify_order_telegram",
+      payload: { orderId: orderId, userId: ctx.userId },
+      runAfter: new Date(Date.now() + 30_000),
+      idempotencyKey: `tg-order:${ctx.workspaceId}:${orderId}`,
+      maxAttempts: 8,
+    }).catch(() => undefined);
+    log.warn({ orderId: orderId, error: err instanceof Error ? err.message : String(err) }, "order_telegram_failed");
+  }
+
+  // ربط الـ OMS: الطلب المؤكد بينزل بالـ OMS كمهمة مستقلة (إذا الإرسال
+  // التلقائي مفعّل) — فشلها أو انقطاع الـ OMS ما بيوقف إنشاء الطلب أبدًا.
+  try {
+    const { maybeEnqueueAutoHandoff } = await import("@/modules/oms/auto-handoff");
+    await maybeEnqueueAutoHandoff(db, ctx.workspaceId, orderId);
+  } catch (err) {
+    log.warn({ orderId: orderId, error: err instanceof Error ? err.message : String(err) }, "order_oms_enqueue_failed");
+  }
 }
 
 /** Validated status transition â€” the only way an order status changes. */
@@ -688,12 +698,21 @@ export async function listOrders(
     confirmationStatus?: string;
     customerId?: string;
     productId?: string;
+    /** 3.2: تبويب «تحتاج مراجعة»… من الخادم (نفس `orderMatchesTab`). */
+    tab?: OrderTab;
+    /** 3.2: بحث برقم الطلب أو المستلم أو العميل. */
+    q?: string;
     cursor?: string;
     limit?: number;
   }
 ) {
   const limit = Math.min(params.limit ?? 25, 100);
   const where: Prisma.OrderWhereInput = { workspaceId: params.workspaceId };
+  const extra: Prisma.OrderWhereInput[] = [];
+  if (params.tab && params.tab !== "all") extra.push(tabWhere(params.tab));
+  const search = searchWhere(params.q);
+  if (Object.keys(search).length > 0) extra.push(search);
+  if (extra.length > 0) where.AND = extra;
   if (params.status) where.status = params.status as Prisma.EnumOrderStatusFilter["equals"];
   if (params.confirmationStatus) {
     where.confirmationStatus = params.confirmationStatus as Prisma.EnumConfirmationStatusFilter["equals"];
@@ -713,11 +732,13 @@ export async function listOrders(
   });
   const hasMore = orders.length > limit;
   const page = hasMore ? orders.slice(0, limit) : orders;
+  // 3.2: العدد الكلي من الخادم («عرض 25 من 143») — ممنوع عدّاد من الصفوف المحمّلة.
+  const total = await db.order.count({ where });
   // P12: معرّفات الإسناد المشفّرة (رمز النقرة · PSID) ما بتطلع بأي قائمة.
   // + شعار «تم ترحيله للتلجرام» من سجل الإرسال الفعلي لكل طلب.
   const notified = await telegramNotifiedOrderIds(db, params.workspaceId, page.map((o) => o.id));
   const items = page.map((o) => ({ ...withoutClickSecrets(o), telegramNotified: notified.has(o.id) }));
-  return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+  return { items, nextCursor: hasMore ? items[items.length - 1].id : null, total };
 }
 
 /**
@@ -749,10 +770,16 @@ export async function deleteOrder(db: Db, ctx: ActorContext, orderId: string) {
     | null;
   if (!order || order.workspaceId !== ctx.workspaceId) throw new NotFoundError("Order");
 
-  await requireWorkspaceOwner(db, ctx, {
-    code: "OWNER_ONLY_ORDERS",
-    message: "حذف الطلبات متاح للمالك فقط",
-  });
+  // 4.1: الحذف النهائي رمز (`orders.delete` — للمالك افتراضيًا). المسار بيفرضه، وهون دفاع ثاني:
+  // سياق فيه `can` بيتحقق منه، وبدونه (استدعاء داخلي) بيرجع لفحص المالك القديم.
+  const ctxCan = (ctx as { can?: (p: string) => boolean }).can;
+  if (typeof ctxCan === "function") {
+    if (!ctxCan.call(ctx, "orders.delete")) {
+      throw new AppError("حذف الطلبات للمالك فقط", 403, "OWNER_ONLY_ORDERS");
+    }
+  } else {
+    await requireWorkspaceOwner(db, ctx, { code: "OWNER_ONLY_ORDERS", message: "حذف الطلبات متاح للمالك فقط" });
+  }
 
   // الترتيب صريح (بنود ثم الطلب): مضمون على القاعدة الحقيقية بالقيد Cascade
   // وعلى البديل بالذاكرة بالحذف المباشر — نفس النتيجة بالحالتين.

@@ -41,7 +41,7 @@ describe("التحويلات والعملاء ← المحادثة نفسها", 
   });
 
   it("الوارد بيفتح المحادثة من ?id=", () => {
-    expect(code(read("src/components/inbox/inbox.tsx"))).toMatch(/get\(\s*["']id["']\s*\)/);
+    expect(code(read("src/app/(dashboard)/conversations/v2/conversations-view.tsx"))).toMatch(/get\(\s*["']id["']\s*\)/);
   });
 
   it("بطاقة العميل بالجوال رابط كمان (مش بس الجدول)", () => {
@@ -70,7 +70,7 @@ describe("صفحة الطلب", () => {
 
 describe("قائمة الحساب", () => {
   it("«الفريق» بتظهر بس لمين بيقدر يفتحها", () => {
-    const shell = code(read("src/components/app-shell.tsx"));
+    const shell = code(read("src/components/shell-v2/header-v2.tsx"));
     expect(shell).toMatch(/canTeam\s*&&/);
   });
 });

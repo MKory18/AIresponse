@@ -1,0 +1,13 @@
+{
+  "stage": "COMPLETE",
+  "phone": "0944555666",
+  "province": "حلب",
+  "items": [
+    {
+      "name": "ماء الكمأ",
+      "quantity": 1
+    }
+  ],
+  "flags": [],
+  "missing": []
+}

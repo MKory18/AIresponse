@@ -314,13 +314,15 @@ export class OmsClient {
     return Array.isArray(res?.items) ? (res.items as Array<Record<string, unknown>>).map(mapV1Product) : null;
   }
 
-  async getOrder(omsOrderId: string): Promise<{ id: string; orderNumber: string | null; status: string; shippingStatus: string | null }> {
+  async getOrder(omsOrderId: string): Promise<{ id: string; orderNumber: string | null; status: string; shippingStatus: string | null; editable: boolean | null }> {
     const res = await this.request<Record<string, unknown>>("GET", `/api/v1/orders/${encodeURIComponent(omsOrderId)}`);
     return {
       id: String(res.order_id ?? omsOrderId),
       orderNumber: res.order_number ? String(res.order_number) : null,
       status: String(res.status ?? ""),
       shippingStatus: res.shipping_status ? String(res.shipping_status) : null,
+      // الـ OMS الأحدث بيرجّع `editable`؛ القديم ما بيرجّعه = null (مجهول، مش «لا»).
+      editable: typeof res.editable === "boolean" ? res.editable : null,
     };
   }
 
@@ -341,6 +343,50 @@ export class OmsClient {
       total: totals ? num(totals.total) : null,
       currency: totals?.currency ? String(totals.currency) : null,
     };
+  }
+
+  /**
+   * فحص العميل بالـ OMS قبل الإرسال (قارئ الطلب 1.6): `GET /api/v1/customers/lookup`.
+   * الباب ممكن ما يدعمه لسا (404 = `OMS_REJECTED`): المستدعي بيعتبر الفشل «ما في معلومة» —
+   * الـ OMS نفسه بيرفض المحظور بـ 422 عند الإرسال.
+   */
+  async lookupCustomer(phone: string): Promise<{ found: boolean; blacklisted: boolean }> {
+    const res = await this.request<Record<string, unknown>>("GET", `/api/v1/customers/lookup?phone=${encodeURIComponent(phone)}`);
+    const customer = (res.customer ?? null) as Record<string, unknown> | null;
+    const blacklisted = res.blacklisted === true || customer?.blacklisted === true || customer?.is_blacklisted === true;
+    return { found: res.found === true || customer !== null, blacklisted };
+  }
+
+  /**
+   * تعديل طلب انبعت (الـ OMS: `POST /api/v1/orders/{id}/amend` · صلاحية `orders.amend`).
+   * بيعدّل بس طلب أنشأه نظامنا وبس قبل التأكيد/الشحن؛ غير هيك 404/409 (= `OMS_REJECTED`) والتوكن القديم 403 (= `OMS_AUTH_FAILED`).
+   * المفتاح بيمنع التكرار: نفس المفتاح = نفس النتيجة.
+   */
+  async amendOrder(
+    omsOrderId: string,
+    changes: { customer?: { name?: string; phone?: string; city?: string; address?: string }; notes?: string },
+    reason: string,
+    idempotencyKey: string
+  ): Promise<{ id: string; status: string; priceAdjusted: boolean }> {
+    const res = await this.request<Record<string, unknown>>("POST", `/api/v1/orders/${encodeURIComponent(omsOrderId)}/amend`, { ...changes, reason: reason.slice(0, 200) }, {
+      "idempotency-key": idempotencyKey,
+    });
+    return { id: String(res.order_id ?? omsOrderId), status: String(res.status ?? ""), priceAdjusted: res.price_adjusted === true };
+  }
+
+  /** إلغاء طلب انبعت (الـ OMS: `POST /api/v1/orders/{id}/cancel` · صلاحية `orders.cancel`). منتهي أصلًا = `already: true`. */
+  async cancelOrder(omsOrderId: string, reason: string, idempotencyKey: string): Promise<{ already: boolean }> {
+    const res = await this.request<Record<string, unknown>>("POST", `/api/v1/orders/${encodeURIComponent(omsOrderId)}/cancel`, { reason: reason.slice(0, 200) }, {
+      "idempotency-key": idempotencyKey,
+    });
+    return { already: res.already === true };
+  }
+
+  /** ملاحظة على طلب انبعت (طلب تعديل من المحادثة) — نص حتمي بلا ذكاء. */
+  async addOrderNote(omsOrderId: string, note: string, idempotencyKey: string): Promise<void> {
+    await this.request<unknown>("POST", `/api/v1/orders/${encodeURIComponent(omsOrderId)}/notes`, { note }, {
+      "idempotency-key": idempotencyKey,
+    });
   }
 }
 

@@ -11,16 +11,23 @@ import { ConfirmDialog } from "../ui/confirm";
 import { GlassCard } from "../ui/card";
 import { EmptyState } from "../ui/empty-state";
 import { CHANNEL_LABELS, type CustomerDetail, type DraftInfo } from "./types";
+import { OrderCard, type OrderCardCan } from "../orders/order-card";
+import type { OrderCardData } from "@/modules/orders/reader/card";
 
 export function CustomerPanel({
   customer,
   orderDrafts,
+  orderCard,
+  onOrderChanged,
   pageName,
   onRefreshProfile,
   onResetMemory,
 }: {
   customer: CustomerDetail | null;
   orderDrafts: DraftInfo[];
+  /** قارئ الطلب: موجودة لما orderMode ≠ LEGACY_DRAFT — بتحل مكان بطاقة المسودة. */
+  orderCard?: { card: OrderCardData; can: OrderCardCan } | null;
+  onOrderChanged?: () => void;
   pageName?: string | null;
   onRefreshProfile?: () => Promise<{ ok: boolean; message: string }>;
   onResetMemory?: () => Promise<void>;
@@ -61,6 +68,9 @@ export function CustomerPanel({
 
   return (
     <div className="space-y-3 p-4">
+      {/* بطاقة الطلب (قارئ الطلب) — أول شي بنص اللوحة دايمًا */}
+      {orderCard && <OrderCard card={orderCard.card} can={orderCard.can} onChanged={() => onOrderChanged?.()} />}
+
       {/* Identity — same resolved name as list + header, never a divergent fallback */}
       <div className="glass-subtle flex flex-col items-center gap-2 rounded-2xl px-3 pb-4 pt-5 text-center">
         <Avatar name={customer.name ?? customer.phone} src={customer.avatarUrl ?? customer.identities.map((i) => i.avatarUrl).find(Boolean) ?? null} size="lg" ring />
@@ -172,7 +182,7 @@ export function CustomerPanel({
       </GlassCard>
 
       {/* طلبات مفتوحة — كل منتج مسودة مستقلة */}
-      {orderDrafts.length > 0 && (
+      {!orderCard && orderDrafts.length > 0 && (
         <div className="space-y-2">
           {orderDrafts.map((draft) => (
             <OrderDraftCard key={draft.id} draft={draft} />

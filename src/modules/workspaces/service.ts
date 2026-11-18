@@ -42,7 +42,7 @@ export async function createWorkspaceForUser(
 export function listWorkspacesForUser(userId: string) {
   return prisma.workspace.findMany({
     where: { members: { some: { userId, status: "ACTIVE" } } },
-    select: { id: true, name: true, slug: true, plan: true, createdAt: true },
+    select: { id: true, name: true, slug: true, plan: true, timezone: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
 }

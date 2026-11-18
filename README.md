@@ -63,7 +63,7 @@ npx prisma migrate deploy   # production (يعمل تلقائيًا في Docker)
 
 ## Environment variables
 
-مقسمة في [.env.example](.env.example): DATABASE / AUTH / ENCRYPTION / AI (مع model routing) / META / QUEUE / WORKER / STORAGE / OBSERVABILITY. **لا مفاتيح حقيقية في Git — `npm run scan:secrets` للفحص.**
+مقسمة في [.env.example](.env.example): DATABASE / AUTH / ENCRYPTION / AI (مع model routing) / META / QUEUE / WORKER / STORAGE / OBSERVABILITY. **لا مفاتيح حقيقية في Git — `npm run scan:secrets` للفحص.** بالإنتاج التسجيل العام مسكّر افتراضيًا (`ALLOW_SIGNUP` · `ALLOW_WORKSPACE_CREATE`) وبيانات الديمو ممنوعة (`ALLOW_DEMO_SEED=1` للسماح) — مفصّلة بآخر `.env.example`.
 
 ## Testing
 

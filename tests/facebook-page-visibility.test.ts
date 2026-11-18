@@ -16,7 +16,8 @@ import { archiveFacebookPage, canArchive, visibleChannelsWhere } from "@/modules
 import { AppError, NotFoundError } from "@/core/errors";
 
 const ROOT = process.cwd();
-const PAGE = readFileSync(join(ROOT, "src/app/(dashboard)/channels/page.tsx"), "utf8");
+const PAGE = readFileSync(join(ROOT, "src/app/(dashboard)/channels/v2/channels-view.tsx"), "utf8");
+const CARD = readFileSync(join(ROOT, "src/app/(dashboard)/channels/v2/channel-card.tsx"), "utf8");
 const ROUTE = readFileSync(join(ROOT, "src/app/api/channels/facebook/route.ts"), "utf8");
 const SELECT = readFileSync(join(ROOT, "src/app/api/channels/facebook/select-page/route.ts"), "utf8");
 const SCHEMA = readFileSync(join(ROOT, "prisma/schema.prisma"), "utf8");
@@ -56,7 +57,7 @@ describe("سبب فشل الربط بينقال للمالك", () => {
 
   it("الواجهة بتستعمل الشرح مش رسالة وحدة لكل الأسباب", () => {
     expect(PAGE).toMatch(/describeConnectError/);
-    expect(PAGE).not.toMatch(/setMessage\("فشل ربط الصفحة — حاول مجددًا\."\)/);
+    expect(PAGE).not.toMatch(/toast\.show\(S\.fbError/);
   });
 
   it("قائمة صفحات فاضية بعد الرجوع بتقول شي مش بتسكت", () => {
@@ -126,6 +127,11 @@ describe("الأرشفة ما بتمس المحادثات", () => {
   it("باب الشيل موجود بالمسار", () => {
     expect(ROUTE).toMatch(/export const DELETE/);
     expect(ROUTE).toMatch(/archiveFacebookPage/);
+  });
+
+  it("زر الشيل بيظهر للموقوفة بس", () => {
+    expect(CARD).toMatch(/row\.status !== "CONNECTED"/);
+    expect(CARD).toMatch(/onArchive\(row\)/);
   });
 
   it("ربط نفس الصفحة من جديد بيرجّعها للقائمة", () => {

@@ -11,6 +11,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog } from "@/components/ui/dialog";
+import { Callout } from "@/components/ui/callout";
+import { useCan } from "@/components/auth/permissions";
 import { GlassCard, PageHeader } from "@/components/ui/card";
 
 type Persona = {
@@ -70,6 +72,8 @@ export default function PersonasPage() {
   const [error, setError] = useState<string | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<{ personaId: string; version: number; name: string } | null>(null);
   const [versionBusy, setVersionBusy] = useState<string | null>(null);
+  const can = useCan();
+  const canPublish = can("personas.publish");
 
   const load = useCallback(async () => {
     try {
@@ -121,6 +125,25 @@ export default function PersonasPage() {
       prohibitedPhrases: String(fd.get("prohibitedPhrases") || "").split("\n").map((s) => s.trim()).filter(Boolean),
       customRules: String(fd.get("customRules") || "").split("\n").map((s) => s.trim()).filter(Boolean),
     };
+    const publishNow = Boolean(editing) && (e.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "publish";
+    if (publishNow && editing) {
+      const draft = await fetch(`/api/personas/${editing}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const created = (await draft.json().catch(() => ({}))) as { version?: number; message?: string; error?: string };
+      if (!draft.ok || !created.version) {
+        setSaveError(created.message ?? created.error ?? `فشل الحفظ (${draft.status})`);
+        return;
+      }
+      const pub = await fetch(`/api/personas/${editing}/versions/${created.version}/publish`, { method: "POST" });
+      if (!pub.ok) {
+        setSaveError("انحفظت كمسودة بس فشل النشر — انشرها من السجل.");
+        load();
+        return;
+      }
+      setSaveError(null);
+      setShowForm(false);
+      load();
+      return;
+    }
     const res = await fetch("/api/personas", {
       method: editing ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -352,8 +375,19 @@ export default function PersonasPage() {
           )}
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>{t.common.cancel}</Button>
-            <Button type="submit">{t.common.save}</Button>
+            <Button type="submit" variant={editing && canPublish ? "secondary" : "primary"}>{editing ? "احفظ بدون نشر" : t.common.save}</Button>
+            {editing && canPublish && (
+              <Button type="submit" value="publish">احفظ وانشر</Button>
+            )}
           </div>
+          {editing && canPublish && (
+            <div className="sm:col-span-2">
+              <Callout
+                risk="«احفظ وانشر» بيغيّر ردود الوكيل الحية فورًا للعملاء."
+                fix="جرّب الشخصية بصفحة «التجربة» قبل النشر، وإذا ما عجبتك ارجع لنسخة قديمة من «الإصدارات» (بتحت)."
+              />
+            </div>
+          )}
         </form>
       </Dialog>
 

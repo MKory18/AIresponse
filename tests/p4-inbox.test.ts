@@ -129,7 +129,7 @@ describe("P4 server-side filters + pagination + ordering", () => {
     const { conv } = await seedConversation();
     const r = await listMessages(db as Db, AGENT, conv.id, { cursor: "nope", limit: 10 });
     expect(Array.isArray(r.items)).toBe(true);
-    expect(await listConversations(db as Db, { workspaceId: "ws-empty" })).toEqual({ items: [], nextCursor: null });
+    expect(await listConversations(db as Db, { workspaceId: "ws-empty" })).toEqual({ items: [], nextCursor: null, total: 0 });
   });
 });
 

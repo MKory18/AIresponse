@@ -1,0 +1,13 @@
+{
+  "stage": "CANCELLED",
+  "phone": null,
+  "province": null,
+  "items": [
+    {
+      "name": "كريم حرير",
+      "quantity": null
+    }
+  ],
+  "flags": [],
+  "cancelRequested": true
+}

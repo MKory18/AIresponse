@@ -1,6 +1,7 @@
 import { AppError, ConflictError, NotFoundError } from "@/core/errors";
 import { recordAudit } from "@/modules/audit/service";
-import { isPermission } from "@/modules/rbac/permissions";
+import { hasPermission, isPermission } from "@/modules/rbac/permissions";
+import { isMemberInviteAllowed } from "@/core/signup-gate";
 import { hashPassword, verifyPassword } from "@/modules/auth/password";
 import { getActorRole as sharedGetActorRole } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
@@ -49,6 +50,31 @@ function assertOwnerRank(actorRole: string | null | undefined): void {
 
 async function getActorRole(db: Db, ctx: ActorContext): Promise<string | null> {
   return sharedGetActorRole(db, ctx);
+}
+
+/** أدوار بيقدر الفاعل يعطيها (المنتقي بيعرض هدول بس): المالك الكل، غيره بلا «مالك». */
+export function assignableRolesFor(actorRole: string | null | undefined): AssignableRole[] {
+  return ASSIGNABLE_ROLES.filter((r) => r !== "OWNER" || actorRole === "OWNER");
+}
+
+/** رموز ما بتنمنح كإضافة لعضو دوره مش مالك/شريك (04-PERMISSIONS §5.4). */
+const PARTNER_ONLY_GRANTS: ReadonlySet<string> = new Set(["orders.delete", "team.owners", "integrations.manage", "users.manage"]);
+
+/**
+ * قواعد المنح (§5.4): **المانح لازم يملك اللي بيمنحه** (`ctx.can`، وبدونه من دوره)
+ * وإلا 403 `CANNOT_GRANT`؛ والرموز الحساسة بس لعضو دوره مالك أو شريك.
+ */
+async function assertCanGrant(db: Db, ctx: ActorContext, permissions: string[], targetRole: string): Promise<void> {
+  if (permissions.length === 0) return;
+  const can = (ctx as { can?: (p: string) => boolean }).can;
+  const actorRole = can ? null : await getActorRole(db, ctx);
+  for (const p of permissions) {
+    const granted = can ? can(p) : actorRole ? hasPermission(actorRole, [], p as never) : false;
+    if (!granted) throw new AppError(`لا يمكنك منح صلاحية لا تملكها: ${p}`, 403, "CANNOT_GRANT");
+    if (PARTNER_ONLY_GRANTS.has(p) && targetRole !== "OWNER" && targetRole !== "ADMIN") {
+      throw new AppError(`هذه الصلاحية لا تُمنح كإضافة لهذا الدور: ${p}`, 422, "PERMISSION_NOT_GRANTABLE");
+    }
+  }
 }
 
 function assertAssignableRole(role: string): asserts role is AssignableRole {
@@ -145,6 +171,11 @@ export async function inviteMember(
   if (input.role === "OWNER") {
     assertOwnerRank(await getActorRole(db, ctx));
   }
+  // 4.2: «دعوة حساب مسجل» مطفية (ALLOW_MEMBER_INVITES) — الطريق الوحيد إنشاء حساب جديد.
+  if (!isMemberInviteAllowed()) {
+    throw new AppError("دعوة حساب مسجّل مطفية — استعمل «إنشاء حساب جديد»", 403, "MEMBER_INVITES_DISABLED");
+  }
+  await assertCanGrant(db, ctx, input.permissions ?? [], input.role);
 
   const user = (await db.user.findUnique({ where: { email } })) as { id: string } | null;
   if (!user) {
@@ -243,11 +274,19 @@ export async function updateMember(
   }
   if (input.permissions !== undefined) {
     assertValidPermissions(input.permissions);
+    await assertCanGrant(db, ctx, input.permissions, (data.role as string | undefined) ?? member.role);
     data.permissions = input.permissions;
+  } else if (input.role !== undefined && input.role !== member.role) {
+    // تغيير الدور بيمسح الإضافات (§5.4) — ما بنورّث صلاحيات دور قديم لدور جديد.
+    data.permissions = [];
   }
   if (input.status !== undefined) {
     if (input.status !== "ACTIVE" && input.status !== "SUSPENDED") {
       throw new AppError("Status must be ACTIVE or SUSPENDED", 422, "INVALID_STATUS");
+    }
+    // S-01: الدعوة بتتفعّل بقبول صاحب الحساب (acceptInvite).
+    if (input.status === "ACTIVE" && member.status === "INVITED") {
+      throw new AppError("An invited member becomes active only when they accept the invitation", 422, "INVITE_NOT_ACCEPTED");
     }
     data.status = input.status as "ACTIVE" | "SUSPENDED";
   }
@@ -362,6 +401,7 @@ export async function createMember(
   if (input.role === "OWNER") {
     assertOwnerRank(await getActorRole(db, ctx));
   }
+  await assertCanGrant(db, ctx, input.permissions ?? [], input.role);
 
   const existing = (await db.user.findUnique({ where: { email } })) as { id: string } | null;
   if (existing) {
@@ -374,7 +414,8 @@ export async function createMember(
 
   const passwordHash = await hashPassword(input.password);
   const user = (await db.user.create({
-    data: { email, name: input.name.trim(), passwordHash },
+    // 4.2: كلمة المرور مؤقتة من الإدارة — بتنطلب تغييرها بأول دخول.
+    data: { email, name: input.name.trim(), passwordHash, mustChangePassword: true },
   })) as { id: string };
   const member = await db.workspaceMember.create({
     data: {
@@ -415,12 +456,28 @@ export async function resetMemberPassword(
   if (input.newPassword.length < 8 || input.newPassword.length > 128) {
     throw new AppError("Password must be 8-128 characters", 422, "INVALID_PASSWORD");
   }
+  // S-01 (docs/HANDOVER-2026-10-27.md §4.1): الحساب مش ملك المساحة. إعادة
+  // التعيين من الإدارة لعضو فعّال وما إله عضوية بمساحة تانية فقط.
+  if (member.status !== "ACTIVE") {
+    throw new AppError("Only an active member's password can be reset", 403, "MEMBER_NOT_ACTIVE");
+  }
+  const memberships = (await db.workspaceMember.findMany({
+    where: { userId: member.userId },
+    select: { id: true, workspaceId: true },
+  })) as { id: string; workspaceId: string }[];
+  if (memberships.some((m) => m.workspaceId !== ctx.workspaceId)) {
+    throw new AppError(
+      "This account belongs to more than one workspace — the user must change the password from their own account settings",
+      403,
+      "USER_SHARED_ACROSS_WORKSPACES"
+    );
+  }
   if (member.role === "OWNER") {
     assertOwnerRank(await getActorRole(db, ctx));
   }
   await db.user.update({
     where: { id: member.userId },
-    data: { passwordHash: await hashPassword(input.newPassword) },
+    data: { passwordHash: await hashPassword(input.newPassword), mustChangePassword: true },
   });
   await recordAudit(db, {
     workspaceId: ctx.workspaceId,
