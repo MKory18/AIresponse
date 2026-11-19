@@ -6,6 +6,8 @@ import { NotFoundError } from "@/core/errors";
 import { z } from "zod";
 import { normalizeOrderFields } from "@/modules/orders/required-fields";
 import { archiveFacebookPage, visibleChannelsWhere } from "@/modules/channels/facebook/archive";
+import { disconnectFacebookPage } from "@/modules/channels/facebook/disconnect";
+import { getFacebookClient } from "@/modules/channels/facebook/client";
 
 /**
  * GET /api/channels/facebook — connection health. SAFE fields only:
@@ -85,8 +87,17 @@ export const PATCH = createHandler(
  * والمربوطة ما بتنشال أبدًا: لازم إزالة الربط أول.
  */
 export const DELETE = createHandler(
-  { body: z.object({ pageId: z.string().min(1) }), permission: "channels.connect" },
+  {
+    // disconnect: المالك أكّد صراحة إنه بدّه يشيل صفحة لسا مربوطة عندنا. بلاه المربوطة بترفض.
+    body: z.object({ pageId: z.string().min(1), disconnect: z.boolean().optional() }),
+    permission: "channels.connect",
+  },
   async ({ auth, body }) => {
+    // الفصل أول: الصفحة المربوطة ما بتنأرشف إلا بعد ما يوقف الاستقبال. ولو الفصل وقع
+    // بنص الطريق، الصفحة بتضل ظاهرة وموقوفة — مش مختفية وهي لسا بتستقبل.
+    if (body.disconnect) {
+      await disconnectFacebookPage(prisma, getFacebookClient(), { workspaceId: auth!.workspaceId, pageId: body.pageId });
+    }
     const res = await archiveFacebookPage(prisma, { workspaceId: auth!.workspaceId, pageId: body.pageId });
     await recordAudit(prisma, {
       workspaceId: auth!.workspaceId,

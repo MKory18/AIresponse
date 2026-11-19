@@ -132,8 +132,10 @@ describe("الأرشفة ما بتمس المحادثات", () => {
     expect(ROUTE).toMatch(/archiveFacebookPage/);
   });
 
-  it("زر الشيل بيظهر للموقوفة بس", () => {
-    expect(CARD).toMatch(/row\.status !== "CONNECTED"/);
+  it("زر الشيل بيظهر لكل صفحة فيسبوك — والحماية عند الخادم", () => {
+    // ⚠️ كان للمش-مربوطة بس، فالصفحة القديمة (ميتا سحبت وصولها وهي CONNECTED عندنا) ما كان في طريقة تشيلها.
+    // 🔧 الحماية انتقلت للخادم: المربوطة بترفض بلا `disconnect: true` (tests/facebook-connect-many-pages.test.ts).
+    expect(CARD).toMatch(/row\.type === "FACEBOOK"/);
     expect(CARD).toMatch(/onArchive\(row\)/);
   });
 

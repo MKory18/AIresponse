@@ -69,8 +69,9 @@ export function ChannelCard({
   const items = [
     ...(row.type === "FACEBOOK" ? [{ key: "test", label: S.test, icon: <Wifi size={14} aria-hidden />, onSelect: () => onTest(row) }] : []),
     ...(row.status === "CONNECTED" ? [{ key: "disconnect", label: S.disconnect, icon: <Unplug size={14} aria-hidden />, danger: true, onSelect: () => onDisconnect(row) }] : []),
-    // الموقوفة بس: صفحة شغّالة ما بتختفي من عين المالك وهي بترد على الزبائن.
-    ...(row.type === "FACEBOOK" && row.status !== "CONNECTED"
+    // لكل صفحة فيسبوك — حتى المربوطة. ⚠️ الصفحة القديمة اللي ميتا سحبت وصولها بتضل CONNECTED عندنا،
+    // فلو الخيار كان للمش-مربوطة بس ما في طريقة تشيلها. 🔧 للمربوطة بيطلع تأكيد صريح بيفصلها أول.
+    ...(row.type === "FACEBOOK"
       ? [{ key: "archive", label: S.archive, icon: <Trash2 size={14} aria-hidden />, danger: true, onSelect: () => onArchive(row) }]
       : []),
   ];

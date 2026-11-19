@@ -3,6 +3,7 @@ import { prisma } from "@/core/db/prisma";
 import { recordAudit } from "@/modules/audit/service";
 import { decryptSecret, encryptSecret } from "@/core/crypto";
 import { getFacebookClient } from "@/modules/channels/facebook/client";
+import { disconnectFacebookPage } from "@/modules/channels/facebook/disconnect";
 import { AppError, NotFoundError } from "@/core/errors";
 import { z } from "zod";
 
@@ -14,41 +15,16 @@ import { z } from "zod";
 export const POST = createHandler(
   { body: z.object({ pageId: z.string().min(1) }), permission: "channels.connect" },
   async ({ auth, body }) => {
-    const channel = await prisma.channel.findFirst({
-      where: { workspaceId: auth!.workspaceId, type: "FACEBOOK", externalId: body.pageId },
-      include: { account: true },
+    const { channelId } = await disconnectFacebookPage(prisma, getFacebookClient(), {
+      workspaceId: auth!.workspaceId,
+      pageId: body.pageId,
     });
-    if (!channel) throw new NotFoundError("Facebook channel");
-
-    // Best-effort Meta unsubscribe before revoking the token.
-    if (channel.account) {
-      try {
-        const token = decryptSecret(channel.account.encryptedCredentials);
-        if (token !== "revoked") {
-          const client = getFacebookClient();
-          await client.unsubscribePageFromApp(token, body.pageId);
-        }
-      } catch {
-        // Never block disconnect on Meta API failure; webhook gate drops
-        // further events once status !== CONNECTED.
-      }
-    }
-
-    await prisma.channel.update({ where: { id: channel.id }, data: { status: "DISCONNECTED" } });
-    if (channel.account) {
-      // Destroy the stored token (encrypted) — connection is gone.
-      // tokenExpiresAt=now() makes health/policy report expired, not LONG_LIVED.
-      await prisma.channelAccount.update({
-        where: { id: channel.account.id },
-        data: { encryptedCredentials: encryptSecret("revoked"), tokenExpiresAt: new Date() },
-      });
-    }
     await recordAudit(prisma, {
       workspaceId: auth!.workspaceId,
       userId: auth!.userId,
       action: "facebook.page.disconnected",
       entityType: "Channel",
-      entityId: channel.id,
+      entityId: channelId,
       metadata: { pageId: body.pageId },
     });
     return ok({ ok: true, pageId: body.pageId, status: "DISCONNECTED" });
