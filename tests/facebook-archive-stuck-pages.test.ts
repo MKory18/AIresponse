@@ -88,11 +88,13 @@ describe("الخيار بيشتغل على كل صفحة مش مربوطة", () 
 });
 
 describe("الواجهة والخادم على نفس القاعدة", () => {
-  it("شرط الزر بالبطاقة هو نفسه شرط الخادم", () => {
-    // لو اختلفوا، بيرجع نفس العطل: زر بيظهر وما بيشتغل.
-    expect(CARD).toMatch(/row\.status !== "CONNECTED"/);
+  it("الزر لكل صفحة فيسبوك، والخادم بيقبل المش-مربوطة مباشرة", () => {
+    // الزر صار لكل صفحة فيسبوك (المربوطة بتأكيد بيفصلها أول — tests/facebook-connect-many-pages.test.ts).
+    // فاللي ما بيتغيّر: الخادم بيقبل ERROR وCONNECTING مباشرة، والمربوطة لحالها بترفض.
+    expect(CARD).toMatch(/row\.type === "FACEBOOK"/);
     expect(canArchive({ status: "ERROR" })).toBe(true);
     expect(canArchive({ status: "CONNECTING" })).toBe(true);
+    expect(canArchive({ status: "CONNECTED" })).toBe(false);
   });
 
   it("القائمة لسا بتخفي المؤرشف", () => {

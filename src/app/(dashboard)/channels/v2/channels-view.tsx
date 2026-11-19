@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { ChannelCard } from "./channel-card";
 import { ConnectDialog } from "./connect-dialog";
-import { type ChannelRow, type PendingPage } from "./model";
+import { connectSelected, pagesAtRisk, type ChannelRow, type PendingPage } from "./model";
 import { CHANNELS_STRINGS as S } from "./strings";
 import { useChannels } from "./use-channels";
 
@@ -33,6 +33,8 @@ export function ChannelsView() {
   const [toArchive, setToArchive] = useState<ChannelRow | null>(null);
   const [connectError, setConnectError] = useState<ConnectErrorNote | null>(null);
   const [busy, setBusy] = useState(false);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -53,6 +55,7 @@ export function ChannelsView() {
           else {
             setConnectError(null);
             setPending(pages);
+            setChosen(new Set(pages.map((p) => p.id)));
             setSelectionToken(token);
           }
         } catch {
@@ -64,17 +67,40 @@ export function ChannelsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function selectPage(pageId: string) {
-    if (!selectionToken) return;
-    try {
-      await api("/api/channels/facebook/select-page", { method: "POST", json: { selectionToken, pageId } });
+  /**
+   * ربط كل الصفحات المعلّمة مرة وحدة — بدل صفحة وحدة وترمي الباقي.
+   * ⚠️ كل صفحة إضافية كانت دورة موافقة جديدة عند فيسبوك، وكل دورة بتعلّم فيها صفحة وحدة
+   * بتسحب الوصول من القديمة. 🔧 رمز الاختيار بيحمل كل الصفحات، فبنربط منه اللي بدك.
+   */
+  async function connectChosen() {
+    if (!selectionToken || chosen.size === 0) return;
+    setConnecting(true);
+    const ids = pending.filter((p) => chosen.has(p.id)).map((p) => p.id);
+    const res = await connectSelected(ids, (pageId) => api("/api/channels/facebook/select-page", { method: "POST", json: { selectionToken, pageId } }));
+    setConnecting(false);
+    if (res.linked.length > 0) toast.show(S.pagesLinked(res.linked.length), "success");
+    if (res.failed.length === 0) {
+      setConnectError(null);
       setPending([]);
       setSelectionToken(null);
-      toast.show(S.pageLinked, "success");
-      void reload();
-    } catch (e) {
-      toast.show(e instanceof Error ? e.message : S.pageFailed, "error");
+      setChosen(new Set());
+    } else {
+      // اللي فشلوا بيضلوا معلّمين بالقائمة عشان المالك يعيد بكبسة وحدة (الرمز ساري ١٠ دقايق).
+      const names = res.failed.map((f) => pending.find((p) => p.id === f.id)?.name ?? f.id).join("، ");
+      setPending(pending.filter((p) => !res.linked.includes(p.id)));
+      setChosen(new Set(res.failed.map((f) => f.id)));
+      setConnectError({ risk: S.partialRisk(names, res.failed[0].message), fix: S.partialFix });
     }
+    void reload();
+  }
+
+  function toggleChosen(id: string) {
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   async function disconnect(row: ChannelRow) {
@@ -99,7 +125,7 @@ export function ChannelsView() {
   async function archive(row: ChannelRow) {
     setBusy(true);
     try {
-      await api("/api/channels/facebook", { method: "DELETE", json: { pageId: row.externalId } });
+      await api("/api/channels/facebook", { method: "DELETE", json: { pageId: row.externalId, disconnect: row.status === "CONNECTED" } });
       toast.show(S.archived, "success");
     } catch (e) {
       toast.show(e instanceof Error ? e.message : S.pageFailed, "error");
@@ -124,6 +150,8 @@ export function ChannelsView() {
     setConnectOpen(true);
   }
 
+  const atRisk = pagesAtRisk(pending, rows);
+
   return (
     <div data-channels-v2 className="mx-auto max-w-5xl space-y-4">
       <Can permission="channels.connect">
@@ -143,20 +171,36 @@ export function ChannelsView() {
       {connectError && <Callout risk={connectError.risk} fix={connectError.fix} />}
 
       {pending.length > 0 && (
-        <section className="space-y-2 rounded-card border border-primary/40 bg-primary-soft p-4">
-          <h2 className="text-sm font-semibold text-ink">{S.pickPage}</h2>
+        <section className="space-y-3 rounded-card border border-primary/40 bg-primary-soft p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-ink">{S.pickPages}</h2>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setChosen(new Set(pending.map((p) => p.id)))}>
+                {S.selectAll}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setChosen(new Set())}>
+                {S.selectNone}
+              </Button>
+            </div>
+          </div>
+          <p className="text-caption text-ink-muted">{S.pickPagesHint}</p>
+          {atRisk.length > 0 && <Callout risk={S.atRiskRisk(atRisk.map((r) => r.displayName || r.externalId).join("، "))} fix={S.atRiskFix} />}
           <ul className="space-y-2">
             {pending.map((p) => (
               <li key={p.id}>
-                <button type="button" onClick={() => void selectPage(p.id)} className="flex w-full items-center justify-between gap-2 rounded-control border border-line bg-surface-2 px-3 py-2 text-start text-sm text-ink hover:border-primary focus-visible:outline-2 focus-visible:outline-focus">
-                  <span>{p.name}</span>
+                <label className="flex w-full cursor-pointer items-center gap-3 rounded-control border border-line bg-surface-2 px-3 py-2 text-sm text-ink hover:border-primary">
+                  <input type="checkbox" checked={chosen.has(p.id)} onChange={() => toggleChosen(p.id)} className="h-4 w-4 accent-primary" />
+                  <span className="flex-1">{p.name}</span>
                   <span dir="ltr" className="text-caption text-ink-muted">
                     {p.id}
                   </span>
-                </button>
+                </label>
               </li>
             ))}
           </ul>
+          <Button size="sm" onClick={() => void connectChosen()} disabled={connecting || chosen.size === 0}>
+            {connecting ? S.connecting : `${S.connectChosen} (${chosen.size})`}
+          </Button>
         </section>
       )}
 
@@ -200,7 +244,16 @@ export function ChannelsView() {
 
       <ConnectDialog open={connectOpen} initial={initial} oauthConfigured={oauthConfigured} onClose={() => setConnectOpen(false)} onLinked={(m) => (toast.show(m, "success"), void reload())} />
       <ConfirmDialog open={toDisconnect !== null} onClose={() => setToDisconnect(null)} onConfirm={() => toDisconnect && void disconnect(toDisconnect)} title={S.disconnectTitle} body={S.disconnectBody} confirmLabel={S.disconnectConfirm} busy={busy} danger />
-      <ConfirmDialog open={toArchive !== null} onClose={() => setToArchive(null)} onConfirm={() => toArchive && void archive(toArchive)} title={S.archiveTitle} body={S.archiveBody} confirmLabel={S.archiveConfirm} busy={busy} danger />
+      <ConfirmDialog
+        open={toArchive !== null}
+        onClose={() => setToArchive(null)}
+        onConfirm={() => toArchive && void archive(toArchive)}
+        title={toArchive?.status === "CONNECTED" ? S.archiveConnectedTitle : S.archiveTitle}
+        body={toArchive?.status === "CONNECTED" ? S.archiveConnectedBody : S.archiveBody}
+        confirmLabel={toArchive?.status === "CONNECTED" ? S.archiveConnectedConfirm : S.archiveConfirm}
+        busy={busy}
+        danger
+      />
     </div>
   );
 }

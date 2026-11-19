@@ -76,3 +76,37 @@ export function connectBody(type: ConnectType, f: { get(name: string): FormDataE
   if (type === "TELEGRAM") return { botToken: s("botToken") };
   return { phoneNumberId: s("phoneNumberId"), token: s("token") };
 }
+
+/**
+ * صفحات فيسبوك المربوطة عندنا بس ما رجعت بقائمة فيسبوك لهالدورة.
+ *
+ * ⚠️ فيسبوك بيعطي التطبيق بس الصفحات اللي علّمها المالك بشاشة الموافقة — ولو علّم صفحة وحدة،
+ * ممكن يسحب الوصول من القديمة. فتوكنها بيموت وهي لسا CONNECTED عندنا: بلا ما تستقبل ولا ترد.
+ * 🔧 منحذّر بأسمائها قبل ما المالك يكمّل، وبيقدر يشيلها (بتأكيد) إذا ما بدّه إياها.
+ */
+export function pagesAtRisk(pending: readonly PendingPage[], rows: readonly ChannelRow[]): ChannelRow[] {
+  const returned = new Set(pending.map((p) => p.id));
+  return rows.filter((r) => r.type === "FACEBOOK" && r.status === "CONNECTED" && r.externalId !== null && !returned.has(r.externalId));
+}
+
+export interface ConnectSelectedResult {
+  linked: string[];
+  failed: Array<{ id: string; message: string }>;
+}
+
+/**
+ * ربط الصفحات المحدّدة وحدة ورا وحدة. فشل وحدة ما بيوقّف الباقي — وإلا صفحة بطيئة بتحرم كل اللي بعدها.
+ * ما بيرمي أبدًا: النتيجة بتحكي شو انربط وشو فشل وليش.
+ */
+export async function connectSelected(ids: readonly string[], connectOne: (id: string) => Promise<unknown>): Promise<ConnectSelectedResult> {
+  const result: ConnectSelectedResult = { linked: [], failed: [] };
+  for (const id of ids) {
+    try {
+      await connectOne(id);
+      result.linked.push(id);
+    } catch (e) {
+      result.failed.push({ id, message: e instanceof Error && e.message ? e.message : "فشل ربط الصفحة" });
+    }
+  }
+  return result;
+}
