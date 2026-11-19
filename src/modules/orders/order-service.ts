@@ -10,7 +10,7 @@ import { requireWorkspaceOwner } from "@/modules/rbac/owner-guard";
 import type { ActorContext, Db } from "@/modules/customers/service";
 import { assertOrderTransition, canTransitionOrder } from "./state-machine";
 import { aggregateVerdict, evaluateOrderRules, type RuleResult } from "./rules";
-import { calculatePricing, calculateCartPricing } from "./pricing";
+import { calculatePricing, calculateCartPricing, bestOfferFor } from "./pricing";
 import { quoteDelivery } from "./delivery";
 import { computeMissingFields, getRequiredOrderFields, parseDraftItems } from "./draft-service";
 import { telegramNotifiedOrderIds } from "./telegram-status";
@@ -166,6 +166,8 @@ export async function createOrderFromDraft(
       price: variantFor(line)?.price ?? line.product.price,
       quantity: line.quantity,
       currency: line.product.currency,
+      // عرض الكمية (٣ بـ ٢٥): نفس الرقم اللي الوكيل قاله للزبون. بند بسعر Variant ما بياخد عرض.
+      offers: variantFor(line) ? undefined : (line.product as { offers?: unknown }).offers,
     })),
     province: draft.province,
   });
@@ -610,12 +612,21 @@ export async function updateOrderFromChat(
     // price); totals are recomputed through the same pricing engine as
     // creation, and the existing discount is carried over (it is only lost
     // when the new subtotal makes it invalid — the engine caps it).
+    // عرض الكمية (٣ بـ ٢٥) بيتبع الكمية: لما الكمية تتغيّر لازم يتحسب من جديد، وإلا خصم العرض القديم
+    // بيضل (٣←١ كان بيمسح السعر كله). الخصم اليدوي (اللي مش من عرض) بيضل متحمّل.
+    const offerRow = (await (db as unknown as {
+      product: { findUnique: (a: unknown) => Promise<{ offers?: unknown } | null> };
+    }).product.findUnique({ where: { id: item.productId }, select: { offers: true } }).catch(() => null)) as { offers?: unknown } | null;
+    const unit = Number(item.unitPrice);
+    const oldOffer = bestOfferFor(unit, item.quantity, offerRow?.offers)?.saving ?? 0;
+    const newOffer = bestOfferFor(unit, params.quantity, offerRow?.offers)?.saving ?? 0;
+    const manualDiscount = Math.max(0, Math.round((Number(order.discount) - oldOffer) * 100) / 100);
     const breakdown = await calculatePricing(db, {
       workspaceId: ctx.workspaceId,
-      product: { price: Number(item.unitPrice), currency: order.currency },
+      product: { price: unit, currency: order.currency },
       quantity: params.quantity,
       province: newProvince,
-      discount: Number(order.discount),
+      discount: manualDiscount + newOffer,
     });
     if (!breakdown.deliveryAvailable) {
       throw new AppError("Delivery not available for this province", 422, "DELIVERY_UNAVAILABLE");

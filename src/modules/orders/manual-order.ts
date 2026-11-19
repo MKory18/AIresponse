@@ -156,7 +156,7 @@ export async function createManualOrder(db: Db, ctx: ActorContext, input: Manual
 
   const breakdown = await calculateCartPricing(db, {
     workspaceId: ctx.workspaceId,
-    items: lines.map((l) => ({ price: variantFor(l)?.price ?? productById.get(l.productId)!.price, quantity: l.quantity, currency: productById.get(l.productId)!.currency })),
+    items: lines.map((l) => ({ price: variantFor(l)?.price ?? productById.get(l.productId)!.price, quantity: l.quantity, currency: productById.get(l.productId)!.currency, offers: variantFor(l) ? undefined : (productById.get(l.productId) as { offers?: unknown }).offers })),
     province: input.customer.province,
   });
   if (!breakdown.deliveryAvailable) throw new AppError("التوصيل مش متاح لهالمحافظة", 422, "DELIVERY_UNAVAILABLE");

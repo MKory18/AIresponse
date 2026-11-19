@@ -1,6 +1,37 @@
 import type { Prisma } from "@prisma/client";
 import type { Db } from "@/modules/customers/service";
 import { quoteDelivery } from "./delivery";
+import { computeOfferSaving, parseOffers } from "@/modules/sales/plan-builder";
+
+/**
+ * عروض الكمية (OMS): «٣ بـ ٢٥». `offer.price` هو **سعر كمية العرض كاملة** مش سعر الوحدة، والتوفير
+ * حتمي = سعر الوحدة × الكمية − سعر العرض (نفس `computeOfferSaving` اللي بيستعمله الوكيل لما بيعرض العرض).
+ *
+ * ⚠️ الوكيل كان بيقول للزبون «٣ بـ ٢٥» (جدول الأسعار الرسمي بـ`reader/reply-context.ts`) والطلب بيتسجّل ٤٥
+ * (`سعر × كمية`)، فالرقم اللي بالطلب مش اللي انوعد فيه الزبون، وباب الـOMS بيعيد الحساب ويرجّع
+ * `price_adjusted` (أو `409 PRICE_MISMATCH` حسب سياسة المالك).
+ * 🔧 العرض بيتطبّق كخصم بنفس المحرّك الوحيد للمبالغ، بشرط **تطابق الكمية حرفيًا** (نفس شرط جدول الأسعار):
+ * ٣ بالطلب = عرض ٣، ٤ = بلا عرض. `subtotal` بيضل الإجمالي قبل العرض و`discount` فيه التوفير، فـ`total` = سعر العرض.
+ */
+export interface AppliedOffer {
+  title: string;
+  quantity: number;
+  price: number;
+  saving: number;
+}
+
+/** أفضل عرض (أكبر توفير) بنفس كمية البند، أو null. */
+export function bestOfferFor(unitPrice: number, quantity: number, rawOffers: unknown, now: Date = new Date()): AppliedOffer | null {
+  if (!rawOffers || !Number.isFinite(unitPrice) || unitPrice <= 0) return null;
+  let best: AppliedOffer | null = null;
+  for (const offer of parseOffers(rawOffers, now)) {
+    if (offer.quantity !== quantity) continue;
+    const saving = computeOfferSaving(unitPrice, offer);
+    if (saving === null) continue;
+    if (!best || saving > best.saving) best = { title: offer.title, quantity: offer.quantity, price: offer.price, saving };
+  }
+  return best;
+}
 
 export interface PriceBreakdown {
   unitPrice: number;
@@ -66,6 +97,8 @@ export interface CartItemInput {
   price: Prisma.Decimal | number | string;
   quantity: number;
   currency: string;
+  /** `Product.offers` الخام — بيتطبّق عرض الكمية المطابقة. ما بتمرّره لبند بسعر Variant (العرض للمنتج الأصلي). */
+  offers?: unknown;
 }
 export interface CartPriceBreakdown {
   lines: { unitPrice: number; quantity: number; subtotal: number }[];
@@ -76,6 +109,8 @@ export interface CartPriceBreakdown {
   currency: string;
   deliveryAvailable: boolean;
   deliveryReason?: string;
+  /** العروض اللي انطبقت (محسوبة بالخصم). بتغيب لما ما في عرض. */
+  appliedOffers?: AppliedOffer[];
 }
 
 export async function calculateCartPricing(
@@ -85,6 +120,8 @@ export async function calculateCartPricing(
     items: CartItemInput[];
     province?: string | null;
     discount?: number;
+    /** وقت الحساب لانتهاء العرض (للاختبار). */
+    now?: Date;
   }
 ): Promise<CartPriceBreakdown> {
   const lines = params.items.map((item) => ({
@@ -102,7 +139,16 @@ export async function calculateCartPricing(
     province: params.province,
     subtotal,
   });
-  const discount = Math.min(Math.max(params.discount ?? 0, 0), subtotal);
+  const appliedOffers: AppliedOffer[] = [];
+  let offerCents = 0;
+  for (const item of params.items) {
+    const offer = bestOfferFor(Number(item.price), item.quantity, item.offers, params.now);
+    if (!offer) continue;
+    appliedOffers.push(offer);
+    offerCents += Math.round(offer.saving * 100);
+  }
+  // الخصم الصريح + توفير العروض، بنفس السقف [0, subtotal].
+  const discount = Math.min(Math.max(Math.round((params.discount ?? 0) * 100) / 100 + offerCents / 100, 0), subtotal);
   const total = (subtotalCents - Math.round(discount * 100) + Math.round(delivery.fee * 100)) / 100;
   return {
     lines,
@@ -113,6 +159,7 @@ export async function calculateCartPricing(
     currency: params.items[0]?.currency ?? "USD",
     deliveryAvailable: delivery.available,
     deliveryReason: delivery.reason,
+    ...(appliedOffers.length ? { appliedOffers } : {}),
   };
 }
 
